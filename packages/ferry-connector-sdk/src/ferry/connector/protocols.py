@@ -155,9 +155,59 @@ class SupportsRecordCounts(Protocol):
 
 
 @runtime_checkable
+class SupportsHighWaterMark(Protocol):
+    """:class:`SupportsSnapshotBounds` refined to the freeze step alone."""
+
+    async def high_water_mark(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        source_filter: SourceFilter | None = None,
+    ) -> str | None: ...
+
+
+@runtime_checkable
+class SupportsBoundedReads(Protocol):
+    """:class:`SupportsSnapshotBounds` refined to bounded reads alone."""
+
+    async def read_records_bounded(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        field_keys: list[str],
+        limit: int,
+        cursor: str | None = None,
+        source_filter: SourceFilter | None = None,
+        upper_bound: str,
+    ) -> RecordPage: ...
+
+
+@runtime_checkable
+class SupportsBoundedCounts(Protocol):
+    """:class:`SupportsSnapshotBounds` refined to bounded counts alone."""
+
+    async def count_records_bounded(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        source_filter: SourceFilter | None = None,
+        upper_bound: str,
+    ) -> int: ...
+
+
+@runtime_checkable
 class SupportsSnapshotBounds(Protocol):
     """Source: freeze a run's scope at a high-water mark and read/count within
-    it — the basis of exact-scope, resumable execution."""
+    it — the basis of exact-scope, resumable execution.
+
+    The union of :class:`SupportsHighWaterMark`, :class:`SupportsBoundedReads`
+    and :class:`SupportsBoundedCounts`: a connector implementing all three
+    methods satisfies the refinements and this bundle alike. Runtimes may
+    probe per method via the refinements; connectors that can only offer a
+    subset implement just the matching refinements."""
 
     async def high_water_mark(
         self,
@@ -226,9 +276,43 @@ class SupportsBatchRelationshipWrites(Protocol):
 
 
 @runtime_checkable
+class SupportsPropertyProvisioning(Protocol):
+    """:class:`SupportsSchemaProvisioning` refined to property reconciliation."""
+
+    async def reconcile_properties(
+        self,
+        credentials: Credentials,
+        *,
+        definitions: list[PropertyDefinition],
+        confirm: bool,
+    ) -> list[PropertyResult]: ...
+
+
+@runtime_checkable
+class SupportsResourceProvisioning(Protocol):
+    """:class:`SupportsSchemaProvisioning` refined to resource (pipeline /
+    custom object) reconciliation."""
+
+    async def reconcile_resources(
+        self,
+        credentials: Credentials,
+        *,
+        pipelines: list[PipelineDefinition],
+        custom_objects: list[CustomObjectDefinition],
+        confirm: bool,
+    ) -> list[ResourceResult]: ...
+
+
+@runtime_checkable
 class SupportsSchemaProvisioning(Protocol):
     """Destination: create missing properties/pipelines/custom objects.
-    ``confirm=False`` must be a pure dry run."""
+    ``confirm=False`` must be a pure dry run.
+
+    The union of :class:`SupportsPropertyProvisioning` and
+    :class:`SupportsResourceProvisioning`: a connector implementing both
+    methods satisfies the refinements and this bundle alike. Runtimes may
+    probe per method via the refinements; connectors that can only offer one
+    side implement just the matching refinement."""
 
     async def reconcile_properties(
         self,
