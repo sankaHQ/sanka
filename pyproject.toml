@@ -15,6 +15,7 @@ members = [
   "connectors/csv",
   "connectors/markdown",
   "connectors/postgres",
+  "connectors/salesforce",
   "connectors/sqlite",
 ]
 
@@ -49,6 +50,7 @@ mypy_path = [
   "connectors/csv/src",
   "connectors/markdown/src",
   "connectors/postgres/src",
+  "connectors/salesforce/src",
   "connectors/sqlite/src",
   "connectors/clickhouse/src",
 ]
@@ -62,6 +64,7 @@ testpaths = [
   "connectors/csv/tests",
   "connectors/markdown/tests",
   "connectors/postgres/tests",
+  "connectors/salesforce/tests",
   "connectors/sqlite/tests",
   "connectors/clickhouse/tests",
   "tests",
