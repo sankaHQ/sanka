@@ -1,0 +1,18 @@
+Ferry monorepo — per-package licensing
+======================================
+
+This repository contains packages under different licenses. The
+SPDX-License-Identifier header in each source file is authoritative.
+
+  packages/ferry-connector-sdk/   Apache-2.0       (LICENSE file in that directory)
+  packages/ferry-migrate/         AGPL-3.0-only    (LICENSE file in that directory)
+  connectors/                     Apache-2.0
+  scripts/, tests/, docs/         Apache-2.0
+
+The full license texts are in each package directory's LICENSE file.
+
+The Ferry Migration Runtime (packages/ferry-migrate) is also available under a
+commercial license from Sanka for use without AGPL-3.0 obligations.
+
+All contributions require a signed Contributor License Agreement; see
+CONTRIBUTING.md.
