@@ -15,15 +15,23 @@ Signature adaptations versus the production adapter (semantics preserved):
   ``invalid_email_policy`` / ``invalid_email_audit_field`` into
   :class:`ferry.connector.WriteOptions` instead of separate keyword
   arguments.
-- :class:`ferry.connector.PipelineStage` carries no per-stage probability, so
-  created deal-pipeline stages get a deterministic linear probability ramp
-  (first stage ``0.0`` … last stage ``1.0``) — HubSpot requires one — and
-  compatibility checks ignore probability. Adjust probabilities in HubSpot
-  after provisioning if they matter.
-- :class:`ferry.connector.CustomObjectDefinition` carries no property list,
-  so created custom-object schemas contain exactly one text property (the
-  primary display property, which HubSpot requires); compatibility checks
-  labels, the primary display property, and associated objects.
+
+Optional provisioning fields the SDK leaves to the connector when omitted:
+
+- :class:`ferry.connector.PipelineStage` ``probability`` is used verbatim on
+  created deal-pipeline stages; a stage without one falls back to a
+  deterministic linear ramp (first stage ``0.0`` … last stage ``1.0`` —
+  HubSpot requires a probability). Pipeline compatibility compares the
+  probability of every stage that carries one and ignores it for stages that
+  do not.
+- :class:`ferry.connector.CustomObjectDefinition` ``properties`` are created
+  with the schema (type-mapped like ``reconcile_properties``, with
+  ``required``/``unique``/``searchable`` flags); the primary display property
+  HubSpot requires is synthesized as a text property only when the list does
+  not already carry it, and an empty list yields that minimal one-property
+  schema. Schema compatibility checks labels, the primary display property,
+  associated objects, and each provided property's stored-value type and
+  uniqueness.
 """
 
 from __future__ import annotations
@@ -114,7 +122,7 @@ def _existing_property_result(
 
 
 def _stage_probability(index: int, count: int) -> float:
-    """Deterministic linear ramp used because the SDK carries no probability."""
+    """Deterministic linear ramp for stages that carry no probability."""
     if count <= 1:
         return 1.0
     return round(index / (count - 1), 4)
@@ -129,7 +137,15 @@ def _pipeline_payload(definition: PipelineDefinition) -> dict[str, Any]:
             {
                 "label": stage.label,
                 "displayOrder": stage.display_order,
-                "metadata": {"probability": str(float(_stage_probability(index, count)))},
+                "metadata": {
+                    "probability": str(
+                        float(
+                            stage.probability
+                            if stage.probability is not None
+                            else _stage_probability(index, count)
+                        )
+                    )
+                },
             }
             for index, stage in enumerate(definition.stages)
         ],
@@ -158,8 +174,6 @@ def _pipeline_is_compatible(
     definition: PipelineDefinition,
     provider_pipeline: dict[str, Any],
 ) -> bool:
-    # Stage probabilities are not part of the SDK definition, so unlike the
-    # production adapter this compatibility check ignores them.
     raw_stages = provider_pipeline.get("stages")
     provider_stages = [item for item in raw_stages or [] if isinstance(item, dict)]
     if len(provider_stages) != len(definition.stages):
@@ -171,28 +185,41 @@ def _pipeline_is_compatible(
             return False
         if int(provider_stage.get("displayOrder") or 0) != stage.display_order:
             return False
+        if stage.probability is None:
+            # No reviewed probability for this stage: compatibility ignores it.
+            continue
+        metadata = provider_stage.get("metadata")
+        provider_probability = metadata.get("probability") if isinstance(metadata, dict) else None
+        if provider_probability is None:
+            # A reviewed probability requires a provider value to verify.
+            return False
+        try:
+            probability_matches = float(provider_probability) == float(stage.probability)
+        except (TypeError, ValueError):
+            probability_matches = False
+        if not probability_matches:
+            return False
     return True
 
 
 def _custom_object_schema_payload(
     definition: CustomObjectDefinition,
 ) -> dict[str, Any]:
-    # The SDK definition carries no property list, so the created schema holds
-    # exactly one text property: the primary display property HubSpot requires.
-    # Additional properties are provisioned separately or created in HubSpot.
-    display_label = (
-        definition.primary_display_property.replace("_", " ").strip().title()
-        or definition.primary_display_property
-    )
-    return {
-        "name": definition.internal_name,
-        "labels": {
-            "singular": definition.singular_label,
-            "plural": definition.plural_label,
-        },
-        "primaryDisplayProperty": definition.primary_display_property,
-        "associatedObjects": definition.associated_objects,
-        "properties": [
+    # The created schema carries the provided properties plus the primary
+    # display property HubSpot requires — synthesized as a text property only
+    # when the provided list does not already carry it. An empty list yields
+    # the minimal one-property schema; additional properties are then
+    # provisioned separately or created in HubSpot.
+    properties: list[dict[str, Any]] = []
+    if all(
+        provided.internal_name != definition.primary_display_property
+        for provided in definition.properties
+    ):
+        display_label = (
+            definition.primary_display_property.replace("_", " ").strip().title()
+            or definition.primary_display_property
+        )
+        properties.append(
             {
                 "name": definition.primary_display_property,
                 "label": display_label,
@@ -202,9 +229,37 @@ def _custom_object_schema_payload(
                 "displayOrder": 0,
                 "description": f"Migrated from {definition.source_object} with Ferry.",
             }
+        )
+    offset = len(properties)
+    for index, prop in enumerate(definition.properties):
+        target_type, field_type = hubspot_property_type(prop.source_type)
+        property_payload: dict[str, Any] = {
+            "name": prop.internal_name,
+            "label": prop.label,
+            "type": target_type,
+            "fieldType": field_type,
+            "hasUniqueValue": prop.unique,
+            "displayOrder": offset + index,
+            "description": f"Migrated from {prop.source_field} with Ferry.",
+        }
+        if target_type == "bool":
+            property_payload["options"] = boolean_property_options()
+        properties.append(property_payload)
+    return {
+        "name": definition.internal_name,
+        "labels": {
+            "singular": definition.singular_label,
+            "plural": definition.plural_label,
+        },
+        "primaryDisplayProperty": definition.primary_display_property,
+        "associatedObjects": definition.associated_objects,
+        "properties": properties,
+        "requiredProperties": [
+            prop.internal_name for prop in definition.properties if prop.required
         ],
-        "requiredProperties": [],
-        "searchableProperties": [],
+        "searchableProperties": [
+            prop.internal_name for prop in definition.properties if prop.searchable
+        ],
         "secondaryDisplayProperties": [],
     }
 
@@ -227,12 +282,21 @@ def _custom_object_schema_is_compatible(
         return False
     raw_properties = provider_schema.get("properties")
     provider_properties = {
-        str(item.get("name") or "").strip()
+        str(item.get("name") or "").strip(): item
         for item in raw_properties or []
         if isinstance(item, dict) and str(item.get("name") or "").strip()
     }
     if definition.primary_display_property not in provider_properties:
         return False
+    for prop in definition.properties:
+        existing = provider_properties.get(prop.internal_name)
+        if existing is None:
+            return False
+        expected_type, _field_type = hubspot_property_type(prop.source_type)
+        if str(existing.get("type") or "").strip() != expected_type:
+            return False
+        if prop.unique and existing.get("hasUniqueValue") is not True:
+            return False
     associated_objects = provider_schema.get("associatedObjects")
     return not (
         isinstance(associated_objects, list)

@@ -56,8 +56,18 @@ everything else → text; existing properties are compared by stored-value
 `type`, not presentation `fieldType`). `reconcile_resources` creates deal
 pipelines and custom object schemas, matching existing ones by label /
 internal name and reporting `existing` / `conflict` / `created` / `failed`.
-`confirm=False` is a pure dry run: nothing mutates, missing resources report
-`would_create`.
+Created pipeline stages use `PipelineStage.probability` verbatim; a stage
+without one gets a deterministic linear ramp (first `0.0` … last `1.0`;
+HubSpot requires a probability), and pipeline compatibility compares the
+probability of every stage that carries one. Created custom object schemas
+contain `CustomObjectDefinition.properties` (same type mapping, with
+`required`/`unique`/`searchable` mapped to the schema's property flags) plus
+the primary display property HubSpot requires, synthesized as a text
+property only when the list does not already carry it — an empty list yields
+that minimal one-property schema. Schema compatibility checks labels, the
+primary display property, associated objects, and each provided property's
+stored-value type and uniqueness. `confirm=False` is a pure dry run: nothing
+mutates, missing resources report `would_create`.
 
 **Rate limiting and retries**: every destination write/provisioning call runs
 through a single-lock provider-control loop — min-interval pacing (default
@@ -78,14 +88,6 @@ otherwise preserved):
 
 - Write policies arrive bundled in `WriteOptions` instead of separate
   keyword arguments.
-- `PipelineStage` carries no per-stage probability, so created deal-pipeline
-  stages get a deterministic linear probability ramp (first `0.0` … last
-  `1.0`; HubSpot requires one) and pipeline compatibility ignores
-  probability — adjust in HubSpot after provisioning if it matters.
-- `CustomObjectDefinition` carries no property list, so created schemas
-  contain exactly one text property (the required primary display property);
-  compatibility checks labels, the primary display property, and associated
-  objects.
 
 Apache-2.0; depends only on `ferry-connector-sdk` and `httpx`. Integration
 tests need `FERRY_TEST_HUBSPOT_ACCESS_TOKEN` (a private-app token for a
