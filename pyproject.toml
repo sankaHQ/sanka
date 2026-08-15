@@ -9,7 +9,7 @@ requires-python = ">=3.12"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*", "connectors/markdown", "connectors/sqlite"]
+members = ["packages/*", "connectors/markdown", "connectors/postgres", "connectors/sqlite"]
 
 [dependency-groups]
 dev = [
@@ -40,6 +40,7 @@ mypy_path = [
   "packages/ferry-connector-sdk/src",
   "packages/ferry-migrate/src",
   "connectors/markdown/src",
+  "connectors/postgres/src",
   "connectors/sqlite/src",
 ]
 
@@ -50,6 +51,7 @@ testpaths = [
   "packages/ferry-connector-sdk/tests",
   "packages/ferry-migrate/tests",
   "connectors/markdown/tests",
+  "connectors/postgres/tests",
   "connectors/sqlite/tests",
   "tests",
 ]
