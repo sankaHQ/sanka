@@ -9,28 +9,47 @@ transfer, retries, checkpoints, and post-migration verification — then
 finishes. Ferry is for **finite** migrations (move from A to B and complete),
 not continuous ETL.
 
-```python
-import ferry.migrations  # coming in Phase 2
+```bash
+ferry migrate ./content sqlite://content.db
+```
 
-migration = ferry.migrations.create(
-    source=ferry.postgres(POSTGRES_URL),
-    target=ferry.clickhouse(CLICKHOUSE_URL),
-)
-plan = migration.plan()  # write-free: what will move, what won't, risks
-migration.apply()  # scope- and hash-bound execution with resume
-result = migration.verify()  # counts, fields, relationships
+```text
+markdown -> sqlite
+
+  documents -> documents  (1,482 records, 6 fields, identity: path)
+
+ready: 100%
+plan hash: sha256:717d9c23…
+Apply this plan? [y/N] y
+run 18cd87dc9285: verification OK
+  documents->documents: source=1482 migrated=1482 failed=0 destination=1482  [ok]
+```
+
+Or as migration-as-code (`ferry.yaml`, committed and reviewed like any other
+config):
+
+```yaml
+source:
+  type: markdown
+  connection: ./content
+target:
+  type: sqlite
+  connection: ./content.db
+```
+
+```bash
+ferry plan && ferry apply && ferry verify
 ```
 
 ## Status
 
-**Pre-release.** The architecture is pinned (packaging, licensing, namespace
-layout, CI guardrails) and the first real layers are in: the connector SPI v1
-(`ferry.connector` — protocols, capability protocols, credentials, schema and
-record types, structured errors) and the migration-as-code core
-(`ferry.runtime.spec` + canonical plan hashing). The engine, CLI lifecycle
-commands, and the first connectors (Markdown, CSV, SQLite, PostgreSQL,
-ClickHouse — then Salesforce and HubSpot) land next. Nothing here is usable
-for real migrations yet.
+**Pre-release, first migrations working.** The lifecycle
+(`create → inspect → plan → apply → verify`) runs end to end through the
+engine and the CLI, with a SQLite state store (hash-bound apply, per-page
+checkpoints, identity-ledger idempotent writes, resume), plus the first two
+connectors: **markdown** (source) and **sqlite** (destination). Next: csv,
+postgres, and clickhouse connectors, then Salesforce and HubSpot. Interfaces
+are still moving; nothing is published to PyPI yet.
 
 ## Repository layout & licensing
 

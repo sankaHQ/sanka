@@ -66,6 +66,7 @@ from ferry.connector.records import (
     WriteOptions,
     WriteResult,
 )
+from ferry.connector.registration import ENTRY_POINT_GROUP, ConnectorRegistration
 from ferry.connector.schema import (
     FieldSchema,
     Inventory,
@@ -75,6 +76,7 @@ from ferry.connector.schema import (
 )
 
 __all__ = [
+    "ENTRY_POINT_GROUP",
     "AuthenticationError",
     "BatchRelationshipWriteResult",
     "BatchWriteInput",
@@ -83,6 +85,7 @@ __all__ = [
     "ConflictError",
     "ConflictPolicy",
     "ConnectorError",
+    "ConnectorRegistration",
     "CredentialProvider",
     "Credentials",
     "CustomObjectDefinition",

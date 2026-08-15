@@ -67,8 +67,10 @@ they bind every later phase:
   than renaming to the PRD's conceptual verbs — port fidelity makes internal
   adoption a signature-compatible swap; the verb mapping is documented in
   `ferry.connector.protocols`.
-- **Phase 2** — engine, SQLite state store, verification, CLI lifecycle
-  commands, and the developer-wedge connectors (`markdown`, `csv`, `sqlite`,
-  `postgres`, `clickhouse`).
+- **Phase 2 (in progress)** — engine, SQLite state store, verification v0,
+  CLI lifecycle commands, and the `markdown` + `sqlite` connectors are done;
+  remaining: `csv`, `postgres`, `clickhouse` connectors, richer verification
+  (field sampling), and wiring the ported mapping/auto-mapping modules into
+  the planner.
 - **Later** — `salesforce` and `hubspot` connectors; managed OAuth
   connections, hosted execution, AI planning/remediation via Ferry Cloud.

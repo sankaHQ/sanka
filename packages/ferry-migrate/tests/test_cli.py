@@ -21,4 +21,6 @@ def test_version_flag_exits_zero() -> None:
 
 def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([]) == 0
-    assert "migration runtime" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "verify finite migrations" in output
+    assert "{plan,apply,verify,status,migrate}" in output

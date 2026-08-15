@@ -8,7 +8,9 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "ferry-connector-markdown",
     "ferry-connector-sdk",
+    "ferry-connector-sqlite",
     "ferry-migrate",
     "ferry-workspace",
 ]
@@ -87,9 +89,35 @@ wheels = [
 ]
 
 [[package]]
+name = "ferry-connector-markdown"
+version = "0.1.0.dev0"
+source = { editable = "connectors/markdown" }
+dependencies = [
+    { name = "ferry-connector-sdk" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "pyyaml", specifier = ">=6" },
+]
+
+[[package]]
 name = "ferry-connector-sdk"
 version = "0.1.0.dev0"
 source = { editable = "packages/ferry-connector-sdk" }
+
+[[package]]
+name = "ferry-connector-sqlite"
+version = "0.1.0.dev0"
+source = { editable = "connectors/sqlite" }
+dependencies = [
+    { name = "ferry-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" }]
 
 [[package]]
 name = "ferry-migrate"

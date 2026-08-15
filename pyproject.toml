@@ -9,7 +9,7 @@ requires-python = ">=3.12"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "connectors/markdown", "connectors/sqlite"]
 
 [dependency-groups]
 dev = [
@@ -39,6 +39,8 @@ explicit_package_bases = true
 mypy_path = [
   "packages/ferry-connector-sdk/src",
   "packages/ferry-migrate/src",
+  "connectors/markdown/src",
+  "connectors/sqlite/src",
 ]
 
 [tool.pytest.ini_options]
@@ -47,5 +49,7 @@ asyncio_mode = "auto"
 testpaths = [
   "packages/ferry-connector-sdk/tests",
   "packages/ferry-migrate/tests",
+  "connectors/markdown/tests",
+  "connectors/sqlite/tests",
   "tests",
 ]
