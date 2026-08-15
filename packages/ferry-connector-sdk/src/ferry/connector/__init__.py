@@ -46,6 +46,7 @@ from ferry.connector.protocols import (
 )
 from ferry.connector.provisioning import (
     CustomObjectDefinition,
+    CustomObjectProperty,
     PipelineDefinition,
     PipelineStage,
     PropertyDefinition,
@@ -89,6 +90,7 @@ __all__ = [
     "CredentialProvider",
     "Credentials",
     "CustomObjectDefinition",
+    "CustomObjectProperty",
     "DataError",
     "DestinationConnector",
     "ErrorCategory",

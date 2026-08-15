@@ -44,9 +44,20 @@ class PropertyResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PipelineStage:
+    """One reviewed stage of a pipeline to ensure exists.
+
+    ``probability`` is the reviewed win likelihood in ``[0, 1]``; ``None``
+    lets the connector pick a provider-appropriate default.
+    """
+
     key: str
     label: str
     display_order: int = 0
+    probability: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.probability is not None and not 0 <= self.probability <= 1:
+            raise ValueError("PipelineStage.probability must be between 0 and 1")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -59,7 +70,33 @@ class PipelineDefinition:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CustomObjectProperty:
+    """A property of a custom object schema, derived from a source field.
+
+    Unlike :class:`PropertyDefinition` this rides inside a
+    :class:`CustomObjectDefinition` (no ``target_object``) and carries the
+    schema-level flags (``required``/``unique``/``searchable``) providers
+    accept only at schema-creation time.
+    """
+
+    source_field: str
+    internal_name: str
+    label: str
+    source_type: str | None = None
+    required: bool = False
+    unique: bool = False
+    searchable: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CustomObjectDefinition:
+    """A custom object schema to ensure exists.
+
+    ``properties`` lists the reviewed properties to create with the schema;
+    an empty list lets the connector create a minimal schema (the primary
+    display property alone) and provision the rest separately.
+    """
+
     key: str
     source_object: str
     internal_name: str
@@ -67,6 +104,7 @@ class CustomObjectDefinition:
     plural_label: str
     primary_display_property: str
     associated_objects: list[str] = field(default_factory=list)
+    properties: list[CustomObjectProperty] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
