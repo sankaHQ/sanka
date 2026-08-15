@@ -9,7 +9,13 @@ requires-python = ">=3.12"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*", "connectors/csv", "connectors/markdown", "connectors/sqlite"]
+members = [
+  "packages/*",
+  "connectors/clickhouse",
+  "connectors/csv",
+  "connectors/markdown",
+  "connectors/sqlite",
+]
 
 [dependency-groups]
 dev = [
@@ -42,6 +48,7 @@ mypy_path = [
   "connectors/csv/src",
   "connectors/markdown/src",
   "connectors/sqlite/src",
+  "connectors/clickhouse/src",
 ]
 
 [tool.pytest.ini_options]
@@ -53,5 +60,6 @@ testpaths = [
   "connectors/csv/tests",
   "connectors/markdown/tests",
   "connectors/sqlite/tests",
+  "connectors/clickhouse/tests",
   "tests",
 ]
