@@ -71,7 +71,7 @@ async def test_inventory_readback_and_target_suggestion(tmp_path: Path) -> None:
     assert inventory.objects[0].record_count == 3
     assert destination.automatic_target_object("My Docs!") == "my_docs"
     assert CONNECTOR.name == "sqlite"
-    assert CONNECTOR.destination is not None and CONNECTOR.source is None
+    assert CONNECTOR.destination is not None and CONNECTOR.source is not None
 
 
 async def test_sqlite_url_prefix_is_accepted(tmp_path: Path) -> None:

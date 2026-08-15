@@ -1,7 +1,7 @@
 [project]
 name = "ferry-connector-sqlite"
 version = "0.1.0.dev0"
-description = "Ferry connector: write migration records into a SQLite database"
+description = "Ferry connector: read and write SQLite databases as a migration source and destination"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
