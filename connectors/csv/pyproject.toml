@@ -1,0 +1,28 @@
+[project]
+name = "ferry-connector-csv"
+version = "0.1.0.dev0"
+description = "Ferry connector: read a CSV or TSV file as a migration source"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Sanka, Inc." }]
+dependencies = [
+  "ferry-connector-sdk",
+]
+
+[project.entry-points."ferry.connectors"]
+csv = "ferry_connector_csv:CONNECTOR"
+
+[project.urls]
+Repository = "https://github.com/sankaHQ/ferry"
+
+[tool.uv.sources]
+ferry-connector-sdk = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ferry_connector_csv"]
