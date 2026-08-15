@@ -74,6 +74,15 @@ async def test_inventory_readback_and_target_suggestion(tmp_path: Path) -> None:
     assert CONNECTOR.destination is not None and CONNECTOR.source is None
 
 
+async def test_inventory_on_missing_database_is_empty_and_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "never-created.db"
+    inventory = await SqliteDestination().inventory(_credentials(db), canonical_types={"documents"})
+    assert inventory.objects == []
+    assert not db.exists()  # planning/inspection must leave no artifacts
+
+
 async def test_sqlite_url_prefix_is_accepted(tmp_path: Path) -> None:
     db = tmp_path / "url.db"
     destination = SqliteDestination()

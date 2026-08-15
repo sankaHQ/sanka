@@ -49,9 +49,11 @@ async def test_full_lifecycle_markdown_to_sqlite(tmp_path: Path) -> None:
     run_id = engine.create(_spec(content, db))
     plan = await engine.plan(run_id)
 
-    assert [r.route_key for r in plan.routes] == ["documents->documents"]
+    assert [r.route_key for r in plan.routes] == ["documents|documents"]
     route = plan.routes[0]
+    assert route.mapping_origin == "identity"  # fresh target database: no schema to map onto
     assert route.identity_field == "path"
+    assert route.identity_target_fields == ["path"]
     assert route.estimated_count == 3
     assert any("mixed types" in w for w in plan.warnings)
     assert 0.5 <= plan.ready < 1.0

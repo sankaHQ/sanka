@@ -8,6 +8,34 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ferry
+          POSTGRES_PASSWORD: ferry
+          POSTGRES_DB: ferry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ferry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FERRY_TEST_POSTGRES_DSN: postgresql://ferry:ferry@localhost:5432/ferry_test
+      FERRY_TEST_CLICKHOUSE_URL: http://localhost:8123/default
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

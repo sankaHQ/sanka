@@ -57,6 +57,10 @@ class SqliteDestination:
         *,
         canonical_types: set[str],
     ) -> Inventory:
+        # Inventory is a read: a database that does not exist yet is simply
+        # empty — never create the file from an inspection/planning path.
+        if not self._db_path(credentials).exists():
+            return Inventory(provider=self.provider, connection_id=credentials.connection_id)
         connection = self._connect(credentials)
         objects: list[ObjectSchema] = []
         for canonical_type in sorted(canonical_types):
@@ -134,7 +138,7 @@ class SqliteDestination:
 
     # -- internals ----------------------------------------------------------
 
-    def _connect(self, credentials: Credentials) -> sqlite3.Connection:
+    def _db_path(self, credentials: Credentials) -> Path:
         raw = credentials.settings.get("connection") or credentials.settings.get("path")
         if not raw:
             raise ConfigurationError("sqlite destination needs a database path (connection)")
@@ -145,7 +149,10 @@ class SqliteDestination:
                 break
         if not path_text:
             raise ConfigurationError("sqlite destination path is empty")
-        key = str(Path(path_text).expanduser())
+        return Path(path_text).expanduser()
+
+    def _connect(self, credentials: Credentials) -> sqlite3.Connection:
+        key = str(self._db_path(credentials))
         connection = self._connections.get(key)
         if connection is None:
             Path(key).parent.mkdir(parents=True, exist_ok=True)

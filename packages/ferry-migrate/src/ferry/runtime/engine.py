@@ -36,6 +36,8 @@ from ferry.connector import (
 )
 from ferry.connector.protocols import DestinationConnector, SourceConnector
 from ferry.runtime.hashing import canonical_json
+from ferry.runtime.mapping.errors import MappingError
+from ferry.runtime.mapping.record_mapping import destination_properties, source_field_keys
 from ferry.runtime.planner import MigrationPlan, RoutePlan, build_plan
 from ferry.runtime.registry import ConnectorRegistry
 from ferry.runtime.spec import EndpointSpec, MigrationSpec, resolve_env
@@ -125,7 +127,7 @@ class MigrationEngine:
     async def inspect(self, run_id: str) -> InspectionResult:
         spec = self._spec(run_id)
         source, source_credentials = self._source(spec)
-        destination, _ = self._destination(spec)
+        destination, destination_credentials = self._destination(spec)
 
         source_objects = await source.discover_objects(source_credentials)
         inventory = await source.inventory(source_credentials)
@@ -133,6 +135,12 @@ class MigrationEngine:
             obj.canonical_type: destination.automatic_target_object(obj.canonical_type)
             for obj in source_objects
         }
+        # Destination inventory is a read: it feeds the auto-mapper when the
+        # target already has schema, and stays empty for fresh targets.
+        destination_inventory = await destination.inventory(
+            destination_credentials,
+            canonical_types={obj.canonical_type for obj in source_objects},
+        )
         result = InspectionResult(
             source_objects=[_source_object_payload(o) for o in source_objects],
             inventory=_inventory_payload(inventory),
@@ -145,6 +153,7 @@ class MigrationEngine:
                     "sourceObjects": result.source_objects,
                     "inventory": result.inventory,
                     "suggestedTargets": result.suggested_targets,
+                    "destinationInventory": _inventory_payload(destination_inventory),
                 }
             ),
         )
@@ -159,12 +168,18 @@ class MigrationEngine:
         assert run.inspection_json is not None
         inspection = json.loads(run.inspection_json)
 
+        raw_destination_inventory = inspection.get("destinationInventory")
         plan = build_plan(
             source_provider=spec.source.type,
             target_provider=spec.target.type,
             inventory=_inventory_from_payload(inspection["inventory"]),
             source_objects=[_source_object_from_payload(o) for o in inspection["sourceObjects"]],
             suggest_target_object=inspection["suggestedTargets"],
+            destination_inventory=(
+                None
+                if raw_destination_inventory is None
+                else _inventory_from_payload(raw_destination_inventory)
+            ),
         )
         self._store.save_plan(run_id, canonical_json(plan.to_payload()), plan.plan_hash)
         return plan
@@ -257,10 +272,10 @@ class MigrationEngine:
         if done:
             return
         terminal = self._store.terminal_source_ids(run_id, route.route_key)
-        field_keys = [m.source_field for m in route.field_mappings]
+        field_keys = sorted(set(source_field_keys(route.field_mappings)) | {route.identity_field})
         options = WriteOptions(
             conflict_policy=conflict_policy,
-            identity_fields=[route.identity_target_field],
+            identity_fields=route.identity_target_fields or None,
         )
 
         while True:
@@ -315,11 +330,17 @@ class MigrationEngine:
             source_id = str(raw_identity)
             if source_id in terminal:
                 continue
-            properties = {
-                m.target_field: record.get(m.source_field)
-                for m in route.field_mappings
-                if m.source_field in record
-            }
+            try:
+                properties = destination_properties(record, route.field_mappings)
+            except MappingError as error:
+                entries.append(
+                    LedgerEntry(
+                        source_record_id=source_id,
+                        status="failed",
+                        message=f"{error.code}: {error}",
+                    )
+                )
+                continue
             pending.append((source_id, properties))
 
         if not pending:
