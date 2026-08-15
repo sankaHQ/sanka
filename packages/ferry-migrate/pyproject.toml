@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
-authors = [{ name = "Sanka" }]
+authors = [{ name = "Sanka, Inc." }]
 keywords = ["migration", "etl", "ferry", "data", "cli"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",

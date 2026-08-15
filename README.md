@@ -48,7 +48,7 @@ enforces both the headers and the import boundary between license zones.
 Connectors and client code depend only on the Apache-2.0 SDK, so building or
 distributing a connector never makes it a derivative of the AGPL runtime. The
 runtime is available under AGPL-3.0-only; commercial licenses are available
-from Sanka for embedding without AGPL obligations.
+from Sanka, Inc. for embedding without AGPL obligations.
 
 ## Development
 

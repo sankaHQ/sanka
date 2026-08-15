@@ -12,7 +12,8 @@ SPDX-License-Identifier header in each source file is authoritative.
 The full license texts are in each package directory's LICENSE file.
 
 The Ferry Migration Runtime (packages/ferry-migrate) is also available under a
-commercial license from Sanka for use without AGPL-3.0 obligations.
+commercial license from Sanka, Inc. for use without AGPL-3.0 obligations —
+see docs/legal/commercial-license.md (draft).
 
 All contributions require a signed Contributor License Agreement; see
 CONTRIBUTING.md.

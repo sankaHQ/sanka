@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Sanka" }]
+authors = [{ name = "Sanka, Inc." }]
 keywords = ["migration", "connector", "ferry", "data"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",

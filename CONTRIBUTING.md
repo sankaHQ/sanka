@@ -6,10 +6,13 @@ Thanks for your interest! Two things to know before opening a pull request.
 
 Ferry is dual-licensed (AGPL-3.0-only runtime + commercial licenses, with an
 Apache-2.0 connector SDK). That model requires every contribution to be covered
-by a signed Contributor License Agreement.
+by a signed Contributor License Agreement:
+[individual CLA](docs/legal/individual-cla.md) ·
+[corporate CLA](docs/legal/corporate-cla.md).
 
-**The CLA signing flow is not live yet.** Until it is, we cannot merge external
-pull requests — issues and discussions are very welcome in the meantime.
+**The CLA texts are drafts under counsel review and the signing flow is not
+live yet.** Until both are done, we cannot merge external pull requests —
+issues and discussions are very welcome in the meantime.
 
 ## 2. License zones and import boundaries
 

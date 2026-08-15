@@ -5,8 +5,8 @@ lifecycle (`create → inspect → plan → apply → verify`), planner, executi
 engine (batching, throttling, retries, checkpoints, resume, identity ledger),
 local state store, verification framework, and the `ferry` CLI.
 
-Licensed **AGPL-3.0-only**; commercial licenses are available from Sanka for
-embedding without AGPL obligations. Connector authors should depend on
+Licensed **AGPL-3.0-only**; commercial licenses are available from
+Sanka, Inc. for embedding without AGPL obligations. Connector authors should depend on
 [`ferry-connector-sdk`](../ferry-connector-sdk/) (Apache-2.0) instead — never
 on this package.
 
