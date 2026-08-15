@@ -23,11 +23,14 @@ result = migration.verify()  # counts, fields, relationships
 
 ## Status
 
-**Pre-release scaffold.** This repository currently pins the architecture:
-packaging, licensing, namespace layout, and CI guardrails. The connector SPI,
-engine, CLI, and the first connectors (Markdown, CSV, SQLite, PostgreSQL,
-ClickHouse — then Salesforce and HubSpot) land in the next phases. Nothing here
-is usable for real migrations yet.
+**Pre-release.** The architecture is pinned (packaging, licensing, namespace
+layout, CI guardrails) and the first real layers are in: the connector SPI v1
+(`ferry.connector` — protocols, capability protocols, credentials, schema and
+record types, structured errors) and the migration-as-code core
+(`ferry.runtime.spec` + canonical plan hashing). The engine, CLI lifecycle
+commands, and the first connectors (Markdown, CSV, SQLite, PostgreSQL,
+ClickHouse — then Salesforce and HubSpot) land next. Nothing here is usable
+for real migrations yet.
 
 ## Repository layout & licensing
 

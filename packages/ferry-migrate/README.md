@@ -10,5 +10,8 @@ embedding without AGPL obligations. Connector authors should depend on
 [`ferry-connector-sdk`](../ferry-connector-sdk/) (Apache-2.0) instead — never
 on this package.
 
-**Status: pre-release scaffold.** The engine and CLI lifecycle commands land
-in Phase 2; today `ferry --version` is the extent of it.
+**Status: pre-release.** Migration-as-code specs (`ferry.runtime.spec`, YAML +
+programmatic, with env-reference resolution and secret-key rejection) and
+canonical plan hashing (`ferry.runtime.hashing`) are in place. The engine,
+state store, and CLI lifecycle commands land in Phase 2; today
+`ferry --version` is the CLI's extent.

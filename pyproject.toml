@@ -16,6 +16,8 @@ dev = [
   "ruff>=0.12",
   "mypy>=1.14",
   "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "types-pyyaml>=6",
 ]
 
 [tool.ruff]
@@ -41,6 +43,7 @@ mypy_path = [
 
 [tool.pytest.ini_options]
 addopts = "-q"
+asyncio_mode = "auto"
 testpaths = [
   "packages/ferry-connector-sdk/tests",
   "packages/ferry-migrate/tests",

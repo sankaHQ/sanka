@@ -13,7 +13,8 @@ format:
 	$(UV) run ruff check --fix .
 
 typecheck:
-	$(UV) run mypy packages/ferry-connector-sdk/src packages/ferry-migrate/src scripts
+	$(UV) run mypy packages/ferry-connector-sdk/src packages/ferry-migrate/src \
+		packages/ferry-connector-sdk/tests packages/ferry-migrate/tests scripts
 
 test:
 	$(UV) run pytest

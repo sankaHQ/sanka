@@ -60,9 +60,13 @@ they bind every later phase:
 
 ## Roadmap
 
-- **Phase 1** — SPI + core model: connector protocols and types in the SDK;
-  migration spec (programmatic + YAML) and canonical plan hashing in the
-  runtime.
+- **Phase 1 (done)** — SPI + core model: connector protocols and types in the
+  SDK; migration spec (programmatic + YAML) and canonical plan hashing in the
+  runtime. Note: the concrete SPI keeps the production-proven method names
+  (`discover_objects` / `inventory` / `read_records` / `write_record`) rather
+  than renaming to the PRD's conceptual verbs — port fidelity makes internal
+  adoption a signature-compatible swap; the verb mapping is documented in
+  `ferry.connector.protocols`.
 - **Phase 2** — engine, SQLite state store, verification, CLI lifecycle
   commands, and the developer-wedge connectors (`markdown`, `csv`, `sqlite`,
   `postgres`, `clickhouse`).

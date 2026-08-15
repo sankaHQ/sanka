@@ -1,16 +1,132 @@
 # SPDX-License-Identifier: Apache-2.0
 """Ferry Connector SDK — Apache-2.0 interfaces for Ferry migration connectors.
 
-Connectors implement the protocols defined in this package and must not import
-the AGPL-licensed runtime (``ferry.runtime``); CI enforces that boundary so a
-connector is never a derivative work of the runtime.
-
-The SPI itself (source/destination protocols, capability protocols, record and
-schema types, credential provider, structured errors) lands in Phase 1. This
-package currently pins the ``ferry.connector`` namespace, licensing, and
-packaging contract.
+Connectors implement the base protocols (:class:`SourceConnector`,
+:class:`DestinationConnector`) plus any optional capability protocols, and
+must not import the AGPL-licensed runtime (``ferry.runtime``); CI enforces
+that boundary so a connector is never a derivative work of the runtime.
 """
 
 from ferry.connector.__about__ import __version__
+from ferry.connector.credentials import (
+    CredentialProvider,
+    Credentials,
+    SupportsCredentialRefresh,
+)
+from ferry.connector.errors import (
+    AuthenticationError,
+    ConfigurationError,
+    ConflictError,
+    ConnectorError,
+    DataError,
+    ErrorCategory,
+    NotFoundError,
+    PermissionDeniedError,
+    ProviderTimeoutError,
+    RateLimitError,
+    SchemaMismatchError,
+    TransientProviderError,
+    UnsupportedFeatureError,
+    ValidationFailedError,
+)
+from ferry.connector.protocols import (
+    DestinationConnector,
+    Limits,
+    SourceConnector,
+    SupportsBatchRelationshipWrites,
+    SupportsBatchWrites,
+    SupportsConfigValidation,
+    SupportsIdentityInspection,
+    SupportsLimits,
+    SupportsOwnerDirectory,
+    SupportsRecordCounts,
+    SupportsRetryMetrics,
+    SupportsSchemaProvisioning,
+    SupportsSnapshotBounds,
+)
+from ferry.connector.provisioning import (
+    CustomObjectDefinition,
+    PipelineDefinition,
+    PipelineStage,
+    PropertyDefinition,
+    PropertyResult,
+    ResourceResult,
+)
+from ferry.connector.records import (
+    BatchRelationshipWriteResult,
+    BatchWriteInput,
+    BatchWriteResult,
+    ConflictPolicy,
+    InvalidEmailPolicy,
+    OwnerProfile,
+    RecordPage,
+    RelationshipWrite,
+    RelationshipWriteResult,
+    SourceFilter,
+    WriteOptions,
+    WriteResult,
+)
+from ferry.connector.schema import (
+    FieldSchema,
+    Inventory,
+    ObjectSchema,
+    ProviderIdentity,
+    SourceObject,
+)
 
-__all__ = ["__version__"]
+__all__ = [
+    "AuthenticationError",
+    "BatchRelationshipWriteResult",
+    "BatchWriteInput",
+    "BatchWriteResult",
+    "ConfigurationError",
+    "ConflictError",
+    "ConflictPolicy",
+    "ConnectorError",
+    "CredentialProvider",
+    "Credentials",
+    "CustomObjectDefinition",
+    "DataError",
+    "DestinationConnector",
+    "ErrorCategory",
+    "FieldSchema",
+    "InvalidEmailPolicy",
+    "Inventory",
+    "Limits",
+    "NotFoundError",
+    "ObjectSchema",
+    "OwnerProfile",
+    "PermissionDeniedError",
+    "PipelineDefinition",
+    "PipelineStage",
+    "PropertyDefinition",
+    "PropertyResult",
+    "ProviderIdentity",
+    "ProviderTimeoutError",
+    "RateLimitError",
+    "RecordPage",
+    "RelationshipWrite",
+    "RelationshipWriteResult",
+    "ResourceResult",
+    "SchemaMismatchError",
+    "SourceConnector",
+    "SourceFilter",
+    "SourceObject",
+    "SupportsBatchRelationshipWrites",
+    "SupportsBatchWrites",
+    "SupportsConfigValidation",
+    "SupportsCredentialRefresh",
+    "SupportsIdentityInspection",
+    "SupportsLimits",
+    "SupportsOwnerDirectory",
+    "SupportsRecordCounts",
+    "SupportsRetryMetrics",
+    "SupportsSchemaProvisioning",
+    "SupportsSnapshotBounds",
+    "TransientProviderError",
+    "UnsupportedFeatureError",
+    "ValidationFailedError",
+    "WriteOptions",
+    "WriteResult",
+    "__version__",
+]

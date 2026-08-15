@@ -16,6 +16,7 @@ classifiers = [
 ]
 dependencies = [
   "ferry-connector-sdk",
+  "pyyaml>=6",
 ]
 
 [project.scripts]
