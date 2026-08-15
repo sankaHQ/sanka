@@ -10,17 +10,28 @@ import pytest
 
 from ferry.connector import (
     Credentials,
+    CustomObjectDefinition,
     DestinationConnector,
     Inventory,
     ObjectSchema,
+    PipelineDefinition,
+    PropertyDefinition,
+    PropertyResult,
     RecordPage,
     RelationshipWrite,
     RelationshipWriteResult,
+    ResourceResult,
     SourceConnector,
     SourceFilter,
     SourceObject,
     SupportsBatchWrites,
+    SupportsBoundedCounts,
+    SupportsBoundedReads,
+    SupportsHighWaterMark,
     SupportsOwnerDirectory,
+    SupportsPropertyProvisioning,
+    SupportsResourceProvisioning,
+    SupportsSchemaProvisioning,
     SupportsSnapshotBounds,
     WriteOptions,
     WriteResult,
@@ -117,6 +128,115 @@ class InMemoryDestination:
         return RelationshipWriteResult(status="linked")
 
 
+class SnapshotBoundedSource(InMemorySource):
+    """InMemorySource plus every method of the snapshot-bounds bundle."""
+
+    async def high_water_mark(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        source_filter: SourceFilter | None = None,
+    ) -> str | None:
+        return "2026-01-01T00:00:00Z"
+
+    async def read_records_bounded(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        field_keys: list[str],
+        limit: int,
+        cursor: str | None = None,
+        source_filter: SourceFilter | None = None,
+        upper_bound: str,
+    ) -> RecordPage:
+        return await self.read_records(
+            credentials,
+            object_type=object_type,
+            field_keys=field_keys,
+            limit=limit,
+            cursor=cursor,
+            source_filter=source_filter,
+        )
+
+    async def count_records_bounded(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        source_filter: SourceFilter | None = None,
+        upper_bound: str,
+    ) -> int:
+        return 0
+
+
+class HighWaterMarkOnlySource(InMemorySource):
+    """InMemorySource plus the freeze step alone — no bounded reads/counts."""
+
+    async def high_water_mark(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        source_filter: SourceFilter | None = None,
+    ) -> str | None:
+        return None
+
+
+class ProvisioningDestination(InMemoryDestination):
+    """InMemoryDestination plus every method of the provisioning bundle."""
+
+    async def reconcile_properties(
+        self,
+        credentials: Credentials,
+        *,
+        definitions: list[PropertyDefinition],
+        confirm: bool,
+    ) -> list[PropertyResult]:
+        return [
+            PropertyResult(
+                source_field=definition.source_field,
+                target_object=definition.target_object,
+                internal_name=definition.internal_name,
+                label=definition.label,
+                status="would_create",
+            )
+            for definition in definitions
+        ]
+
+    async def reconcile_resources(
+        self,
+        credentials: Credentials,
+        *,
+        pipelines: list[PipelineDefinition],
+        custom_objects: list[CustomObjectDefinition],
+        confirm: bool,
+    ) -> list[ResourceResult]:
+        return [
+            ResourceResult(
+                resource_type="pipeline",
+                key=definition.key,
+                label=definition.label,
+                status="would_create",
+            )
+            for definition in pipelines
+        ]
+
+
+class PropertyProvisioningOnlyDestination(InMemoryDestination):
+    """InMemoryDestination plus property reconciliation alone."""
+
+    async def reconcile_properties(
+        self,
+        credentials: Credentials,
+        *,
+        definitions: list[PropertyDefinition],
+        confirm: bool,
+    ) -> list[PropertyResult]:
+        return []
+
+
 CREDS = Credentials(provider="memory")
 
 
@@ -133,6 +253,40 @@ def test_capability_protocols_are_absent_unless_implemented() -> None:
     assert not isinstance(source, SupportsSnapshotBounds)
     assert not isinstance(source, SupportsOwnerDirectory)
     assert not isinstance(destination, SupportsBatchWrites)
+    assert not isinstance(source, SupportsHighWaterMark)
+    assert not isinstance(source, SupportsBoundedReads)
+    assert not isinstance(source, SupportsBoundedCounts)
+    assert not isinstance(destination, SupportsPropertyProvisioning)
+    assert not isinstance(destination, SupportsResourceProvisioning)
+    assert not isinstance(destination, SupportsSchemaProvisioning)
+
+
+def test_granular_refinements_track_their_single_method() -> None:
+    freeze_only = HighWaterMarkOnlySource({"docs": []})
+    assert isinstance(freeze_only, SupportsHighWaterMark)
+    assert not isinstance(freeze_only, SupportsBoundedReads)
+    assert not isinstance(freeze_only, SupportsBoundedCounts)
+    assert not isinstance(freeze_only, SupportsSnapshotBounds)
+
+    property_only = PropertyProvisioningOnlyDestination()
+    assert isinstance(property_only, SupportsPropertyProvisioning)
+    assert not isinstance(property_only, SupportsResourceProvisioning)
+    assert not isinstance(property_only, SupportsSchemaProvisioning)
+
+
+def test_bundle_implementations_satisfy_their_refinements() -> None:
+    # A class carrying every method of a bundle satisfies the bundled protocol
+    # and each granular refinement alike — runtimes may probe either way.
+    bounded: SupportsSnapshotBounds = SnapshotBoundedSource({"docs": []})
+    assert isinstance(bounded, SupportsSnapshotBounds)
+    assert isinstance(bounded, SupportsHighWaterMark)
+    assert isinstance(bounded, SupportsBoundedReads)
+    assert isinstance(bounded, SupportsBoundedCounts)
+
+    provisioning: SupportsSchemaProvisioning = ProvisioningDestination()
+    assert isinstance(provisioning, SupportsSchemaProvisioning)
+    assert isinstance(provisioning, SupportsPropertyProvisioning)
+    assert isinstance(provisioning, SupportsResourceProvisioning)
 
 
 @pytest.mark.asyncio

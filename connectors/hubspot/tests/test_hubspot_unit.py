@@ -22,7 +22,9 @@ from ferry_connector_hubspot._base import (
     mapped_error,
 )
 from ferry_connector_hubspot._destination import (
+    _custom_object_schema_is_compatible,
     _custom_object_schema_payload,
+    _pipeline_is_compatible,
     _pipeline_payload,
     _stage_probability,
 )
@@ -33,6 +35,7 @@ from ferry.connector import (
     ConflictError,
     Credentials,
     CustomObjectDefinition,
+    CustomObjectProperty,
     DestinationConnector,
     NotFoundError,
     PermissionDeniedError,
@@ -1350,6 +1353,320 @@ def test_pipeline_payload_probability_strings() -> None:
     payload = _pipeline_payload(_pipeline_definition())
     stages = payload["stages"]
     assert [stage["metadata"]["probability"] for stage in stages] == ["0.0", "0.5", "1.0"]
+
+
+def _pipeline_definition_with_probabilities() -> PipelineDefinition:
+    return PipelineDefinition(
+        key="sales",
+        label="Sales Pipeline",
+        object_type="deals",
+        stages=[
+            PipelineStage(key="new", label="New", display_order=0, probability=0.1),
+            PipelineStage(key="review", label="Review", display_order=1, probability=0.4),
+            PipelineStage(key="won", label="Won", display_order=2, probability=0.9),
+        ],
+    )
+
+
+def _provider_pipeline(probabilities: list[str | None]) -> dict[str, object]:
+    stages: list[dict[str, object]] = []
+    for index, (label, probability) in enumerate(
+        zip(["New", "Review", "Won"], probabilities, strict=True)
+    ):
+        stage: dict[str, object] = {"id": f"s-{index}", "label": label, "displayOrder": index}
+        if probability is not None:
+            stage["metadata"] = {"probability": probability}
+        stages.append(stage)
+    return {"id": "p-1", "label": "sales pipeline", "stages": stages}
+
+
+def test_pipeline_payload_uses_provided_probabilities_with_ramp_fallback() -> None:
+    definition = PipelineDefinition(
+        key="sales",
+        label="Sales Pipeline",
+        object_type="deals",
+        stages=[
+            PipelineStage(key="new", label="New", display_order=0, probability=0.2),
+            PipelineStage(key="review", label="Review", display_order=1),
+            PipelineStage(key="won", label="Won", display_order=2, probability=1.0),
+        ],
+    )
+    stages = _pipeline_payload(definition)["stages"]
+    # The reviewed 0.2 and 1.0 pass through; the middle stage without a
+    # reviewed probability falls back to the linear ramp (index 1 of 3 = 0.5).
+    assert [stage["metadata"]["probability"] for stage in stages] == ["0.2", "0.5", "1.0"]
+
+
+def test_pipeline_compatibility_compares_probability_only_when_reviewed() -> None:
+    reviewed = _pipeline_definition_with_probabilities()
+    assert _pipeline_is_compatible(reviewed, _provider_pipeline(["0.1", "0.4", "0.9"]))
+    # Float comparison, not string comparison.
+    assert _pipeline_is_compatible(reviewed, _provider_pipeline(["0.10", "0.40", "0.90"]))
+    assert not _pipeline_is_compatible(reviewed, _provider_pipeline(["0.1", "0.5", "0.9"]))
+    # A reviewed probability requires a parseable provider value (production
+    # semantics): a stage without metadata cannot be verified.
+    assert not _pipeline_is_compatible(reviewed, _provider_pipeline(["0.1", None, "0.9"]))
+    assert not _pipeline_is_compatible(reviewed, _provider_pipeline(["0.1", "oops", "0.9"]))
+
+    unreviewed = _pipeline_definition()
+    # Without reviewed probabilities the check ignores provider metadata
+    # entirely, whether present or absent.
+    assert _pipeline_is_compatible(unreviewed, _provider_pipeline(["0.7", "0.8", "0.9"]))
+    assert _pipeline_is_compatible(unreviewed, _provider_pipeline([None, None, None]))
+
+
+async def test_reconcile_resources_existing_pipeline_verifies_reviewed_probabilities() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/crm/v3/pipelines/deals"
+        return httpx.Response(200, json={"results": [_provider_pipeline(["0.1", "0.4", "0.9"])]})
+
+    (result,) = await destination(respond).reconcile_resources(
+        credentials(),
+        pipelines=[_pipeline_definition_with_probabilities()],
+        custom_objects=[],
+        confirm=False,
+    )
+    assert result.status == "existing"
+    assert result.stage_ids == {"new": "s-0", "review": "s-1", "won": "s-2"}
+
+    def respond_conflict(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [_provider_pipeline(["0.1", "0.5", "0.9"])]})
+
+    (conflict,) = await destination(respond_conflict).reconcile_resources(
+        credentials(),
+        pipelines=[_pipeline_definition_with_probabilities()],
+        custom_objects=[],
+        confirm=False,
+    )
+    assert conflict.status == "conflict"
+
+
+async def test_reconcile_resources_confirm_creates_pipeline_with_provided_probabilities() -> None:
+    created: list[dict[str, object]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"results": []})
+        payload = body(request)
+        created.append(payload)
+        return httpx.Response(
+            201,
+            json={
+                "id": "p-9",
+                "label": payload["label"],
+                "stages": [
+                    {"id": f"s-{index}", "label": stage["label"]}  # type: ignore[index]
+                    for index, stage in enumerate(payload["stages"])  # type: ignore[arg-type]
+                ],
+            },
+        )
+
+    (result,) = await destination(respond).reconcile_resources(
+        credentials(),
+        pipelines=[_pipeline_definition_with_probabilities()],
+        custom_objects=[],
+        confirm=True,
+    )
+    assert result.status == "created"
+    stages = created[0]["stages"]
+    assert isinstance(stages, list)
+    assert [stage["metadata"]["probability"] for stage in stages] == ["0.1", "0.4", "0.9"]  # type: ignore[index]
+
+
+def _custom_object_properties() -> list[CustomObjectProperty]:
+    return [
+        CustomObjectProperty(
+            source_field="OrderNumber",
+            internal_name="order_number",
+            label="Order number",
+            required=True,
+            unique=True,
+            searchable=True,
+        ),
+        CustomObjectProperty(
+            source_field="IsPriority",
+            internal_name="is_priority",
+            label="Priority",
+            source_type="bool",
+        ),
+    ]
+
+
+def _custom_object_definition_with_properties() -> CustomObjectDefinition:
+    return CustomObjectDefinition(
+        key="orders",
+        source_object="Order",
+        internal_name="orders",
+        singular_label="Order",
+        plural_label="Orders",
+        primary_display_property="order_number",
+        associated_objects=["CONTACT"],
+        properties=_custom_object_properties(),
+    )
+
+
+def test_custom_object_schema_payload_includes_provided_properties() -> None:
+    payload = _custom_object_schema_payload(_custom_object_definition_with_properties())
+    properties = payload["properties"]
+    assert isinstance(properties, list)
+    # The provided list already carries the primary display property, so no
+    # synthetic duplicate is added.
+    assert [prop["name"] for prop in properties] == ["order_number", "is_priority"]
+    primary, priority = properties
+    assert primary["label"] == "Order number"
+    assert primary["type"] == "string"
+    assert primary["fieldType"] == "text"
+    assert primary["hasUniqueValue"] is True
+    assert primary["displayOrder"] == 0
+    assert primary["description"] == "Migrated from OrderNumber with Ferry."
+    assert priority["type"] == "bool"
+    assert priority["fieldType"] == "booleancheckbox"
+    assert priority["hasUniqueValue"] is False
+    assert priority["displayOrder"] == 1
+    assert [option["value"] for option in priority["options"]] == ["true", "false"]
+    assert payload["requiredProperties"] == ["order_number"]
+    assert payload["searchableProperties"] == ["order_number"]
+
+
+def test_custom_object_schema_payload_synthesizes_missing_primary_display_property() -> None:
+    definition = CustomObjectDefinition(
+        key="orders",
+        source_object="Order",
+        internal_name="orders",
+        singular_label="Order",
+        plural_label="Orders",
+        primary_display_property="order_number",
+        properties=[
+            CustomObjectProperty(source_field="Status", internal_name="status", label="Status"),
+        ],
+    )
+    payload = _custom_object_schema_payload(definition)
+    properties = payload["properties"]
+    assert isinstance(properties, list)
+    assert [prop["name"] for prop in properties] == ["order_number", "status"]
+    synthetic, status = properties
+    assert synthetic["label"] == "Order Number"
+    assert synthetic["type"] == "string"
+    assert synthetic["hasUniqueValue"] is False
+    assert synthetic["displayOrder"] == 0
+    assert status["displayOrder"] == 1
+    assert payload["requiredProperties"] == []
+    assert payload["searchableProperties"] == []
+
+
+def _provider_custom_schema() -> dict[str, object]:
+    return {
+        "objectTypeId": "2-77",
+        "name": "orders",
+        "labels": {"singular": "Order", "plural": "Orders"},
+        "primaryDisplayProperty": "order_number",
+        "properties": [
+            {"name": "order_number", "type": "string", "hasUniqueValue": True},
+            {"name": "is_priority", "type": "bool"},
+        ],
+        "associatedObjects": ["CONTACT"],
+    }
+
+
+def test_custom_object_compatibility_checks_provided_properties() -> None:
+    definition = _custom_object_definition_with_properties()
+    assert _custom_object_schema_is_compatible(definition, _provider_custom_schema())
+
+    missing = _provider_custom_schema()
+    missing["properties"] = [{"name": "order_number", "type": "string", "hasUniqueValue": True}]
+    assert not _custom_object_schema_is_compatible(definition, missing)
+
+    type_mismatch = _provider_custom_schema()
+    type_mismatch["properties"] = [
+        {"name": "order_number", "type": "string", "hasUniqueValue": True},
+        {"name": "is_priority", "type": "string"},
+    ]
+    assert not _custom_object_schema_is_compatible(definition, type_mismatch)
+
+    not_unique = _provider_custom_schema()
+    not_unique["properties"] = [
+        {"name": "order_number", "type": "string"},
+        {"name": "is_priority", "type": "bool"},
+    ]
+    assert not _custom_object_schema_is_compatible(definition, not_unique)
+
+
+def test_custom_object_compatibility_without_provided_properties_checks_primary_name() -> None:
+    # Without provided properties only the primary display property's presence
+    # is verified (previous behavior preserved) — no type requirements.
+    definition = _custom_object_definition()
+    minimal = {
+        "labels": {"singular": "Order", "plural": "Orders"},
+        "primaryDisplayProperty": "order_number",
+        "properties": [{"name": "order_number"}],
+        "associatedObjects": ["CONTACT"],
+    }
+    assert _custom_object_schema_is_compatible(definition, minimal)
+    absent = dict(minimal)
+    absent["properties"] = [{"name": "something_else"}]
+    assert not _custom_object_schema_is_compatible(definition, absent)
+
+
+async def test_reconcile_resources_existing_custom_object_with_properties() -> None:
+    schema = _provider_custom_schema()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/crm/v3/schemas":
+            return httpx.Response(200, json={"results": [schema]})
+        if request.url.path == "/crm/v3/schemas/2-77":
+            return httpx.Response(200, json=schema)
+        raise AssertionError(f"unexpected request {request.url.path}")
+
+    (result,) = await destination(respond).reconcile_resources(
+        credentials(),
+        pipelines=[],
+        custom_objects=[_custom_object_definition_with_properties()],
+        confirm=False,
+    )
+    assert result.status == "existing"
+
+    incompatible = _provider_custom_schema()
+    incompatible["properties"] = [
+        {"name": "order_number", "type": "string", "hasUniqueValue": True}
+    ]
+
+    def respond_conflict(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/crm/v3/schemas":
+            return httpx.Response(200, json={"results": [incompatible]})
+        return httpx.Response(200, json=incompatible)
+
+    (conflict,) = await destination(respond_conflict).reconcile_resources(
+        credentials(),
+        pipelines=[],
+        custom_objects=[_custom_object_definition_with_properties()],
+        confirm=False,
+    )
+    assert conflict.status == "conflict"
+
+
+async def test_reconcile_resources_confirm_creates_custom_object_with_properties() -> None:
+    created: list[dict[str, object]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"results": []})
+        payload = body(request)
+        created.append(payload)
+        return httpx.Response(201, json={"objectTypeId": "2-88"})
+
+    (result,) = await destination(respond).reconcile_resources(
+        credentials(),
+        pipelines=[],
+        custom_objects=[_custom_object_definition_with_properties()],
+        confirm=True,
+    )
+    assert result.status == "created"
+    payload = created[0]
+    properties = payload["properties"]
+    assert isinstance(properties, list)
+    assert [prop["name"] for prop in properties] == ["order_number", "is_priority"]  # type: ignore[index]
+    assert payload["requiredProperties"] == ["order_number"]
+    assert payload["searchableProperties"] == ["order_number"]
 
 
 # --------------------------------------------------------------------------
