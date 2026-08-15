@@ -14,8 +14,9 @@ format:
 
 typecheck:
 	$(UV) run mypy packages/ferry-connector-sdk/src packages/ferry-migrate/src \
-		connectors/clickhouse/src connectors/csv/src connectors/markdown/src \
-		connectors/postgres/src connectors/salesforce/src connectors/sqlite/src \
+		connectors/clickhouse/src connectors/csv/src connectors/hubspot/src \
+		connectors/markdown/src connectors/postgres/src connectors/salesforce/src \
+		connectors/sqlite/src \
 		packages/ferry-connector-sdk/tests packages/ferry-migrate/tests scripts
 
 test:

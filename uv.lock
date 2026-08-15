@@ -11,6 +11,7 @@ resolution-markers = [
 members = [
     "ferry-connector-clickhouse",
     "ferry-connector-csv",
+    "ferry-connector-hubspot",
     "ferry-connector-markdown",
     "ferry-connector-postgres",
     "ferry-connector-salesforce",
@@ -238,6 +239,21 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" }]
+
+[[package]]
+name = "ferry-connector-hubspot"
+version = "0.1.0.dev0"
+source = { editable = "connectors/hubspot" }
+dependencies = [
+    { name = "ferry-connector-sdk" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "httpx", specifier = ">=0.27" },
+]
 
 [[package]]
 name = "ferry-connector-markdown"

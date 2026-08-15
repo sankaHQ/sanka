@@ -9,11 +9,11 @@ executes it with checkpoints and retries, and verifies the result. Then it's
 **done** — Ferry is for finite migrations (move from A to B and finish), not
 continuous ETL.
 
-> **Status: pre-release.** The runtime, CLI, and the developer-wedge
-> connectors below work end to end and are exercised in CI against live
-> databases, but APIs may still move and nothing is published to PyPI yet.
-> Salesforce/HubSpot connectors, the REST API, and Ferry Cloud are in
-> progress.
+> **Status: pre-release.** The runtime, CLI, and every connector below work
+> end to end — the database connectors are exercised in CI against live
+> databases, and the Salesforce/HubSpot connectors are ports of the adapters
+> running production migrations at Sanka. APIs may still move and nothing is
+> published to PyPI yet; the REST API and Ferry Cloud are in progress.
 
 ## Why Ferry?
 
@@ -117,8 +117,8 @@ computed over the unresolved spec.
 | `sqlite` | ✅ | ✅ | Keyset pagination on PK/rowid; lazy tables, upserts, schema evolution |
 | `postgres` | ✅ | ✅ | Keyset pagination + snapshot bounds on all PK types; type-promotion ladder; SQLSTATE-mapped errors |
 | `clickhouse` | — | ✅ | `ReplacingMergeTree` + identity `ORDER BY`; batch inserts; `FINAL`-guarded count verification |
-| `salesforce` | planned | planned | Port of Sanka's production migration adapters |
-| `hubspot` | planned | planned | Port of Sanka's production migration adapters |
+| `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
+| `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
 
 Connectors implement the **Apache-2.0** [`ferry-connector-sdk`](packages/ferry-connector-sdk/)
 and never import the runtime — so building (or distributing) a connector
