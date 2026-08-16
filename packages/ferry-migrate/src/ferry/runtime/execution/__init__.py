@@ -16,6 +16,7 @@ run, program, or channel id.
 """
 
 from ferry.runtime.execution.errors import EXECUTION_FAULT_CODES, ExecutionFault
+from ferry.runtime.execution.local import SqliteExecutionState
 from ferry.runtime.execution.model import (
     AttemptIdentity,
     BatchPage,
@@ -28,6 +29,27 @@ from ferry.runtime.execution.model import (
     PairStatusTotal,
     RecordWriteOutcome,
     WriteStatus,
+)
+from ferry.runtime.execution.report_codec import (
+    HEARTBEAT_FRESHNESS,
+    canonical_route_manifest,
+    dump_journal,
+    execution_heartbeat_is_recent,
+    execution_is_cancelled,
+    execution_route_high_water_marks,
+    execution_route_manifest,
+    filter_mapping_groups,
+    load_journal,
+    parse_datetime,
+    prepare_route_state,
+    report_checkpoints,
+    report_progress_marker,
+    report_route_counts,
+    report_route_failed_record_ids,
+    report_route_pending_record_ids,
+    require_matching_route_manifest,
+    route_keys_by_pair,
+    selected_route_keys,
 )
 from ferry.runtime.execution.state import (
     NULL_OBSERVER,
@@ -42,6 +64,7 @@ from ferry.runtime.execution.state import (
 
 __all__ = [
     "EXECUTION_FAULT_CODES",
+    "HEARTBEAT_FRESHNESS",
     "NULL_OBSERVER",
     "AttemptFence",
     "AttemptIdentity",
@@ -61,5 +84,24 @@ __all__ = [
     "PairStatusTotal",
     "RecordWriteOutcome",
     "SaveOutcome",
+    "SqliteExecutionState",
     "WriteStatus",
+    "canonical_route_manifest",
+    "dump_journal",
+    "execution_heartbeat_is_recent",
+    "execution_is_cancelled",
+    "execution_route_high_water_marks",
+    "execution_route_manifest",
+    "filter_mapping_groups",
+    "load_journal",
+    "parse_datetime",
+    "prepare_route_state",
+    "report_checkpoints",
+    "report_progress_marker",
+    "report_route_counts",
+    "report_route_failed_record_ids",
+    "report_route_pending_record_ids",
+    "require_matching_route_manifest",
+    "route_keys_by_pair",
+    "selected_route_keys",
 ]
