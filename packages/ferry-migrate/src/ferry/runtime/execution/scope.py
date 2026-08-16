@@ -16,11 +16,18 @@ Scope validation against a saved manifest reuses the codec contracts
 and friends); :func:`freeze_scope` composes manifest, selection, marks, and
 totals into one :class:`~ferry.runtime.execution.model.ExecutionScope`, whose
 ``scope_hash`` is the stable handle approvals bind to.
+
+:class:`ExactIdScope` is the tagged variant for the safety runbook's exact-ID
+pilot sets: instead of a frozen high-water mark, the scope enumerates the
+exact candidate ids per route (and their canonical ``candidate_hash``), and
+``run_batch`` intersects every source page with that set, refusing route
+completion until the execution ledger covers every candidate id.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from ferry.connector import (
@@ -40,11 +47,22 @@ from ferry.runtime.execution.report_codec import (
     selected_route_keys,
 )
 from ferry.runtime.execution.state import NULL_OBSERVER, ExecutionObserver
+from ferry.runtime.hashing import content_hash
 from ferry.runtime.mapping.record_mapping import (
     MappingGroup,
     mapping_group_key,
     mapping_route_manifest,
 )
+
+EXACT_CANDIDATE_HASH_MISMATCH_CODE = "FERRY_EXACT_SCOPE_CANDIDATE_HASH_MISMATCH"
+"""Refusal code when an exact candidate set no longer matches its hash.
+
+Minted by the open runtime: the workspace safety runbook's exact-ID pilot
+("an exact saved ID set and its hash") is operator procedure in production,
+so there is no production code to preserve. Deliberately absent from
+:data:`~ferry.runtime.execution.errors.EXECUTION_FAULT_CODES`, which pins the
+production taxonomy verbatim.
+"""
 
 
 def execution_routes(
@@ -213,4 +231,155 @@ async def freeze_scope(
         selected_route_keys=tuple(selected),
         route_high_water_marks=high_water_marks,
         route_totals=route_totals,
+    )
+
+
+def exact_candidate_hash(candidate_ids_by_route: Mapping[str, Iterable[str]]) -> str:
+    """Canonical content hash of an exact candidate-id set.
+
+    Ids are string-coerced, stripped, deduplicated, and sorted per route, and
+    route keys sort inside the canonical JSON form, so the same logical
+    candidate set always yields the same hash regardless of construction
+    order — the runbook's saved-ID-set hash, the stable handle an approval
+    binds to.
+    """
+
+    return content_hash(
+        {
+            "candidateIdsByRoute": {
+                str(route_key): sorted(
+                    {
+                        str(candidate_id).strip()
+                        for candidate_id in candidate_ids
+                        if str(candidate_id).strip()
+                    }
+                )
+                for route_key, candidate_ids in candidate_ids_by_route.items()
+            }
+        }
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExactIdScope(ExecutionScope):
+    """The safety runbook's exact-ID pilot scope — a tagged scope variant.
+
+    ``candidate_ids_by_route`` enumerates, per selected route, exactly the
+    source record ids the execution may touch (canonical deduplicated sorted
+    tuples); ``candidate_hash`` is their canonical content hash — the
+    read-back gate an approval pins, verified again before any batch runs.
+    ``route_totals`` carries ``len(candidate_ids)`` per route, so anything
+    reconciling against ``scope.route_totals`` checks the runbook identity
+    (created + updated + skipped + failed = candidate count) against the
+    exact candidate count with no extra wiring. High-water marks stay empty:
+    the candidate set itself is the bound.
+
+    Under an exact scope, :func:`~ferry.runtime.execution.routes.run_batch`
+    intersects every source page with the candidate set and refuses to
+    complete a route until the execution ledger holds a terminal result for
+    every candidate id.
+    """
+
+    candidate_ids_by_route: Mapping[str, tuple[str, ...]]
+    candidate_hash: str
+
+    def verify_candidate_hash(self) -> None:
+        """Refuse when the candidate set drifted from its approved hash."""
+
+        computed = exact_candidate_hash(self.candidate_ids_by_route)
+        if computed != self.candidate_hash:
+            raise ExecutionFault(
+                "The exact-ID candidate set does not match its approved candidate hash.",
+                code=EXACT_CANDIDATE_HASH_MISMATCH_CODE,
+                details={
+                    "candidateHash": self.candidate_hash,
+                    "computedCandidateHash": computed,
+                },
+            )
+
+
+def exact_id_scope(
+    *,
+    groups: list[MappingGroup],
+    candidate_ids_by_route: Mapping[str, Iterable[str]],
+    requested_route_keys: Any | None = None,
+    expected_route_manifest: Any | None = None,
+    expected_candidate_hash: str | None = None,
+) -> ExactIdScope:
+    """Freeze the exact-ID pilot scope one execution is bound to.
+
+    The manifest comes from the current mapping groups, validated against
+    ``expected_route_manifest`` when a saved one is provided — exactly as
+    :func:`freeze_scope` validates it. The selection defaults to the
+    candidate routes and must name exactly them: a selected route without
+    candidate ids, or candidate ids for an unselected route, refuses with
+    ``FERRY_EXECUTION_ROUTE_INVALID`` — an exact scope enumerates everything
+    it may touch, nothing less and nothing more. Candidate ids are
+    canonicalized (string-coerced, stripped, deduplicated, sorted; an empty
+    set is legal and completes its route without a read), and the canonical
+    hash must equal ``expected_candidate_hash`` when the caller reads one
+    back from an approval record.
+    """
+
+    route_manifest = (
+        require_matching_route_manifest(groups, expected_route_manifest)
+        if expected_route_manifest is not None
+        else canonical_route_manifest(mapping_route_manifest(groups))
+    )
+    candidates: dict[str, tuple[str, ...]] = {}
+    for route_key, candidate_ids in candidate_ids_by_route.items():
+        if isinstance(candidate_ids, str | bytes):
+            raise ExecutionFault(
+                "Exact-ID candidates must be a collection of ids, not a single string.",
+                code="FERRY_EXECUTION_ROUTE_INVALID",
+                details={"routeKey": str(route_key)},
+            )
+        candidates[str(route_key)] = tuple(
+            sorted(
+                {
+                    str(candidate_id).strip()
+                    for candidate_id in candidate_ids
+                    if str(candidate_id).strip()
+                }
+            )
+        )
+    if not candidates:
+        raise ExecutionFault(
+            "An exact-ID scope requires at least one candidate route.",
+            code="FERRY_EXECUTION_ROUTE_INVALID",
+        )
+    selected = selected_route_keys(
+        route_manifest,
+        list(candidates) if requested_route_keys is None else requested_route_keys,
+    )
+    routes_without_candidates = [route_key for route_key in selected if route_key not in candidates]
+    unselected_candidates = sorted(set(candidates).difference(selected))
+    if routes_without_candidates or unselected_candidates:
+        details: dict[str, Any] = {}
+        if routes_without_candidates:
+            details["routeKeysWithoutCandidates"] = routes_without_candidates
+        if unselected_candidates:
+            details["unselectedCandidateRouteKeys"] = unselected_candidates
+        raise ExecutionFault(
+            "An exact-ID scope must enumerate candidate ids for exactly its selected routes.",
+            code="FERRY_EXECUTION_ROUTE_INVALID",
+            details=details,
+        )
+    candidate_hash = exact_candidate_hash(candidates)
+    if expected_candidate_hash is not None and expected_candidate_hash != candidate_hash:
+        raise ExecutionFault(
+            "The exact-ID candidate set does not match its approved candidate hash.",
+            code=EXACT_CANDIDATE_HASH_MISMATCH_CODE,
+            details={
+                "expectedCandidateHash": expected_candidate_hash,
+                "candidateHash": candidate_hash,
+            },
+        )
+    return ExactIdScope(
+        route_manifest=tuple(route_manifest),
+        selected_route_keys=tuple(selected),
+        route_high_water_marks={},
+        route_totals={route_key: len(candidates[route_key]) for route_key in selected},
+        candidate_ids_by_route=candidates,
+        candidate_hash=candidate_hash,
     )

@@ -1,12 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The ``ferry`` CLI: plan / apply / verify / status, plus the
+"""The ``ferry`` CLI: plan / validate / apply / verify / status, plus the
 ``ferry migrate SRC DST`` shorthand.
 
 Spec-driven flow (migration-as-code)::
 
-    ferry plan   -f ferry.yaml
-    ferry apply  -f ferry.yaml
-    ferry verify -f ferry.yaml
+    ferry plan     -f ferry.yaml
+    ferry validate -f ferry.yaml
+    ferry apply    -f ferry.yaml
+    ferry verify   -f ferry.yaml
+
+``validate`` is write-free by construction: it samples live source records
+through the reviewed plan and reports rejects without ever resolving the
+destination connector, exiting non-zero when invalid records exist.
 
 Shorthand::
 
@@ -20,11 +25,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from ferry.runtime.__about__ import __version__
 from ferry.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
+from ferry.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
 from ferry.runtime.planner import MigrationPlan
 from ferry.runtime.registry import ConnectorRegistry, UnknownConnectorError
 from ferry.runtime.spec import EndpointSpec, MigrationSpec, SpecError
@@ -63,6 +71,26 @@ def _build_parser() -> argparse.ArgumentParser:
     plan = commands.add_parser("plan", help="inspect source/target and produce a reviewable plan")
     common(plan)
     plan.set_defaults(handler=_cmd_plan)
+
+    validate = commands.add_parser(
+        "validate",
+        help="validate sampled source records against the plan without writing",
+        description="Validate sampled source records against the plan without writing.",
+    )
+    common(validate)
+    validate.add_argument(
+        "--sample",
+        type=int,
+        default=DEFAULT_VALIDATION_SAMPLE_SIZE,
+        help="records sampled per route",
+    )
+    validate.add_argument(
+        "--full", action="store_true", help="validate every source record, not a sample"
+    )
+    validate.add_argument(
+        "--json", action="store_true", help="print the raw validation payload as JSON"
+    )
+    validate.set_defaults(handler=_cmd_validate)
 
     apply_ = commands.add_parser("apply", help="execute the reviewed plan (resumable)")
     common(apply_)
@@ -107,6 +135,21 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
     plan = await engine.plan(run_id)
     _print_plan(run_id, plan)
     return 0
+
+
+async def _cmd_validate(args: argparse.Namespace) -> int:
+    spec = _load_spec(args.file)
+    engine = _engine(args.state)
+    run_id = engine.create(spec)
+    run = engine.store.get_run(run_id)
+    if run.plan_json is None:
+        raise ExecutionError("no plan for this spec yet; run `ferry plan` first")
+    payload = await engine.validate(run_id, sample_size=args.sample, full=args.full)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        _print_validation(run_id, payload)
+    return 1 if _validation_invalid(payload) else 0
 
 
 async def _cmd_apply(args: argparse.Namespace) -> int:
@@ -207,6 +250,34 @@ def _print_plan(run_id: str, plan: MigrationPlan) -> None:
     print()
     print(f"ready: {plan.ready:.0%}")
     print(f"plan hash: {plan.plan_hash}")
+
+
+def _validation_invalid(payload: dict[str, Any]) -> bool:
+    return any(int(row.get("invalid") or 0) > 0 for row in payload.get("objects") or [])
+
+
+def _print_validation(run_id: str, payload: dict[str, Any]) -> None:
+    rows = payload.get("objects") or []
+    verdict = "FAILED" if _validation_invalid(payload) else "OK"
+    print(f"run {run_id}: validation {verdict} (write-free)")
+    for row in rows:
+        marker = "INVALID" if int(row.get("invalid") or 0) > 0 else "ok"
+        print(
+            f"  {row['sourceObject']} -> {row['destinationObject']}:"
+            f" sampled={row['sampled']} valid={row['valid']} invalid={row['invalid']}  [{marker}]"
+        )
+        for reason in row.get("invalidReasons") or []:
+            fields = (
+                f"  ({reason['sourceField']} -> {reason['targetField']})"
+                if reason.get("sourceField") and reason.get("targetField")
+                else ""
+            )
+            print(f"    - {reason['count']}x {reason['code']}: {reason['message']}{fields}")
+    warnings = payload.get("warnings") or []
+    if warnings:
+        print("warnings:")
+        for warning in warnings:
+            print(f"  - {warning}")
 
 
 def _print_verify(report: VerifyReport) -> None:

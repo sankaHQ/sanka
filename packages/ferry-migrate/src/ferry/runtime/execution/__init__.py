@@ -69,12 +69,17 @@ from ferry.runtime.execution.report_codec import (
     selected_route_keys,
 )
 from ferry.runtime.execution.routes import (
+    EXACT_SCOPE_COVERAGE_WARNING,
     OnMissingIdentity,
     WritePolicies,
     WriteRetry,
     run_batch,
 )
 from ferry.runtime.execution.scope import (
+    EXACT_CANDIDATE_HASH_MISMATCH_CODE,
+    ExactIdScope,
+    exact_candidate_hash,
+    exact_id_scope,
     execution_routes,
     freeze_route_high_water_marks,
     freeze_scope,
@@ -90,14 +95,29 @@ from ferry.runtime.execution.state import (
     ExecutionObserver,
     SaveOutcome,
 )
+from ferry.runtime.execution.validate import (
+    DEFAULT_VALIDATION_SAMPLE_SIZE,
+    MAX_VALIDATION_REJECTS,
+    MISSING_IDENTITY_CODE,
+    validate_routes,
+    validation_reason,
+    validation_record_id,
+    validation_rejection,
+    validation_rejects_truncated_warning,
+)
 
 __all__ = [
     "BATCH_SAFETY_LIMIT_MESSAGE",
     "DEFAULT_MAX_BATCHES",
     "DEFAULT_PAUSE_SECONDS",
+    "DEFAULT_VALIDATION_SAMPLE_SIZE",
+    "EXACT_CANDIDATE_HASH_MISMATCH_CODE",
+    "EXACT_SCOPE_COVERAGE_WARNING",
     "EXECUTION_FAULT_CODES",
     "FROZEN_TOTAL_SHORTFALL_WARNING",
     "HEARTBEAT_FRESHNESS",
+    "MAX_VALIDATION_REJECTS",
+    "MISSING_IDENTITY_CODE",
     "NULL_OBSERVER",
     "STALLED_NO_PROGRESS_WARNING",
     "AttemptFence",
@@ -106,6 +126,7 @@ __all__ = [
     "BatchStep",
     "ClaimOutcome",
     "ContinuousExecutor",
+    "ExactIdScope",
     "ExecutionFault",
     "ExecutionHost",
     "ExecutionJournal",
@@ -130,6 +151,8 @@ __all__ = [
     "canonical_route_manifest",
     "dump_journal",
     "durable_route_result_state",
+    "exact_candidate_hash",
+    "exact_id_scope",
     "execution_heartbeat_is_recent",
     "execution_is_cancelled",
     "execution_route_high_water_marks",
@@ -156,4 +179,9 @@ __all__ = [
     "route_keys_by_pair",
     "run_batch",
     "selected_route_keys",
+    "validate_routes",
+    "validation_reason",
+    "validation_record_id",
+    "validation_rejection",
+    "validation_rejects_truncated_warning",
 ]
