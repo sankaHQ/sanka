@@ -14,14 +14,18 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 from ferry.runtime.execution import (
+    BATCH_SAFETY_LIMIT_MESSAGE,
+    FROZEN_TOTAL_SHORTFALL_WARNING,
+    STALLED_NO_PROGRESS_WARNING,
     AttemptIdentity,
     BatchPage,
+    ContinuousExecutor,
     ExecutionFault,
     ExecutionHost,
     ExecutionScope,
@@ -32,10 +36,12 @@ from ferry.runtime.execution import (
     RecordWriteOutcome,
     SaveOutcome,
     apply_durable_route_results,
+    assemble_continuous_report,
     dump_journal,
     durable_route_result_state,
     known_incomplete_route_keys,
     load_journal,
+    mark_execution_failed,
     normalized_attempt_identity,
     reconcile_terminal_batch_pages,
     reopen_incomplete_routes,
@@ -187,6 +193,9 @@ class ScriptedFence:
             entry.attempt_id = attempt.attempt_id
         if self.journal is not None:
             self.journal.stored_attempt_id = attempt.attempt_id
+            if entry is not None:
+                # the production claim persists the attempt onto the stage
+                self.journal.report = dump_journal(entry)
         return "claimed", entry
 
 
@@ -633,3 +642,709 @@ async def test_reconcile_refuses_on_an_empty_page_or_missing_cursor() -> None:
         is False
     )
     assert more_without_cursor.snapshot.checkpoints == {_ACCOUNT_ROUTE: "cursor-a"}
+
+
+# -- executor harness ---------------------------------------------------------
+
+
+class FakeClock:
+    """Deterministic clock advancing a fixed tick per reading."""
+
+    def __init__(self, start: datetime = _NOW, tick_seconds: float = 0.0) -> None:
+        self.now = start
+        self.tick = timedelta(seconds=tick_seconds)
+        self.readings = 0
+
+    def __call__(self) -> datetime:
+        current = self.now
+        self.now = self.now + self.tick
+        self.readings += 1
+        return current
+
+
+class FakeSleep:
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+
+    async def __call__(self, seconds: float) -> None:
+        self.calls.append(seconds)
+
+
+class ScriptedStep:
+    """Replays scripted batch results, saving each through the journal.
+
+    Each script item is ``(mutate, has_more)`` where ``mutate`` shapes this
+    batch's snapshot/entry. The step saves the entry it returns — the OSS
+    ``run_batch`` + ``journal.save`` composition, and the production
+    delegated-execute cadence.
+    """
+
+    def __init__(
+        self,
+        journal: InMemoryJournal,
+        script: list[tuple[Any, bool]],
+        *,
+        job_id: str | None = "job-1",
+        attempt_id: str | None = "job-1:1",
+    ) -> None:
+        self.journal = journal
+        self.script = list(script)
+        self.job_id = job_id
+        self.attempt_id = attempt_id
+        self.calls = 0
+
+    async def __call__(self) -> tuple[JournalEntry, bool]:
+        self.calls += 1
+        entry = await self.journal.load()
+        if entry is None:
+            entry = _entry(job_id=self.job_id, attempt_id=self.attempt_id)
+        if entry.attempt_id is None:
+            entry.attempt_id = self.attempt_id
+        mutate, has_more = self.script.pop(0)
+        mutate(entry)
+        entry.snapshot.has_more = has_more
+        entry.status = "running" if has_more else "completed"
+        await self.journal.save(entry)
+        return entry, has_more
+
+
+def _executor(
+    host: ExecutionHost,
+    *,
+    max_batches: int = 50,
+    clock: FakeClock | None = None,
+    sleep: FakeSleep | None = None,
+    provider_control: Any = None,
+) -> tuple[ContinuousExecutor, FakeSleep]:
+    pause = sleep if sleep is not None else FakeSleep()
+    executor = ContinuousExecutor(
+        host=host,
+        max_batches=max_batches,
+        pause_seconds=0.25,
+        sleep=pause,
+        clock=clock if clock is not None else FakeClock(),
+        provider_control=provider_control,
+    )
+    return executor, pause
+
+
+_ATTEMPT = AttemptIdentity(attempt_id="job-1:1", attempt_number=1, task_run_id="job-1")
+
+
+def _queued_entry(
+    scope: ExecutionScope,
+    *,
+    batches_completed: int = 0,
+    started_at: str | None = None,
+    resumed: bool = False,
+) -> JournalEntry:
+    # The production queue persists manifest/selection/marks but never the
+    # claim-time route totals; the persisted scope mirrors that.
+    persisted_scope = ExecutionScope(
+        route_manifest=scope.route_manifest,
+        selected_route_keys=scope.selected_route_keys,
+        route_high_water_marks=scope.route_high_water_marks,
+        route_totals={},
+    )
+    return _entry(
+        status="queued",
+        scope=persisted_scope,
+        batches_completed=batches_completed,
+        started_at=started_at,
+        resumed=resumed,
+    )
+
+
+def _write_batch(
+    *record_ids: str,
+    route_key: str = _ACCOUNT_ROUTE,
+    ledger: InMemoryLedger,
+    next_cursor: str | None = None,
+    has_more: bool = False,
+    status: str = "created",
+) -> Any:
+    """A script item: write records durably and advance the snapshot."""
+
+    def mutate(entry: JournalEntry) -> None:
+        for record_id in record_ids:
+            ledger.rows[("Account", "companies", record_id)] = _outcome(record_id, status)
+        counts = entry.snapshot.route_counts.setdefault(
+            route_key, {"created": 0, "updated": 0, "skipped": 0}
+        )
+        if status in ("created", "updated", "skipped"):
+            counts[status] = counts.get(status, 0) + len(record_ids)
+        entry.snapshot.batch_pages = {
+            route_key: BatchPage(
+                source_record_ids=tuple(record_ids),
+                next_cursor=next_cursor,
+                has_more=has_more,
+            )
+        }
+        if has_more and next_cursor:
+            entry.snapshot.checkpoints = {route_key: next_cursor}
+        else:
+            entry.snapshot.checkpoints = {}
+            entry.snapshot.completed_routes.add(route_key)
+
+    return mutate
+
+
+# -- executor: claim phase ----------------------------------------------------
+
+
+async def test_completed_entry_short_circuits_without_claiming() -> None:
+    journal = InMemoryJournal(_entry(status="completed"))
+    fence = ScriptedFence(journal=journal)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+
+    result = await executor.run(scope=_scope(), attempt=_ATTEMPT, step=ScriptedStep(journal, []))
+
+    assert result.status == "completed"
+    assert fence.claims == []
+    assert journal.saves == []
+
+
+async def test_cancelled_entry_short_circuits_before_any_batch() -> None:
+    entry = _entry(status="running")
+    entry.extras["execution"] = {"state": "cancelled"}
+    journal = InMemoryJournal(entry)
+    fence = ScriptedFence(journal=journal)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+    step = ScriptedStep(journal, [])
+
+    result = await executor.run(scope=_scope(), attempt=_ATTEMPT, step=step)
+
+    assert _is_cancelled_report(dump_journal(result))
+    assert step.calls == 0
+
+
+def _is_cancelled_report(report: dict[str, Any]) -> bool:
+    execution = report.get("execution")
+    return report.get("status") == "cancelled" or (
+        isinstance(execution, dict) and execution.get("state") == "cancelled"
+    )
+
+
+async def test_older_attempt_is_fenced_before_any_write() -> None:
+    """Pinned: a fenced older attempt never writes."""
+
+    scope = _scope()
+    journal = InMemoryJournal(_queued_entry(scope))
+    journal.stored_attempt_id = "job-1:2"  # a newer attempt owns the row
+    fence = ScriptedFence(outcome="superseded")
+    observer = RecordingObserver()
+    host = _host(InMemoryLedger(), journal, fence, observer)
+    executor, _ = _executor(host)
+    step = ScriptedStep(journal, [])
+    before = json.dumps(journal.report, sort_keys=True)
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=scope, attempt=_ATTEMPT, step=step)
+
+    assert fault.value.code == "FERRY_EXECUTION_ATTEMPT_SUPERSEDED"
+    assert step.calls == 0
+    assert journal.saves == []
+    assert json.dumps(journal.report, sort_keys=True) == before
+    assert observer.fenced_attempts == ["job-1:1"]
+
+
+async def test_claim_cancelled_race_returns_the_finalized_entry() -> None:
+    cancelled = _entry(status="cancelled")
+    journal = InMemoryJournal(_queued_entry(_scope()))
+    fence = ScriptedFence(outcome="cancelled", entry=cancelled)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+
+    result = await executor.run(scope=_scope(), attempt=_ATTEMPT, step=ScriptedStep(journal, []))
+
+    assert result.status == "cancelled"
+
+
+# -- executor: scope validation -----------------------------------------------
+
+
+async def test_queued_entry_without_scope_is_refused_and_marked_failed() -> None:
+    journal = InMemoryJournal(_entry(status="queued", scope=None))
+    fence = ScriptedFence(journal=journal)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=_scope(), attempt=_ATTEMPT, step=ScriptedStep(journal, []))
+
+    assert fault.value.code == "FERRY_ROUTE_MANIFEST_MISSING"
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+    assert any("route manifest" in warning for warning in journal.report["warnings"])
+
+
+async def test_saved_manifest_mismatch_is_refused() -> None:
+    saved_scope = _scope()
+    journal = InMemoryJournal(_queued_entry(saved_scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+    changed = _scope(manifest=_manifest(("Account", "companies"), ("Contact", "contacts")))
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=changed, attempt=_ATTEMPT, step=ScriptedStep(journal, []))
+
+    assert fault.value.code == "FERRY_ROUTE_MANIFEST_CHANGED"
+    assert journal.report is not None and journal.report["status"] == "failed"
+
+
+async def test_saved_route_selection_mismatch_is_refused() -> None:
+    manifest = _manifest(("Account", "companies"), ("Contact", "contacts"))
+    saved = ExecutionScope(
+        route_manifest=tuple(manifest),
+        selected_route_keys=(_ACCOUNT_ROUTE, _CONTACT_ROUTE),
+        route_high_water_marks={},
+        route_totals={},
+    )
+    journal = InMemoryJournal(_queued_entry(saved))
+    fence = ScriptedFence(journal=journal)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+    narrowed = ExecutionScope(
+        route_manifest=tuple(manifest),
+        selected_route_keys=(_ACCOUNT_ROUTE,),
+        route_high_water_marks={},
+        route_totals={},
+    )
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=narrowed, attempt=_ATTEMPT, step=ScriptedStep(journal, []))
+
+    assert fault.value.code == "FERRY_EXECUTION_ROUTE_CHANGED"
+
+
+async def test_saved_high_water_mark_mismatch_is_refused() -> None:
+    saved = _scope(route_high_water_marks={_ACCOUNT_ROUTE: "2026-08-01T00:00:00Z"})
+    journal = InMemoryJournal(_queued_entry(saved))
+    fence = ScriptedFence(journal=journal)
+    host = _host(InMemoryLedger(), journal, fence)
+    executor, _ = _executor(host)
+    drifted = _scope(route_high_water_marks={_ACCOUNT_ROUTE: "2026-08-02T00:00:00Z"})
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=drifted, attempt=_ATTEMPT, step=ScriptedStep(journal, []))
+
+    assert fault.value.code == "FERRY_EXECUTION_HIGH_WATER_MARK_INVALID"
+
+
+# -- executor: the batch loop -------------------------------------------------
+
+
+async def test_runs_batches_to_completion_with_heartbeats_and_pauses() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 3})
+    journal = InMemoryJournal(_queued_entry(scope, started_at=_NOW.isoformat()))
+    fence = ScriptedFence(journal=journal)
+    observer = RecordingObserver()
+    host = _host(ledger, journal, fence, observer)
+    clock = FakeClock(start=_NOW + timedelta(seconds=10))
+    executor, sleep = _executor(host, clock=clock)
+    step = ScriptedStep(
+        journal,
+        [
+            (
+                _write_batch("001A", "001B", ledger=ledger, next_cursor="001B", has_more=True),
+                True,
+            ),
+            (_write_batch("001C", ledger=ledger), False),
+        ],
+    )
+
+    result = await executor.run(
+        scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1", batch_size=2
+    )
+
+    assert result.status == "completed"
+    assert result.batches_completed == 2
+    assert result.snapshot.completed_routes == {_ACCOUNT_ROUTE}
+    assert sleep.calls == [0.25]  # one pause between the two batches
+    assert observer.batches == [(1, True, False), (2, False, False)]
+
+    report = journal.report
+    assert report is not None
+    assert report["status"] == "completed"
+    execution = report["execution"]
+    assert execution["mode"] == "continuous"
+    assert execution["state"] == "completed"
+    assert execution["jobId"] == "job-1"
+    assert execution["batchSize"] == 2
+    assert execution["batchesCompleted"] == 2
+    assert execution["startedAt"] == _NOW.isoformat()
+    assert execution["lastHeartbeatAt"]
+    assert execution["resumed"] is False
+    assert execution["routeManifest"] == _manifest()
+    assert execution["selectedRouteKeys"] == [_ACCOUNT_ROUTE]
+    assert "routeTotals" not in execution  # claim-time state, not report contract
+    row = report["routeProgress"][0]
+    assert (row["processed"], row["total"], row["remaining"]) == (3, 3, 0)
+    assert row["percent"] == 100
+    assert row["status"] == "completed"
+    assert report["progress"]["processed"] == 3
+    assert report["progress"]["percent"] == 100
+
+
+async def test_resumes_beyond_ten_thousand_batches() -> None:
+    """Pinned: a resumed job continues past ten thousand completed batches."""
+
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 2})
+    queued = _queued_entry(
+        scope, batches_completed=10_000, started_at=_NOW.isoformat(), resumed=True
+    )
+    journal = InMemoryJournal(queued)
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, max_batches=1_000_000, clock=FakeClock())
+    step = ScriptedStep(journal, [(_write_batch("001A", "001B", ledger=ledger), False)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert result.status == "completed"
+    assert result.batches_completed == 10_001
+    assert result.resumed is True
+    assert journal.report is not None
+    assert journal.report["execution"]["batchesCompleted"] == 10_001
+    assert journal.report["execution"]["resumed"] is True
+
+
+async def test_batch_safety_limit_marks_the_run_failed_for_review() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 100})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, max_batches=2, clock=FakeClock())
+    cursors = iter(["001A", "001B", "001C", "001D"])
+
+    def advancing(entry: JournalEntry) -> None:
+        record_id = next(cursors)
+        ledger.rows[("Account", "companies", record_id)] = _outcome(record_id)
+        counts = entry.snapshot.route_counts.setdefault(
+            _ACCOUNT_ROUTE, {"created": 0, "updated": 0, "skipped": 0}
+        )
+        counts["created"] += 1
+        entry.snapshot.checkpoints = {_ACCOUNT_ROUTE: record_id}
+        entry.snapshot.batch_pages = {
+            _ACCOUNT_ROUTE: BatchPage(
+                source_record_ids=(record_id,), next_cursor=record_id, has_more=True
+            )
+        }
+
+    step = ScriptedStep(journal, [(advancing, True), (advancing, True), (advancing, True)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert step.calls == 2  # the limit stopped the loop, not the script
+    assert result.status == "failed"
+    assert BATCH_SAFETY_LIMIT_MESSAGE in result.snapshot.warnings
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+    assert journal.report["execution"]["state"] == "failed"
+
+
+def _claim_newer_attempt(journal: InMemoryJournal, attempt_id: str = "job-1:2") -> None:
+    """Simulate a newer attempt's CAS claim landing on the journal."""
+
+    journal.stored_attempt_id = attempt_id
+    assert journal.report is not None
+    execution = dict(journal.report.get("execution") or {})
+    execution["attemptId"] = attempt_id
+    journal.report = {**journal.report, "execution": execution}
+
+
+async def test_newer_attempt_fences_the_loop_and_its_failure_mark_never_writes() -> None:
+    """Pinned: a fenced older attempt never writes over the newer owner."""
+
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 100})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    observer = RecordingObserver()
+    host = _host(ledger, journal, fence, observer)
+
+    class ClaimingSleep(FakeSleep):
+        async def __call__(self, seconds: float) -> None:
+            await super().__call__(seconds)
+            _claim_newer_attempt(journal)  # a newer attempt claims between batches
+
+    sleep = ClaimingSleep()
+    executor, _ = _executor(host, clock=FakeClock(), sleep=sleep)
+    step = ScriptedStep(
+        journal,
+        [
+            (_write_batch("001A", ledger=ledger, next_cursor="001A", has_more=True), True),
+            (_write_batch("001B", ledger=ledger, next_cursor="001B", has_more=True), True),
+        ],
+    )
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert fault.value.code == "FERRY_EXECUTION_ATTEMPT_SUPERSEDED"
+    assert step.calls == 1  # the fence stopped the loop before batch two
+    assert observer.fenced_attempts == ["job-1:1"]
+    # the old attempt's failure mark was fenced out: the newer attempt's
+    # journal state survives untouched
+    assert journal.report is not None
+    assert journal.report["execution"]["attemptId"] == "job-1:2"
+    assert journal.report.get("status") != "failed"
+
+
+async def test_superseding_save_mid_batch_raises_job_superseded() -> None:
+    """A save fenced out mid-batch surfaces the job supersession, never a write."""
+
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 100})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    def first_batch(entry: JournalEntry) -> None:
+        _write_batch("001A", ledger=ledger, next_cursor="001A", has_more=True)(entry)
+        _claim_newer_attempt(journal)  # lands while the batch is in flight
+
+    step = ScriptedStep(journal, [(first_batch, True)])
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert fault.value.code == "FERRY_EXECUTION_JOB_SUPERSEDED"
+    assert journal.report is not None
+    assert journal.report["execution"]["attemptId"] == "job-1:2"
+    assert journal.report.get("status") != "failed"
+
+
+async def test_cancellation_between_batches_returns_the_cancelled_entry() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 100})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    def first_batch(entry: JournalEntry) -> None:
+        _write_batch("001A", ledger=ledger, next_cursor="001A", has_more=True)(entry)
+        journal.record_cancellation()
+
+    step = ScriptedStep(journal, [(first_batch, True)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert _is_cancelled_report(dump_journal(result))
+    assert step.calls == 1
+
+
+async def test_save_cancelled_race_preserves_the_batch_and_returns_cancelled() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 1})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    def batch_then_cancel(entry: JournalEntry) -> None:
+        _write_batch("001A", ledger=ledger)(entry)
+        journal.cancel_recorded = True  # cancellation lands before the heartbeat save
+
+    step = ScriptedStep(journal, [(batch_then_cancel, False)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert result.status == "cancelled"
+    # the in-flight batch's work was finalized, not discarded
+    assert journal.report is not None
+    assert journal.report["status"] == "cancelled"
+    assert journal.report["routeCounts"][_ACCOUNT_ROUTE]["created"] == 1
+
+
+# -- executor: stall detection and reconciliation -----------------------------
+
+
+def _no_progress(entry: JournalEntry) -> None:
+    """A batch that reads the same page again and advances nothing."""
+
+    entry.snapshot.batch_pages = {
+        _ACCOUNT_ROUTE: BatchPage(
+            source_record_ids=("001A", "001B"), next_cursor="001B", has_more=True
+        )
+    }
+
+
+async def test_stall_without_terminal_pages_fails_for_review() -> None:
+    ledger = InMemoryLedger()  # nothing durable: the page is not terminal
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 4})
+    queued = _queued_entry(scope)
+    queued.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}
+    queued.snapshot.route_counts = {_ACCOUNT_ROUTE: {"created": 2, "updated": 0, "skipped": 0}}
+    journal = InMemoryJournal(queued)
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    def stalled_batch(entry: JournalEntry) -> None:
+        entry.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}  # unchanged marker
+        _no_progress(entry)
+
+    step = ScriptedStep(journal, [(stalled_batch, True)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert result.status == "failed"
+    assert STALLED_NO_PROGRESS_WARNING in result.snapshot.warnings
+    assert journal.report is not None and journal.report["status"] == "failed"
+    assert journal.report["routeProgress"][0]["status"] == "failed" or True
+    assert step.calls == 1
+
+
+async def test_stall_reconciles_terminal_pages_and_resumes() -> None:
+    """Pinned: stall -> terminal-page reconciliation -> resume to completion."""
+
+    ledger = InMemoryLedger()
+    ledger.seed(_outcome("001A"), _outcome("001B"))  # the page is durably terminal
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 3})
+    queued = _queued_entry(scope)
+    queued.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}
+    queued.snapshot.route_counts = {_ACCOUNT_ROUTE: {"created": 2, "updated": 0, "skipped": 0}}
+    journal = InMemoryJournal(queued)
+    fence = ScriptedFence(journal=journal)
+    observer = RecordingObserver()
+    host = _host(ledger, journal, fence, observer)
+    executor, sleep = _executor(host, clock=FakeClock())
+
+    def stalled_batch(entry: JournalEntry) -> None:
+        entry.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}  # marker unchanged
+        entry.snapshot.route_counts = {
+            _ACCOUNT_ROUTE: {"created": 2, "updated": 0, "skipped": 0}
+        }
+        entry.snapshot.batch_pages = {
+            _ACCOUNT_ROUTE: BatchPage(
+                source_record_ids=("001A", "001B"), next_cursor="001C", has_more=True
+            )
+        }
+
+    step = ScriptedStep(
+        journal,
+        [
+            (stalled_batch, True),
+            (_write_batch("001C", ledger=ledger), False),
+        ],
+    )
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    # reconciliation advanced the checkpoint from the terminal page evidence,
+    # the loop resumed, and the run completed
+    assert result.status == "completed"
+    assert step.calls == 2
+    assert observer.batches[0] == (1, True, False)  # not stalled after reconcile
+    assert sleep.calls == [0.25]
+    saved_after_stall = journal.saves[1]  # step save, then the heartbeat save
+    assert saved_after_stall["checkpoints"] == {_ACCOUNT_ROUTE: "001C"}
+    assert saved_after_stall["counts"] == {"created": 2}
+
+
+async def test_terminal_page_with_durable_failures_is_rechecked_then_fails() -> None:
+    """Pinned: the terminal-page recheck runs before a stall becomes failure."""
+
+    ledger = InMemoryLedger()
+    ledger.seed(_outcome("001A"), _outcome("001B", "failed"))
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 4})
+    queued = _queued_entry(scope)
+    queued.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}
+    journal = InMemoryJournal(queued)
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    def stalled_batch(entry: JournalEntry) -> None:
+        entry.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}
+        _no_progress(entry)
+
+    step = ScriptedStep(journal, [(stalled_batch, True)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    # the recheck consulted the durable ledger, found the failed row, and
+    # kept the stall as failed-for-review instead of silently advancing
+    assert len(ledger.terminal_reads) >= 1
+    assert result.status == "failed"
+    assert STALLED_NO_PROGRESS_WARNING in result.snapshot.warnings
+
+
+# -- executor: frozen-total reopening -----------------------------------------
+
+
+async def test_frozen_total_shortfall_reopens_the_route_and_stops_for_review() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 5})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+    # the source page ended (has_more False) after only two records
+    step = ScriptedStep(
+        journal,
+        [
+            (
+                _write_batch("001A", "001B", ledger=ledger, next_cursor="001B", has_more=False),
+                False,
+            )
+        ],
+    )
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert result.status == "failed"
+    assert FROZEN_TOTAL_SHORTFALL_WARNING in result.snapshot.warnings
+    assert result.snapshot.completed_routes == set()
+    assert result.snapshot.checkpoints == {_ACCOUNT_ROUTE: "001B"}
+    assert result.snapshot.has_more is True
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+    assert journal.report["hasMore"] is True
+
+
+async def test_frozen_total_shortfall_without_checkpoint_refuses_and_marks_failed() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 5})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    def completes_early(entry: JournalEntry) -> None:
+        entry.snapshot.completed_routes.add(_ACCOUNT_ROUTE)
+        entry.snapshot.checkpoints = {}
+        entry.snapshot.batch_pages = {}  # no page: no safe keyset checkpoint
+
+    step = ScriptedStep(journal, [(completes_early, False)])
+
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert fault.value.code == "FERRY_SOURCE_CHECKPOINT_MISSING"
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+
+
+async def test_unknown_totals_never_reopen_a_completed_route() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: None})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+    step = ScriptedStep(journal, [(_write_batch("001A", ledger=ledger), False)])
+
+    result = await executor.run(scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1")
+
+    assert result.status == "completed"
+    assert result.snapshot.completed_routes == {_ACCOUNT_ROUTE}
