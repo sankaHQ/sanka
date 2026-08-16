@@ -31,7 +31,9 @@ from ferry.connector import (
     Credentials,
     DestinationConnector,
     RecordPage,
+    RelationshipWrite,
     SourceConnector,
+    SupportsBatchRelationshipWrites,
     SupportsBatchWrites,
     SupportsBoundedReads,
     SupportsOwnerDirectory,
@@ -55,6 +57,8 @@ from ferry.runtime.mapping.owner_mapping import (
 from ferry.runtime.mapping.pending_relationships import (
     PendingRelationship,
     PendingRelationships,
+    pending_relationship,
+    pending_relationship_key,
     pending_relationship_source_ids,
     resolve_destination_record_ids,
     retry_pending_relationships,
@@ -525,6 +529,120 @@ async def run_batch(
                 state.destination_record_id = batch_result.destination_record_id
                 state.message = batch_result.message
 
+        # -- relationship phase ---------------------------------------------
+        relationship_batch_writer = (
+            destination if isinstance(destination, SupportsBatchRelationshipWrites) else None
+        )
+        relationship_inputs: list[RelationshipWrite] = []
+        relationship_source_by_trace: dict[str, str] = {}
+        relationship_pending_by_trace: dict[str, PendingRelationship] = {}
+        for state in record_states:
+            if state.status == "failed":
+                continue
+            destination_record_id = state.destination_record_id
+            for relationship_index, relationship in enumerate(
+                mapping_field
+                for mapping_field in route.fields
+                if mapping_field.mapping_kind == "relationship"
+            ):
+                for related_index, related_source_id in enumerate(
+                    relationship_source_ids(state.record, relationship)
+                ):
+                    parked_relationship = pending_relationship(
+                        source_record_id=state.source_record_id,
+                        destination_object=route.destination_object,
+                        destination_record_id=destination_record_id,
+                        relationship_field=relationship.target_field,
+                        related_source_object=str(relationship.source_reference_object),
+                        related_source_record_id=related_source_id,
+                        related_destination_object=str(relationship.target_reference_object),
+                        relationship_mode=(relationship.relationship_mode or "default"),
+                        association_category=relationship.association_category,
+                        association_type_id=relationship.association_type_id,
+                    )
+                    pending_key = pending_relationship_key(parked_relationship)
+                    try:
+                        if not destination_record_id:
+                            raise ExecutionFault(
+                                "Destination record id is missing.",
+                                code="FERRY_RELATIONSHIP_DESTINATION_PENDING",
+                            )
+                        related_destination_id = related_destination_ids.get(
+                            (
+                                str(relationship.source_reference_object),
+                                str(relationship.target_reference_object),
+                            ),
+                            {},
+                        ).get(related_source_id)
+                        if not related_destination_id:
+                            raise ExecutionFault(
+                                "Referenced destination record has not been written yet.",
+                                code="FERRY_RELATIONSHIP_TARGET_PENDING",
+                            )
+                        trace_id = f"{state.source_record_id}:{relationship_index}:{related_index}"
+                        relationship_write = RelationshipWrite(
+                            trace_id=trace_id,
+                            object_type=route.destination_object,
+                            record_id=destination_record_id,
+                            relationship_field=relationship.target_field,
+                            related_object_type=str(relationship.target_reference_object),
+                            related_record_id=related_destination_id,
+                            relationship_mode=(relationship.relationship_mode or "default"),
+                            association_category=relationship.association_category,
+                            association_type_id=relationship.association_type_id,
+                        )
+                        if relationship_batch_writer is not None:
+                            relationship_inputs.append(relationship_write)
+                            relationship_source_by_trace[trace_id] = state.source_record_id
+                            relationship_pending_by_trace[trace_id] = parked_relationship
+                        else:
+                            await destination.write_relationship(
+                                destination_credentials,
+                                relationship=relationship_write,
+                            )
+                    except Exception as error:
+                        state.relationship_failed = True
+                        state.pending_relationships[pending_key] = parked_relationship
+                        state.message = (
+                            f"{state.message or ''} Relationship pending: {error}"
+                        ).strip()[:_MESSAGE_LIMIT]
+
+        if relationship_batch_writer is not None and relationship_inputs:
+            try:
+                relationship_results = await relationship_batch_writer.write_relationships(
+                    destination_credentials,
+                    relationships=relationship_inputs,
+                )
+            except Exception as error:
+                relationship_results = []
+                relationship_batch_error = _failure_message(error)
+            else:
+                relationship_batch_error = "Destination association batch did not return a result."
+            relationship_results_by_trace = {
+                result.trace_id: result for result in relationship_results
+            }
+            states_by_source_id = {state.source_record_id: state for state in record_states}
+            for relationship_input in relationship_inputs:
+                relationship_result = relationship_results_by_trace.get(relationship_input.trace_id)
+                if relationship_result is not None and relationship_result.status != "failed":
+                    continue
+                state = states_by_source_id[
+                    relationship_source_by_trace[relationship_input.trace_id]
+                ]
+                state.relationship_failed = True
+                parked_relationship = relationship_pending_by_trace[relationship_input.trace_id]
+                state.pending_relationships[pending_relationship_key(parked_relationship)] = (
+                    parked_relationship
+                )
+                error_message = (
+                    relationship_result.message
+                    if relationship_result is not None
+                    else relationship_batch_error
+                )
+                state.message = (
+                    f"{state.message or ''} Relationship pending: {error_message}"
+                ).strip()[:_MESSAGE_LIMIT]
+
         # -- pending parking ------------------------------------------------
         page_source_id_set = set(page_source_ids)
         for pending_key, parked_relationship in list(current_route_pending_relationships.items()):
@@ -591,6 +709,17 @@ async def run_batch(
                 batch_failed = True
             elif not batch_failed:
                 last_terminal_cursor = source_record_id
+
+        # -- end-of-route pending retry -------------------------------------
+        if not page.has_more and current_route_pending_relationships:
+            current_route_pending_relationships = await _retry_parked_relationships(
+                host=host,
+                destination=destination,
+                destination_credentials=destination_credentials,
+                snapshot=snapshot,
+                route_key=route_key,
+                pending_relationships=current_route_pending_relationships,
+            )
 
         if batch_failed:
             if last_terminal_cursor:

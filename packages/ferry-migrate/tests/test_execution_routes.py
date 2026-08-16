@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from ferry.connector import (
+    BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
@@ -45,7 +46,13 @@ from ferry.runtime.execution import (
 )
 from ferry.runtime.execution.model import AttemptIdentity
 from ferry.runtime.execution.state import ClaimOutcome
-from ferry.runtime.mapping import MappingError, MigrationMappingField, mapping_groups
+from ferry.runtime.mapping import (
+    MappingError,
+    MigrationMappingField,
+    mapping_groups,
+    pending_relationship,
+    pending_relationship_key,
+)
 from ferry.runtime.state import TERMINAL_WRITE_STATUSES
 
 _CREDENTIALS = Credentials(provider="fake")
@@ -933,3 +940,347 @@ async def test_run_batch_fails_records_without_identity_by_default() -> None:
     assert ledger.rows[("Account", "companies", "001B")].status == "created"
     assert snapshot.route_failed_record_ids == {"Account|companies": {"missing-identity:0"}}
     assert snapshot.completed_routes == set()
+
+
+# -- relationship phase -------------------------------------------------------
+
+
+def _relationship_fields() -> list[MigrationMappingField]:
+    return [
+        MigrationMappingField(
+            source_field="Account.Name", target_object="companies", target_field="name"
+        ),
+        MigrationMappingField(
+            source_field="Account.ParentId",
+            source_reference_object="Account",
+            target_object="companies",
+            target_field="default",
+            target_reference_object="companies",
+            mapping_kind="relationship",
+            association_category="USER_DEFINED",
+            association_type_id=173,
+        ),
+    ]
+
+
+def _parked(source_record_id: str, destination_record_id: str | None) -> dict[str, Any]:
+    return pending_relationship(
+        source_record_id=source_record_id,
+        destination_object="companies",
+        destination_record_id=destination_record_id,
+        relationship_field="default",
+        related_source_object="Account",
+        related_source_record_id="001P",
+        related_destination_object="companies",
+        relationship_mode="default",
+        association_category="USER_DEFINED",
+        association_type_id=173,
+    )
+
+
+class BatchRelationshipDestination(BatchDestination):
+    """Batch relationship writer; single association writes must stay unused."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.relationship_batches: list[list[RelationshipWrite]] = []
+
+    async def write_relationship(self, *args: Any, **kwargs: Any) -> RelationshipWriteResult:
+        raise AssertionError("record-at-a-time association write must not be used")
+
+    async def write_relationships(
+        self,
+        credentials: Credentials,
+        *,
+        relationships: list[RelationshipWrite],
+    ) -> list[BatchRelationshipWriteResult]:
+        self.relationship_batches.append(list(relationships))
+        return [
+            BatchRelationshipWriteResult(trace_id=write.trace_id, status="linked")
+            for write in relationships
+        ]
+
+
+class PendingRelationshipBatchDestination(BatchRelationshipDestination):
+    async def write_relationships(
+        self,
+        credentials: Credentials,
+        *,
+        relationships: list[RelationshipWrite],
+    ) -> list[BatchRelationshipWriteResult]:
+        self.relationship_batches.append(list(relationships))
+        return [
+            BatchRelationshipWriteResult(
+                trace_id=write.trace_id,
+                status="failed",
+                message="association unavailable",
+            )
+            for write in relationships
+        ]
+
+
+class FailingRelationshipDestination(FakeDestination):
+    async def write_relationship(
+        self,
+        credentials: Credentials,
+        *,
+        relationship: RelationshipWrite,
+    ) -> RelationshipWriteResult:
+        self.relationships.append(relationship)
+        raise RuntimeError("association unavailable")
+
+
+class RelationshipOnlyDestination(FakeDestination):
+    """Association reconciliation must not read pages or write records."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.relationship_batches: list[list[RelationshipWrite]] = []
+
+    async def write_record(self, *args: Any, **kwargs: Any) -> WriteResult:
+        raise AssertionError("association reconciliation must not write scalar records")
+
+    async def write_records(self, *args: Any, **kwargs: Any) -> list[BatchWriteResult]:
+        raise AssertionError("association reconciliation must not write scalar batches")
+
+    async def write_relationships(
+        self,
+        credentials: Credentials,
+        *,
+        relationships: list[RelationshipWrite],
+    ) -> list[BatchRelationshipWriteResult]:
+        self.relationship_batches.append(list(relationships))
+        return [
+            BatchRelationshipWriteResult(trace_id=write.trace_id, status="linked")
+            for write in relationships
+        ]
+
+
+class RefusingSource(FakeSource):
+    async def read_records(self, *args: Any, **kwargs: Any) -> RecordPage:
+        raise AssertionError("association reconciliation must not read source pages")
+
+
+async def test_run_batch_links_relationship_after_resolving_destination_ids() -> None:
+    source = FakeSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = FakeDestination()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()), source, destination, host=_host(identity=identity)
+    )
+
+    assert has_more is False
+    assert destination.writes == [{"name": "Acme"}]
+    assert len(destination.relationships) == 1
+    write = destination.relationships[0]
+    assert write.trace_id == "001A:0:0"
+    assert write.object_type == "companies"
+    assert write.record_id == "dest-1"
+    assert write.relationship_field == "default"
+    assert write.related_object_type == "companies"
+    assert write.related_record_id == "dest-parent"
+    assert write.relationship_mode == "default"
+    assert write.association_category == "USER_DEFINED"
+    assert write.association_type_id == 173
+    assert identity.requests == [("Account", "companies", ("001P",))]
+    assert snapshot.completed_routes == {"Account|companies"}
+    assert snapshot.route_pending_relationships == {"Account|companies": {}}
+
+
+async def test_run_batch_links_relationship_from_shared_run_candidates() -> None:
+    source = FakeSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = FakeDestination()
+    shared = SharedIdentityCandidates({("Account", "001P", "companies"): ["dest-parent"]})
+
+    _snapshot, _has_more = await _run(
+        _routes(_relationship_fields()), source, destination, host=_host(shared=shared)
+    )
+
+    assert [write.related_record_id for write in destination.relationships] == ["dest-parent"]
+    assert shared.requests == [("Account", "companies", ("001P",))]
+
+
+async def test_run_batch_batches_relationships_and_preserves_record_checkpoint() -> None:
+    source = FakeSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = BatchRelationshipDestination()
+    ledger = InMemoryLedger()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()), source, destination, host=_host(ledger, identity=identity)
+    )
+
+    assert has_more is False
+    assert ledger.rows[("Account", "companies", "001A")].status == "created"
+    assert len(destination.relationship_batches) == 1
+    write = destination.relationship_batches[0][0]
+    assert write.record_id == "dest-001A"
+    assert write.related_record_id == "dest-parent"
+    assert snapshot.completed_routes == {"Account|companies"}
+
+
+async def test_run_batch_advances_checkpoint_when_first_relationship_is_pending() -> None:
+    class PagedSource(FakeSource):
+        async def read_records(self, *args: Any, **kwargs: Any) -> RecordPage:
+            page = await super().read_records(*args, **kwargs)
+            return RecordPage(
+                object_key=page.object_key,
+                records=page.records,
+                next_cursor="001A",
+                has_more=True,
+            )
+
+    source = PagedSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = PendingRelationshipBatchDestination()
+    ledger = InMemoryLedger()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()),
+        source,
+        destination,
+        host=_host(ledger, identity=identity),
+        batch_size=1,
+    )
+
+    assert has_more is True
+    assert snapshot.checkpoints == {"Account|companies": "001A"}
+    assert snapshot.route_failed_record_ids == {"Account|companies": set()}
+    assert snapshot.route_pending_record_ids == {"Account|companies": {"001A"}}
+    pending = list(snapshot.route_pending_relationships["Account|companies"].values())
+    assert len(pending) == 1
+    assert pending[0]["sourceRecordId"] == "001A"
+    assert pending[0]["destinationRecordId"] == "dest-001A"
+    assert pending[0]["relatedSourceRecordId"] == "001P"
+    assert pending[0]["relatedDestinationObject"] == "companies"
+    assert destination.batch_writes == [[("001A", {"name": "Acme"})]]
+    row = ledger.rows[("Account", "companies", "001A")]
+    assert row.status == "created"
+    assert row.message is not None
+    assert "Relationship pending: association unavailable" in row.message
+
+
+async def test_run_batch_retries_parked_relationships_on_a_completed_route() -> None:
+    parked = _parked("001A", "dest-001A")
+    snapshot = ExecutionSnapshot(
+        completed_routes={"Account|companies"},
+        route_pending_relationships={
+            "Account|companies": {pending_relationship_key(parked): parked}
+        },
+        route_pending_record_ids={"Account|companies": {"001A"}},
+    )
+    source = RefusingSource()
+    destination = RelationshipOnlyDestination()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()),
+        source,
+        destination,
+        host=_host(identity=identity),
+        snapshot=snapshot,
+    )
+
+    assert has_more is False
+    assert destination.writes == []
+    assert len(destination.relationship_batches) == 1
+    write = destination.relationship_batches[0][0]
+    assert write.record_id == "dest-001A"
+    assert write.related_record_id == "dest-parent"
+    assert snapshot.route_pending_relationships == {"Account|companies": {}}
+    assert snapshot.route_pending_record_ids == {"Account|companies": set()}
+    assert snapshot.completed_routes == {"Account|companies"}
+
+
+async def test_run_batch_retries_parked_relationships_excluding_the_current_page() -> None:
+    parked_on_page = _parked("001A", "dest-001A")
+    parked_off_page = _parked("002B", "dest-002B")
+    snapshot = ExecutionSnapshot(
+        route_pending_relationships={
+            "Account|companies": {
+                pending_relationship_key(parked_on_page): parked_on_page,
+                pending_relationship_key(parked_off_page): parked_off_page,
+            }
+        },
+        route_pending_record_ids={"Account|companies": {"001A", "002B"}},
+    )
+    source = FakeSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = FakeDestination()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()),
+        source,
+        destination,
+        host=_host(identity=identity),
+        snapshot=snapshot,
+    )
+
+    assert has_more is False
+    # The off-page parked link retried first; the on-page record relinked
+    # fresh after its rewrite, never through the parked entry.
+    assert [write.record_id for write in destination.relationships] == ["dest-002B", "dest-1"]
+    assert snapshot.route_pending_relationships == {"Account|companies": {}}
+    assert snapshot.route_pending_record_ids == {"Account|companies": set()}
+    assert snapshot.completed_routes == {"Account|companies"}
+
+
+async def test_run_batch_parks_a_failed_relationship_and_keeps_the_scalar_write() -> None:
+    source = FakeSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = FailingRelationshipDestination()
+    ledger = InMemoryLedger()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()), source, destination, host=_host(ledger, identity=identity)
+    )
+
+    assert has_more is False
+    assert snapshot.completed_routes == {"Account|companies"}
+    row = ledger.rows[("Account", "companies", "001A")]
+    assert row.status == "created"
+    assert row.message is not None
+    assert "Relationship pending: association unavailable" in row.message
+    assert snapshot.route_pending_record_ids == {"Account|companies": {"001A"}}
+    pending = list(snapshot.route_pending_relationships["Account|companies"].values())
+    assert len(pending) == 1
+    assert pending[0]["sourceRecordId"] == "001A"
+    assert pending[0]["destinationRecordId"] == "dest-1"
+    # The failed link was attempted in the relationship phase and once more
+    # by the end-of-route retry before staying parked.
+    assert len(destination.relationships) == 2
+
+
+async def test_run_batch_parks_a_relationship_when_the_write_returns_no_id() -> None:
+    class NoIdDestination(FakeDestination):
+        async def write_record(
+            self,
+            credentials: Credentials,
+            *,
+            object_type: str,
+            properties: dict[str, Any],
+            options: WriteOptions,
+        ) -> WriteResult:
+            self.writes.append(dict(properties))
+            return WriteResult(status="created", destination_record_id=None)
+
+    source = FakeSource(records=[{"Id": "001A", "Name": "Acme", "ParentId": "001P"}])
+    destination = NoIdDestination()
+    ledger = InMemoryLedger()
+    identity = InMemoryIdentityLedger({("Account", "001P", "companies"): "dest-parent"})
+
+    snapshot, has_more = await _run(
+        _routes(_relationship_fields()), source, destination, host=_host(ledger, identity=identity)
+    )
+
+    assert has_more is False
+    assert destination.relationships == []
+    row = ledger.rows[("Account", "companies", "001A")]
+    assert row.status == "created"
+    assert row.message is not None
+    assert "Relationship pending: Destination record id is missing." in row.message
+    pending = list(snapshot.route_pending_relationships["Account|companies"].values())
+    assert len(pending) == 1
+    assert pending[0]["destinationRecordId"] is None
+    assert snapshot.route_pending_record_ids == {"Account|companies": {"001A"}}
