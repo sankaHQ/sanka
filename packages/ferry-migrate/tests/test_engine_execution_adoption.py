@@ -15,6 +15,8 @@ from typing import Any
 import pytest
 
 from ferry.connector import (
+    BatchWriteInput,
+    BatchWriteResult,
     ConnectorError,
     ConnectorRegistration,
     Credentials,
@@ -240,6 +242,43 @@ class MemoryDestination:
 class OwnerMemoryDestination(MemoryDestination):
     async def list_owners(self, credentials: Credentials) -> list[OwnerProfile]:
         return list(self._owners or [])
+
+
+class BatchMemoryDestination(MemoryDestination):
+    """Batch-capable destination; the record-at-a-time path must stay unused."""
+
+    async def write_record(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        properties: dict[str, Any],
+        options: WriteOptions,
+    ) -> WriteResult:
+        raise AssertionError("record-at-a-time destination write must not be used")
+
+    async def write_records(
+        self,
+        credentials: Credentials,
+        *,
+        object_type: str,
+        records: list[BatchWriteInput],
+        options: WriteOptions,
+    ) -> list[BatchWriteResult]:
+        results: list[BatchWriteResult] = []
+        for record in records:
+            self.write_calls.append((object_type, dict(record.properties)))
+            self._counter += 1
+            destination_id = f"D{self._counter}"
+            self.rows.setdefault(object_type, {})[destination_id] = dict(record.properties)
+            results.append(
+                BatchWriteResult(
+                    trace_id=record.trace_id,
+                    status="created",
+                    destination_record_id=destination_id,
+                )
+            )
+        return results
 
 
 # -- scenario plumbing ---------------------------------------------------------
@@ -469,6 +508,26 @@ async def test_missing_identity_records_fail_and_hold_the_run(tmp_path: Path) ->
     assert engine.store.get_run(run_id).status is RunStatus.FAILED
     assert destination.write_calls == []
     assert engine.store.ledger_summary(run_id) == {"records|records": {"failed": 1}}
+
+
+async def test_apply_uses_destination_batch_writes(tmp_path: Path) -> None:
+    """A batch-capable destination gets one batch write per page through the
+    engine (the flagship ClickHouse path), and the pair ledger still keys
+    results by the source identity."""
+    records = [{"id": f"r{n}", "name": f"row {n}"} for n in range(1, 4)]
+    source = MemorySource({"records": records})
+    destination = BatchMemoryDestination()
+    engine = _engine(tmp_path, source, destination, batch_size=2)
+    run_id = _create_run(engine, [_scalar_route("records", ["id", "name"], estimated_count=3)])
+
+    await engine.apply(run_id)
+
+    assert engine.store.get_run(run_id).status is RunStatus.APPLIED
+    assert len(destination.write_calls) == 3
+    assert engine.store.ledger_summary(run_id) == {"records|records": {"created": 3}}
+    assert engine.store.terminal_source_ids(run_id, "records|records") == {"r1", "r2", "r3"}
+    report = await engine.verify(run_id)
+    assert report.ok and report.routes[0].migrated == 3
 
 
 async def test_apply_honors_a_cancellation_recorded_in_the_journal(tmp_path: Path) -> None:
