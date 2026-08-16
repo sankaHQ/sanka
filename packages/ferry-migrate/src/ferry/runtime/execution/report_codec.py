@@ -41,7 +41,10 @@ Value normalizations the production reader itself performs are preserved:
 ``routeCounts`` rows normalize to the four-status shape, blank checkpoint
 keys/values drop, pending-relationship entries are rebuilt with the
 canonical ten-key spelling, and saved high-water-mark maps re-sort by route
-key.
+key. A parsed scope always dumps complete — a hand-authored execution dict
+carrying only ``routeManifest`` gains its canonical ``selectedRouteKeys``
+and ``routeHighWaterMarks`` on save, exactly what the production writer
+would next persist.
 """
 
 from __future__ import annotations
