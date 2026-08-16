@@ -51,6 +51,12 @@ from ferry.runtime.execution.report_codec import (
     route_keys_by_pair,
     selected_route_keys,
 )
+from ferry.runtime.execution.scope import (
+    execution_routes,
+    freeze_route_high_water_marks,
+    freeze_scope,
+    frozen_route_totals,
+)
 from ferry.runtime.execution.state import (
     NULL_OBSERVER,
     AttemptFence,
@@ -92,7 +98,11 @@ __all__ = [
     "execution_is_cancelled",
     "execution_route_high_water_marks",
     "execution_route_manifest",
+    "execution_routes",
     "filter_mapping_groups",
+    "freeze_route_high_water_marks",
+    "freeze_scope",
+    "frozen_route_totals",
     "load_journal",
     "parse_datetime",
     "prepare_route_state",
