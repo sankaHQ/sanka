@@ -90,14 +90,27 @@ from ferry.runtime.execution.state import (
     ExecutionObserver,
     SaveOutcome,
 )
+from ferry.runtime.execution.validate import (
+    DEFAULT_VALIDATION_SAMPLE_SIZE,
+    MAX_VALIDATION_REJECTS,
+    MISSING_IDENTITY_CODE,
+    validate_routes,
+    validation_reason,
+    validation_record_id,
+    validation_rejection,
+    validation_rejects_truncated_warning,
+)
 
 __all__ = [
     "BATCH_SAFETY_LIMIT_MESSAGE",
     "DEFAULT_MAX_BATCHES",
     "DEFAULT_PAUSE_SECONDS",
+    "DEFAULT_VALIDATION_SAMPLE_SIZE",
     "EXECUTION_FAULT_CODES",
     "FROZEN_TOTAL_SHORTFALL_WARNING",
     "HEARTBEAT_FRESHNESS",
+    "MAX_VALIDATION_REJECTS",
+    "MISSING_IDENTITY_CODE",
     "NULL_OBSERVER",
     "STALLED_NO_PROGRESS_WARNING",
     "AttemptFence",
@@ -156,4 +169,9 @@ __all__ = [
     "route_keys_by_pair",
     "run_batch",
     "selected_route_keys",
+    "validate_routes",
+    "validation_reason",
+    "validation_record_id",
+    "validation_rejection",
+    "validation_rejects_truncated_warning",
 ]
