@@ -13,11 +13,14 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from ferry.connector import Credentials, RecordPage, SourceFilter, SourceObject
+from ferry.connector.protocols import DestinationConnector, SourceConnector
+from ferry.runtime.engine import ExecutionError, MigrationEngine
 from ferry.runtime.execution import (
     DEFAULT_VALIDATION_SAMPLE_SIZE,
     MAX_VALIDATION_REJECTS,
@@ -31,6 +34,9 @@ from ferry.runtime.execution import (
     validation_rejects_truncated_warning,
 )
 from ferry.runtime.mapping import MappingError, MigrationMappingField, mapping_groups
+from ferry.runtime.registry import ConnectorRegistry
+from ferry.runtime.spec import EndpointSpec, MigrationSpec
+from ferry.runtime.state import SqliteStateStore
 
 _CREDENTIALS = Credentials(provider="fake")
 
@@ -591,3 +597,87 @@ async def test_routes_validate_independently_with_route_keyed_rejects() -> None:
     assert reject["routeKey"] == "Account|contacts"
     assert reject["code"] == "FERRY_REQUIRED_SOURCE_FIELD_EMPTY"
     assert reject["sourceField"] == "Account.Industry"
+
+
+# -- engine surface -----------------------------------------------------------
+
+
+class PoisonedRegistry(ConnectorRegistry):
+    """A registry whose destination role must never be resolved."""
+
+    def __init__(self, inner: ConnectorRegistry) -> None:
+        self._inner = inner
+
+    def names(self) -> list[str]:
+        return self._inner.names()
+
+    def source(self, type_name: str) -> SourceConnector:
+        return self._inner.source(type_name)
+
+    def destination(self, type_name: str) -> DestinationConnector:
+        raise AssertionError("write-free validation must never resolve a destination connector")
+
+
+def _write_markdown_content(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "a.md").write_text("---\ntitle: A\n---\nAlpha body\n", encoding="utf-8")
+    (root / "b.md").write_text("---\ntitle: B\n---\nBeta body\n", encoding="utf-8")
+
+
+def _markdown_spec(content: Path, db: Path) -> MigrationSpec:
+    return MigrationSpec(
+        source=EndpointSpec(type="markdown", connection=str(content)),
+        target=EndpointSpec(type="sqlite", connection=str(db)),
+    )
+
+
+async def test_engine_validate_never_resolves_the_destination(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_markdown_content(content)
+    store_path = tmp_path / "state" / "state.db"
+    engine = MigrationEngine(
+        store=SqliteStateStore(store_path), registry=ConnectorRegistry.discover()
+    )
+    run_id = engine.create(_markdown_spec(content, db))
+    await engine.plan(run_id)
+    status_before = engine.store.get_run(run_id).status
+
+    validating_engine = MigrationEngine(
+        store=SqliteStateStore(store_path),
+        registry=PoisonedRegistry(ConnectorRegistry.discover()),
+    )
+    payload = await validating_engine.validate(run_id)
+
+    (row,) = payload["objects"]
+    assert (row["sourceObject"], row["destinationObject"]) == ("documents", "documents")
+    assert row["sampled"] == 2
+    assert row["valid"] == 2
+    assert row["invalid"] == 0
+    assert payload["rejects"] == []
+    assert not db.exists()  # nothing was written, nothing was even created
+    assert engine.store.get_run(run_id).status is status_before  # no lifecycle transition
+
+
+async def test_engine_validate_requires_a_plan(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_markdown_content(content)
+    engine = MigrationEngine(
+        store=SqliteStateStore(tmp_path / "state.db"), registry=ConnectorRegistry.discover()
+    )
+    run_id = engine.create(_markdown_spec(content, db))
+
+    with pytest.raises(ExecutionError, match="has no plan"):
+        await engine.validate(run_id)
+
+
+async def test_engine_validate_wraps_execution_faults(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_markdown_content(content)
+    engine = MigrationEngine(
+        store=SqliteStateStore(tmp_path / "state.db"), registry=ConnectorRegistry.discover()
+    )
+    run_id = engine.create(_markdown_spec(content, db))
+    await engine.plan(run_id)
+
+    with pytest.raises(ExecutionError, match="FERRY_DRY_RUN_LIMIT_INVALID"):
+        await engine.validate(run_id, sample_size=0)

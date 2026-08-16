@@ -36,6 +36,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 from ferry.connector import ConflictPolicy, ConnectorError, Credentials, SupportsRecordCounts
 from ferry.connector.protocols import DestinationConnector, SourceConnector
 from ferry.runtime.execution import (
+    DEFAULT_VALIDATION_SAMPLE_SIZE,
     AttemptFence,
     ExecutionFault,
     ExecutionHost,
@@ -50,6 +51,7 @@ from ferry.runtime.execution import (
     freeze_scope,
     normalized_attempt_identity,
     run_batch,
+    validate_routes,
 )
 from ferry.runtime.hashing import canonical_json
 from ferry.runtime.mapping.record_mapping import MappingGroup, mapping_group_key
@@ -249,6 +251,46 @@ class MigrationEngine:
         )
         self._store.save_plan(run_id, canonical_json(plan.to_payload()), plan.plan_hash)
         return plan
+
+    async def validate(
+        self,
+        run_id: str,
+        *,
+        sample_size: int = DEFAULT_VALIDATION_SAMPLE_SIZE,
+        full: bool = False,
+    ) -> dict[str, Any]:
+        """Write-free validation of the persisted plan against live records.
+
+        Reads a sampled page per plan route (every page with ``full``) and
+        projects the records through the reviewed mapping — the production
+        dry run. The destination connector is never resolved, no execution
+        state is opened, and no run status changes: per ARCHITECTURE
+        tenet 2, nothing on this path can write. Returns the deterministic
+        validation payload (``objects`` rows, capped ``rejects``,
+        ``warnings``) from :func:`ferry.runtime.execution.validate_routes`.
+        """
+        run = self._store.get_run(run_id)
+        if run.plan_json is None:
+            raise ExecutionError(f"run {run_id!r} has no plan; run plan first")
+        plan = MigrationPlan.from_payload(json.loads(run.plan_json))
+        spec = self._spec(run_id)
+        source, source_credentials = self._source(spec)
+        try:
+            return await validate_routes(
+                routes=[_execution_route(route) for route in plan.routes],
+                source=source,
+                source_credentials=source_credentials,
+                sample_size=sample_size,
+                full=full,
+            )
+        except ConnectorError as error:
+            raise ExecutionError(
+                f"run {run_id!r} validation failed ({error.category}): {error}"
+            ) from error
+        except ExecutionFault as fault:
+            raise ExecutionError(
+                f"run {run_id!r} validation failed ({fault.code}): {fault}"
+            ) from fault
 
     async def apply(self, run_id: str, *, plan_hash: str | None = None) -> None:
         run = self._store.get_run(run_id)
