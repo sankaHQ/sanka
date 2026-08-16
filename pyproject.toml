@@ -34,6 +34,12 @@ line-length = 100
 target-version = "py312"
 extend-exclude = ["tests/fixtures"]
 
+[tool.ruff.format]
+# ruff >= 0.16 formats fenced Python blocks in Markdown by default. Markdown
+# here (design docs especially) carries illustrative sketches with
+# hand-aligned comments — review artifacts, not formatter-owned code.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 
