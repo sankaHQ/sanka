@@ -678,6 +678,28 @@ async def run_batch(
                 },
             )
 
+        # -- concurrent-attempt failed-to-skipped repair ---------------------
+        # A write that failed here may have been committed by another active
+        # attempt in the meantime; the durable ledger is the authority, so a
+        # failed record whose pair row is terminal repairs to "skipped".
+        confirmed_terminal_destination_ids: dict[str, str | None] = {}
+        if any(state.status == "failed" for state in record_states):
+            confirmed_terminal_destination_ids = await host.ledger.terminal_destination_ids(
+                source_object=route.source_object,
+                source_record_ids=page_source_ids,
+                destination_object=route.destination_object,
+            )
+        for state in record_states:
+            if (
+                state.status == "failed"
+                and state.source_record_id in confirmed_terminal_destination_ids
+            ):
+                state.status = "skipped"
+                state.destination_record_id = confirmed_terminal_destination_ids[
+                    state.source_record_id
+                ]
+                state.message = _REPAIRED_BY_ACTIVE_ATTEMPT_MESSAGE
+
         # -- counters, failed-id dedupe, checkpoint advance -----------------
         for state in record_states:
             source_record_id = state.source_record_id

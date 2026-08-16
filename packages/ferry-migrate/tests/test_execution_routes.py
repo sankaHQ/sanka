@@ -1284,3 +1284,102 @@ async def test_run_batch_parks_a_relationship_when_the_write_returns_no_id() -> 
     assert len(pending) == 1
     assert pending[0]["destinationRecordId"] is None
     assert snapshot.route_pending_record_ids == {"Account|companies": {"001A"}}
+
+
+# -- repair and durable bookkeeping -------------------------------------------
+
+
+async def test_run_batch_repairs_a_failed_write_committed_by_an_active_attempt() -> None:
+    class FailingWriteDestination(FakeDestination):
+        async def write_record(self, *args: Any, **kwargs: Any) -> WriteResult:
+            raise RuntimeError("provider timeout")
+
+    class ConcurrentTerminalLedger(InMemoryLedger):
+        """Another active attempt commits 001A between the write and the re-read."""
+
+        async def upsert_results(self, results: Sequence[RecordWriteOutcome]) -> int:
+            count = await super().upsert_results(results)
+            self.rows[("Account", "companies", "001A")] = RecordWriteOutcome(
+                source_object="Account",
+                source_record_id="001A",
+                destination_object="companies",
+                destination_record_id="dest-other-attempt",
+                status="created",
+            )
+            return count
+
+    ledger = ConcurrentTerminalLedger()
+    observer = RecordingObserver()
+
+    snapshot, has_more = await _run(
+        _name_route(),
+        FakeSource(),
+        FailingWriteDestination(),
+        host=_host(ledger, observer=observer),
+    )
+
+    assert has_more is False
+    assert snapshot.completed_routes == {"Account|companies"}
+    assert snapshot.route_counts["Account|companies"] == {
+        "created": 0,
+        "updated": 0,
+        "skipped": 1,
+    }
+    assert snapshot.route_failed_record_ids == {"Account|companies": set()}
+    assert observer.failed_records == []
+    assert ledger.rows[("Account", "companies", "001A")].destination_record_id == (
+        "dest-other-attempt"
+    )
+    # The re-read happened exactly once, and only because a write failed.
+    assert ledger.terminal_reads == [
+        ("Account", "companies", ("001A",)),
+        ("Account", "companies", ("001A",)),
+    ]
+
+
+async def test_run_batch_uses_page_scoped_terminal_reads_and_bulk_persistence() -> None:
+    source_records = [
+        {"Id": f"001-{index:03d}", "Name": f"Company {index}"} for index in range(200)
+    ]
+    source = FakeSource(records=source_records)
+    ledger = InMemoryLedger()
+
+    _snapshot, has_more = await _run(_name_route(), source, BatchDestination(), host=_host(ledger))
+
+    assert has_more is False
+    assert ledger.terminal_reads == [
+        ("Account", "companies", tuple(str(record["Id"]) for record in source_records))
+    ]
+    assert len(ledger.upsert_calls) == 1
+    assert len(ledger.upsert_calls[0]) == 200
+    assert ledger.upsert_calls[0][0].source_record_id == "001-000"
+
+
+async def test_run_batch_keeps_failed_records_retryable() -> None:
+    class AlwaysFailingDestination(FakeDestination):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempts = 0
+
+        async def write_record(self, *args: Any, **kwargs: Any) -> WriteResult:
+            self.attempts += 1
+            raise RuntimeError("provider rejected the write")
+
+    destination = AlwaysFailingDestination()
+    ledger = InMemoryLedger()
+    host = _host(ledger)
+    snapshot = ExecutionSnapshot()
+
+    snapshot, first_has_more = await _run(
+        _name_route(), FakeSource(), destination, host=host, snapshot=snapshot
+    )
+    snapshot, second_has_more = await _run(
+        _name_route(), FakeSource(), destination, host=host, snapshot=snapshot
+    )
+
+    assert first_has_more is True
+    assert second_has_more is True
+    assert destination.attempts == 2
+    assert snapshot.route_counts["Account|companies"]["failed"] == 1
+    assert snapshot.route_failed_record_ids == {"Account|companies": {"001A"}}
+    assert snapshot.completed_routes == set()
