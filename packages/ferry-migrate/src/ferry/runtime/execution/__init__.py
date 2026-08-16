@@ -51,6 +51,7 @@ from ferry.runtime.execution.report_codec import (
     route_keys_by_pair,
     selected_route_keys,
 )
+from ferry.runtime.execution.routes import OnMissingIdentity, WritePolicies, run_batch
 from ferry.runtime.execution.scope import (
     execution_routes,
     freeze_route_high_water_marks,
@@ -86,11 +87,13 @@ __all__ = [
     "ExecutionSnapshot",
     "ExecutionStatus",
     "JournalEntry",
+    "OnMissingIdentity",
     "PairFailedIds",
     "PairStatusTotal",
     "RecordWriteOutcome",
     "SaveOutcome",
     "SqliteExecutionState",
+    "WritePolicies",
     "WriteStatus",
     "canonical_route_manifest",
     "dump_journal",
@@ -113,5 +116,6 @@ __all__ = [
     "report_route_pending_record_ids",
     "require_matching_route_manifest",
     "route_keys_by_pair",
+    "run_batch",
     "selected_route_keys",
 ]
