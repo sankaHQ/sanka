@@ -15,6 +15,20 @@ over their pinned execution scope; upstream code never sees a workspace,
 run, program, or channel id.
 """
 
+from ferry.runtime.execution.continuous import (
+    BATCH_SAFETY_LIMIT_MESSAGE,
+    DEFAULT_MAX_BATCHES,
+    DEFAULT_PAUSE_SECONDS,
+    FROZEN_TOTAL_SHORTFALL_WARNING,
+    STALLED_NO_PROGRESS_WARNING,
+    BatchStep,
+    apply_durable_route_results,
+    durable_route_result_state,
+    known_incomplete_route_keys,
+    normalized_attempt_identity,
+    reconcile_terminal_batch_pages,
+    reopen_incomplete_routes,
+)
 from ferry.runtime.execution.errors import EXECUTION_FAULT_CODES, ExecutionFault
 from ferry.runtime.execution.local import SqliteExecutionState
 from ferry.runtime.execution.model import (
@@ -70,12 +84,18 @@ from ferry.runtime.execution.state import (
 )
 
 __all__ = [
+    "BATCH_SAFETY_LIMIT_MESSAGE",
+    "DEFAULT_MAX_BATCHES",
+    "DEFAULT_PAUSE_SECONDS",
     "EXECUTION_FAULT_CODES",
+    "FROZEN_TOTAL_SHORTFALL_WARNING",
     "HEARTBEAT_FRESHNESS",
     "NULL_OBSERVER",
+    "STALLED_NO_PROGRESS_WARNING",
     "AttemptFence",
     "AttemptIdentity",
     "BatchPage",
+    "BatchStep",
     "ClaimOutcome",
     "ExecutionFault",
     "ExecutionHost",
@@ -95,8 +115,10 @@ __all__ = [
     "SqliteExecutionState",
     "WritePolicies",
     "WriteStatus",
+    "apply_durable_route_results",
     "canonical_route_manifest",
     "dump_journal",
+    "durable_route_result_state",
     "execution_heartbeat_is_recent",
     "execution_is_cancelled",
     "execution_route_high_water_marks",
@@ -106,9 +128,13 @@ __all__ = [
     "freeze_route_high_water_marks",
     "freeze_scope",
     "frozen_route_totals",
+    "known_incomplete_route_keys",
     "load_journal",
+    "normalized_attempt_identity",
     "parse_datetime",
     "prepare_route_state",
+    "reconcile_terminal_batch_pages",
+    "reopen_incomplete_routes",
     "report_checkpoints",
     "report_progress_marker",
     "report_route_counts",
