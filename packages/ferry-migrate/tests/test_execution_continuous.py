@@ -1201,7 +1201,8 @@ async def test_stall_without_terminal_pages_fails_for_review() -> None:
     assert result.status == "failed"
     assert STALLED_NO_PROGRESS_WARNING in result.snapshot.warnings
     assert journal.report is not None and journal.report["status"] == "failed"
-    assert journal.report["routeProgress"][0]["status"] == "failed" or True
+    assert journal.report["routeProgress"][0]["status"] == "failed"
+    assert journal.report["execution"]["state"] == "failed"
     assert step.calls == 1
 
 
