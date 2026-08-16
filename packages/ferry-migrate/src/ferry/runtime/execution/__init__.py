@@ -69,6 +69,7 @@ from ferry.runtime.execution.report_codec import (
     selected_route_keys,
 )
 from ferry.runtime.execution.routes import (
+    EXACT_SCOPE_COVERAGE_WARNING,
     OnMissingIdentity,
     WritePolicies,
     WriteRetry,
@@ -111,6 +112,7 @@ __all__ = [
     "DEFAULT_PAUSE_SECONDS",
     "DEFAULT_VALIDATION_SAMPLE_SIZE",
     "EXACT_CANDIDATE_HASH_MISMATCH_CODE",
+    "EXACT_SCOPE_COVERAGE_WARNING",
     "EXECUTION_FAULT_CODES",
     "FROZEN_TOTAL_SHORTFALL_WARNING",
     "HEARTBEAT_FRESHNESS",

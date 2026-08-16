@@ -18,13 +18,21 @@ checkpoint beyond the first failed record.
 Scope-free by construction: the host closes its :class:`ExecutionHost`
 adapters over whatever run scope it pins; ``run_batch`` itself has no
 vocabulary for a workspace, program, or channel.
+
+An optional :class:`~ferry.runtime.execution.scope.ExactIdScope` narrows one
+batch to the safety runbook's exact-ID pilot set: the candidate hash is
+re-verified before anything runs, every source page is intersected with the
+candidate id set (records outside it are untouched and uncounted), and a
+route refuses to complete until the execution ledger holds a terminal result
+for every candidate id — surfacing the shortfall as a snapshot warning and a
+retryable ``has_more``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ferry.connector import (
     BatchRelationshipWriteResult,
@@ -51,7 +59,7 @@ from ferry.runtime.execution.model import (
     ExecutionSnapshot,
     RecordWriteOutcome,
 )
-from ferry.runtime.execution.state import ExecutionHost
+from ferry.runtime.execution.state import ExecutionHost, ExecutionLedger
 from ferry.runtime.mapping.owner_mapping import (
     MissingOwnerPolicy,
     OwnerDirectory,
@@ -73,6 +81,9 @@ from ferry.runtime.mapping.record_mapping import (
     relationship_source_ids,
     source_field_keys,
 )
+
+if TYPE_CHECKING:
+    from ferry.runtime.execution.scope import ExactIdScope
 
 OnMissingIdentity = Literal["drop", "fail"]
 """What a record without a source identity does to the batch.
@@ -98,6 +109,13 @@ _ALREADY_WRITTEN_MESSAGE = "Destination record was already written."
 _REPAIRED_BY_ACTIVE_ATTEMPT_MESSAGE = (
     "Destination result was already committed by an active execution attempt."
 )
+
+EXACT_SCOPE_COVERAGE_WARNING = (
+    "Exact-ID scope: route {route_key} has {uncovered_count} of {candidate_count}"
+    " candidate ids without a terminal result; the route cannot complete until"
+    " the execution ledger covers every candidate id."
+)
+"""Warning kept on the snapshot while an exact-ID route refuses completion."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -154,6 +172,48 @@ async def _dispatch_write[T](retry: WriteRetry | None, operation: Callable[[], A
     if retry is None:
         return await operation()
     return cast("T", await retry(operation))
+
+
+def _sync_exact_scope_warning(
+    snapshot: ExecutionSnapshot,
+    *,
+    route_key: str,
+    uncovered_count: int,
+    candidate_count: int,
+) -> None:
+    """Keep at most one live coverage warning per refusing exact-scope route."""
+
+    prefix = f"Exact-ID scope: route {route_key} has "
+    warnings = [warning for warning in snapshot.warnings if not warning.startswith(prefix)]
+    if uncovered_count:
+        warnings.append(
+            EXACT_SCOPE_COVERAGE_WARNING.format(
+                route_key=route_key,
+                uncovered_count=uncovered_count,
+                candidate_count=candidate_count,
+            )
+        )
+    snapshot.warnings = warnings
+
+
+async def _uncovered_candidate_count(
+    *,
+    ledger: ExecutionLedger,
+    route: ExecutionRoute,
+    candidates: frozenset[str],
+) -> int:
+    """Candidate ids the durable ledger holds no terminal result for.
+
+    The ledger — not the in-memory counters — is the authority the exact-ID
+    completion refusal consults, mirroring the runbook's read-back stance.
+    """
+
+    terminal_destination_ids = await ledger.terminal_destination_ids(
+        source_object=route.source_object,
+        source_record_ids=sorted(candidates),
+        destination_object=route.destination_object,
+    )
+    return len(candidates.difference(terminal_destination_ids))
 
 
 async def _retry_parked_relationships(
@@ -345,6 +405,7 @@ async def run_batch(
     snapshot: ExecutionSnapshot,
     host: ExecutionHost,
     route_high_water_marks: Mapping[str, str | None] | None = None,
+    exact_scope: ExactIdScope | None = None,
     on_missing_identity: OnMissingIdentity = "fail",
     retry: WriteRetry | None = None,
 ) -> bool:
@@ -355,14 +416,43 @@ async def run_batch(
     ``checkpoints`` and ``batch_pages`` are replaced with this batch's
     in-progress routes; counters, pending state, failed-id sets, and
     completed routes are updated in place.
+
+    An ``exact_scope`` narrows the batch to its exact candidate-id sets: the
+    candidate hash is re-verified before any connector is touched
+    (:data:`~ferry.runtime.execution.scope.EXACT_CANDIDATE_HASH_MISMATCH_CODE`
+    on drift), a route absent from the candidate map refuses fail-closed,
+    every page is intersected with the route's candidate set — records
+    outside it are not written, not counted, and never reach the ledger or
+    the batch-page reconciliation evidence — and a route completes only once
+    the ledger holds a terminal result for every candidate id (the shortfall
+    stays visible as a snapshot warning and a retryable ``has_more``). A
+    record without an identity can never be a candidate, so
+    ``on_missing_identity`` never fires inside an exact scope; the empty
+    candidate set completes its route without a read; and frozen ``None``
+    high-water marks do not short-circuit candidate routes — the candidate
+    set, not the mark, is the authority on emptiness.
     """
 
+    candidate_ids_by_route: Mapping[str, tuple[str, ...]] | None = None
+    if exact_scope is not None:
+        exact_scope.verify_candidate_hash()
+        candidate_ids_by_route = exact_scope.candidate_ids_by_route
     next_checkpoints: dict[str, str] = {}
     batch_pages: dict[str, BatchPage] = {}
     has_more = False
     owners = _OwnerDirectories()
     batch_writer = destination if isinstance(destination, SupportsBatchWrites) else None
     for route in routes:
+        route_candidates: frozenset[str] | None = None
+        if candidate_ids_by_route is not None:
+            route_candidate_ids = candidate_ids_by_route.get(route.route_key)
+            if route_candidate_ids is None:
+                raise ExecutionFault(
+                    "Ferry execution includes a route outside the exact-ID scope.",
+                    code="FERRY_EXECUTION_ROUTE_INVALID",
+                    details={"routeKey": route.route_key},
+                )
+            route_candidates = frozenset(route_candidate_ids)
         has_owner_mapping = any(
             mapping_field.mapping_kind == "owner" for mapping_field in route.fields
         )
@@ -392,8 +482,15 @@ async def run_batch(
                     pending_relationships=parked,
                 )
             continue
+        if route_candidates is not None and not route_candidates:
+            # The exact scope names no candidate ids for this route: the
+            # empty set is trivially covered, so the route completes
+            # without a read.
+            snapshot.completed_routes.add(route_key)
+            continue
         if (
-            route_high_water_marks is not None
+            route_candidates is None
+            and route_high_water_marks is not None
             and route_key in route_high_water_marks
             and route_high_water_marks[route_key] is None
         ):
@@ -427,9 +524,19 @@ async def run_batch(
             cursor=current_cursor,
             upper_bound=upper_bound,
         )
+        page_records = page.records
+        if route_candidates is not None:
+            # Exact-ID intersection: records outside the candidate set are
+            # untouched — never written, never counted, and absent from the
+            # batch-page reconciliation evidence.
+            page_records = [
+                record
+                for record in page.records
+                if _record_identity(record, route.source_identity_field) in route_candidates
+            ]
         page_source_ids = [
             source_record_id
-            for record in page.records
+            for record in page_records
             if (source_record_id := _record_identity(record, route.source_identity_field))
         ]
         batch_pages[route_key] = BatchPage(
@@ -454,7 +561,7 @@ async def run_batch(
         related_destination_ids = await _related_destination_ids(
             host=host,
             route=route,
-            records=page.records,
+            records=page_records,
         )
 
         # -- write phase ----------------------------------------------------
@@ -469,7 +576,7 @@ async def run_batch(
             invalid_email_audit_field=policies.invalid_email_audit_field,
         )
         missing_identity_count = 0
-        for record in page.records:
+        for record in page_records:
             source_record_id = _record_identity(record, route.source_identity_field)
             if not source_record_id:
                 if on_missing_identity == "drop":
@@ -808,7 +915,27 @@ async def run_batch(
             next_checkpoints[route_key] = page.next_cursor
             has_more = True
         else:
-            snapshot.completed_routes.add(route_key)
+            route_complete = True
+            if route_candidates is not None:
+                # Exact-ID completion refusal: the durable ledger, not the
+                # in-memory counters, must cover every candidate id before
+                # the route may complete.
+                uncovered_count = await _uncovered_candidate_count(
+                    ledger=host.ledger,
+                    route=route,
+                    candidates=route_candidates,
+                )
+                _sync_exact_scope_warning(
+                    snapshot,
+                    route_key=route_key,
+                    uncovered_count=uncovered_count,
+                    candidate_count=len(route_candidates),
+                )
+                if uncovered_count:
+                    route_complete = False
+                    has_more = True
+            if route_complete:
+                snapshot.completed_routes.add(route_key)
 
     snapshot.checkpoints = next_checkpoints
     snapshot.batch_pages = batch_pages
