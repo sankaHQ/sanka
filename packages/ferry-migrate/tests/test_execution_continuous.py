@@ -35,6 +35,7 @@ from ferry.runtime.execution import (
     PairStatusTotal,
     RecordWriteOutcome,
     SaveOutcome,
+    SqliteExecutionState,
     apply_durable_route_results,
     assemble_continuous_report,
     dump_journal,
@@ -46,7 +47,7 @@ from ferry.runtime.execution import (
     reconcile_terminal_batch_pages,
     reopen_incomplete_routes,
 )
-from ferry.runtime.execution.state import ClaimOutcome
+from ferry.runtime.execution.state import ClaimOutcome, ExecutionJournal
 from ferry.runtime.state import TERMINAL_WRITE_STATUSES
 
 _NOW = datetime(2026, 8, 16, 12, 0, 0, tzinfo=UTC)
@@ -681,7 +682,7 @@ class ScriptedStep:
 
     def __init__(
         self,
-        journal: InMemoryJournal,
+        journal: ExecutionJournal,
         script: list[tuple[Any, bool]],
         *,
         job_id: str | None = "job-1",
@@ -1221,9 +1222,7 @@ async def test_stall_reconciles_terminal_pages_and_resumes() -> None:
 
     def stalled_batch(entry: JournalEntry) -> None:
         entry.snapshot.checkpoints = {_ACCOUNT_ROUTE: "001B"}  # marker unchanged
-        entry.snapshot.route_counts = {
-            _ACCOUNT_ROUTE: {"created": 2, "updated": 0, "skipped": 0}
-        }
+        entry.snapshot.route_counts = {_ACCOUNT_ROUTE: {"created": 2, "updated": 0, "skipped": 0}}
         entry.snapshot.batch_pages = {
             _ACCOUNT_ROUTE: BatchPage(
                 source_record_ids=("001A", "001B"), next_cursor="001C", has_more=True
@@ -1348,3 +1347,467 @@ async def test_unknown_totals_never_reopen_a_completed_route() -> None:
 
     assert result.status == "completed"
     assert result.snapshot.completed_routes == {_ACCOUNT_ROUTE}
+
+
+# -- progress / heartbeat assembly --------------------------------------------
+
+
+async def test_progress_rows_carry_rate_eta_and_percent_from_the_injected_clock() -> None:
+    ledger = InMemoryLedger()
+    manifest = _manifest(("Account", "companies"), ("Contact", "contacts"))
+    scope = ExecutionScope(
+        route_manifest=tuple(manifest),
+        selected_route_keys=(_ACCOUNT_ROUTE, _CONTACT_ROUTE),
+        route_high_water_marks={},
+        route_totals={_ACCOUNT_ROUTE: 10, _CONTACT_ROUTE: None},
+    )
+    snapshot = ExecutionSnapshot(
+        checkpoints={_ACCOUNT_ROUTE: "001E"},
+        route_counts={
+            _ACCOUNT_ROUTE: {"created": 3, "updated": 1, "skipped": 1, "failed": 1},
+            _CONTACT_ROUTE: {"created": 2, "updated": 0, "skipped": 0},
+        },
+        route_pending_record_ids={_CONTACT_ROUTE: {"003A", "003B"}},
+    )
+    entry = _entry(snapshot=snapshot)
+
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=entry,
+        state="running",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=4,
+        batch_size=25,
+        resumed=False,
+        stalled=False,
+        now=_NOW + timedelta(seconds=10),
+    )
+
+    account_row, contact_row = entry.route_progress
+    assert account_row["routeKey"] == _ACCOUNT_ROUTE
+    assert account_row["processed"] == 5
+    assert account_row["failed"] == 1
+    assert account_row["total"] == 10
+    assert account_row["remaining"] == 5
+    assert account_row["percent"] == 50
+    assert account_row["etaSeconds"] == 10  # 5 processed / 10s => 5 remaining / 0.5/s
+    assert account_row["checkpoint"] == "001E"
+    assert account_row["status"] == "running"
+    assert contact_row["total"] is None
+    assert contact_row["remaining"] is None
+    assert contact_row["percent"] is None
+    assert contact_row["etaSeconds"] is None
+    assert contact_row["associationPending"] == 2
+
+    progress = entry.extras["progress"]
+    assert progress["processed"] == 7
+    assert progress["total"] is None  # one unknown total keeps the overall unknown
+    assert progress["remaining"] is None
+    assert progress["percent"] is None
+    assert progress["etaSeconds"] is None
+
+
+async def test_progress_falls_back_to_durable_pair_totals_for_unique_pairs() -> None:
+    ledger = InMemoryLedger()
+    ledger.seed(
+        _outcome("001A", "created"),
+        _outcome("001B", "updated"),
+        _outcome("001C", "failed"),
+    )
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 4})
+    entry = _entry()  # no in-memory route counts at all
+
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=entry,
+        state="running",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=1,
+        batch_size=25,
+        resumed=False,
+        stalled=False,
+        now=_NOW + timedelta(seconds=1),
+    )
+
+    row = entry.route_progress[0]
+    assert row["processed"] == 2
+    assert row["created"] == 1
+    assert row["updated"] == 1
+    assert row["failed"] == 1
+    assert row["remaining"] == 2
+
+
+async def test_failed_routes_report_failed_status_only_while_stalled() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 5})
+    snapshot = ExecutionSnapshot(
+        route_counts={_ACCOUNT_ROUTE: {"created": 1, "updated": 0, "skipped": 0, "failed": 2}}
+    )
+    entry = _entry(snapshot=snapshot)
+
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=entry,
+        state="failed",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=2,
+        batch_size=25,
+        resumed=False,
+        stalled=True,
+        now=_NOW + timedelta(seconds=5),
+    )
+
+    assert entry.route_progress[0]["status"] == "failed"
+    assert STALLED_NO_PROGRESS_WARNING in entry.snapshot.warnings
+
+    # the same warning is not appended twice
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=entry,
+        state="failed",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=3,
+        batch_size=25,
+        resumed=False,
+        stalled=True,
+        now=_NOW + timedelta(seconds=6),
+    )
+    assert entry.snapshot.warnings.count(STALLED_NO_PROGRESS_WARNING) == 1
+
+
+async def test_provider_control_is_written_only_when_a_supplier_exists() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 1})
+
+    entry = _entry()
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=entry,
+        state="running",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=1,
+        batch_size=25,
+        resumed=False,
+        stalled=False,
+        now=_NOW,
+    )
+    assert "providerControl" not in dump_journal(entry)
+
+    with_metrics = _entry()
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=with_metrics,
+        state="running",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=1,
+        batch_size=25,
+        resumed=False,
+        stalled=False,
+        now=_NOW,
+        provider_control=lambda: {"retryAfterSeconds": 30},
+    )
+    assert dump_journal(with_metrics)["providerControl"] == {"retryAfterSeconds": 30}
+
+    with_null_metrics = _entry()
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=with_null_metrics,
+        state="running",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=1,
+        batch_size=25,
+        resumed=False,
+        stalled=False,
+        now=_NOW,
+        provider_control=lambda: None,
+    )
+    # the production heartbeat writes the key even when the provider has none
+    report = dump_journal(with_null_metrics)
+    assert "providerControl" in report and report["providerControl"] is None
+
+
+async def test_heartbeat_preserves_host_envelope_keys_and_persisted_totals() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 2})
+    queued = _entry(status="queued", scope=scope)  # persisted totals present (local queue)
+    report = dump_journal(queued)
+    report["summary"] = "host copy"
+    report["generatedAt"] = "2026-08-16T00:00:00+00:00"
+    report["sourceProvider"] = "salesforce"
+    entry = load_journal(report)
+
+    await assemble_continuous_report(
+        ledger=ledger,
+        entry=entry,
+        state="running",
+        scope=scope,
+        job_id="job-1",
+        started_at=_NOW.isoformat(),
+        batches_completed=1,
+        batch_size=25,
+        resumed=True,
+        stalled=False,
+        now=_NOW,
+    )
+
+    dumped = dump_journal(entry)
+    # envelope copy is untouched host property
+    assert dumped["summary"] == "host copy"
+    assert dumped["generatedAt"] == "2026-08-16T00:00:00+00:00"
+    assert dumped["sourceProvider"] == "salesforce"
+    # a locally persisted scope keeps its totals through the heartbeat
+    assert dumped["execution"]["routeTotals"] == {_ACCOUNT_ROUTE: 2}
+    assert dumped["execution"]["resumed"] is True
+    assert "resumed" not in entry.extras.get("execution", {})
+
+
+# -- failure marking ----------------------------------------------------------
+
+
+async def test_mark_execution_failed_appends_the_message_and_heartbeat() -> None:
+    scope = _scope()
+    journal = InMemoryJournal(_queued_entry(scope))
+    clock = FakeClock()
+
+    marked = await mark_execution_failed(
+        journal=journal,
+        message="Source API rejected the credentials.",
+        job_id="job-1",
+        attempt_id="job-1:1",
+        clock=clock,
+    )
+
+    assert marked is not None
+    assert marked.status == "failed"
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+    assert journal.report["warnings"] == ["Source API rejected the credentials."]
+    execution = journal.report["execution"]
+    assert execution["mode"] == "continuous"
+    assert execution["state"] == "failed"
+    assert execution["jobId"] == "job-1"
+    assert execution["lastHeartbeatAt"] == _NOW.isoformat()
+
+    # marking again with the same message does not duplicate the warning
+    again = await mark_execution_failed(
+        journal=journal,
+        message="Source API rejected the credentials.",
+        job_id="job-1",
+        attempt_id="job-1:1",
+        clock=clock,
+    )
+    assert again is not None
+    assert journal.report["warnings"] == ["Source API rejected the credentials."]
+
+
+async def test_mark_execution_failed_is_fenced_by_job_and_attempt() -> None:
+    scope = _scope()
+    foreign_job = _queued_entry(scope)
+    foreign_job.job_id = "job-9"
+    journal = InMemoryJournal(foreign_job)
+    assert (await mark_execution_failed(journal=journal, message="boom", job_id="job-1")) is None
+    assert journal.report is not None and journal.report.get("status") == "queued"
+
+    owned = InMemoryJournal(_queued_entry(scope))
+    owned.stored_attempt_id = "job-1:2"  # a newer attempt owns the row
+    assert (
+        await mark_execution_failed(
+            journal=owned, message="boom", job_id="job-1", attempt_id="job-1:1"
+        )
+    ) is None
+    assert owned.report is not None and owned.report.get("status") == "queued"
+
+
+async def test_mark_execution_failed_creates_a_fresh_entry_when_nothing_persisted() -> None:
+    journal = InMemoryJournal()
+
+    marked = await mark_execution_failed(
+        journal=journal, message="boom", job_id="job-1", clock=FakeClock()
+    )
+
+    assert marked is not None
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+    assert journal.report["warnings"] == ["boom"]
+
+
+# -- executor: exception paths ------------------------------------------------
+
+
+async def test_step_exception_marks_the_run_failed_and_reraises() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 1})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    class Boom(RuntimeError):
+        pass
+
+    async def exploding_step() -> tuple[JournalEntry, bool]:
+        raise Boom("destination write exploded")
+
+    with pytest.raises(Boom):
+        await executor.run(scope=scope, attempt=_ATTEMPT, step=exploding_step, job_id="job-1")
+
+    assert journal.report is not None
+    assert journal.report["status"] == "failed"
+    assert "destination write exploded" in journal.report["warnings"]
+    assert journal.report["execution"]["state"] == "failed"
+
+
+async def test_step_exception_after_cancellation_returns_the_cancelled_entry() -> None:
+    ledger = InMemoryLedger()
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 1})
+    journal = InMemoryJournal(_queued_entry(scope))
+    fence = ScriptedFence(journal=journal)
+    host = _host(ledger, journal, fence)
+    executor, _ = _executor(host, clock=FakeClock())
+
+    async def cancelled_then_boom() -> tuple[JournalEntry, bool]:
+        journal.record_cancellation()
+        raise RuntimeError("batch interrupted by cancellation")
+
+    result = await executor.run(
+        scope=scope, attempt=_ATTEMPT, step=cancelled_then_boom, job_id="job-1"
+    )
+
+    assert _is_cancelled_report(dump_journal(result))
+    assert journal.report is not None
+    assert journal.report.get("status") == "cancelled"
+
+
+# -- SQLite execution state end-to-end ----------------------------------------
+
+
+def _sqlite_host(state: SqliteExecutionState) -> ExecutionHost:
+    return ExecutionHost(
+        ledger=state,
+        journal=state,
+        fence=state,
+        identity_ledger=NullIdentityLedger(),
+        shared_identity_ledger=None,
+        observer=RecordingObserver(),
+    )
+
+
+async def test_sqlite_continuous_run_completes_and_survives_reload(tmp_path: Any) -> None:
+    path = tmp_path / "ferry.db"
+    state = SqliteExecutionState(path, run_id="run-1", job_id="job-1")
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 3})
+    await state.save(_queued_entry(scope))
+
+    async def batch(record_ids: tuple[str, ...], has_more: bool, cursor: str | None) -> None:
+        entry = await state.load()
+        assert entry is not None
+        await state.upsert_results([_outcome(record_id) for record_id in record_ids])
+        counts = entry.snapshot.route_counts.setdefault(
+            _ACCOUNT_ROUTE, {"created": 0, "updated": 0, "skipped": 0}
+        )
+        counts["created"] = counts.get("created", 0) + len(record_ids)
+        entry.snapshot.batch_pages = {
+            _ACCOUNT_ROUTE: BatchPage(
+                source_record_ids=record_ids, next_cursor=cursor, has_more=has_more
+            )
+        }
+        if has_more and cursor:
+            entry.snapshot.checkpoints = {_ACCOUNT_ROUTE: cursor}
+        else:
+            entry.snapshot.checkpoints = {}
+            entry.snapshot.completed_routes.add(_ACCOUNT_ROUTE)
+        entry.snapshot.has_more = has_more
+        entry.status = "running" if has_more else "completed"
+        assert await state.save(entry) == "saved"
+
+    script = iter(
+        [
+            (("001A", "001B"), True, "001B"),
+            (("001C",), False, None),
+        ]
+    )
+
+    async def step() -> tuple[JournalEntry, bool]:
+        record_ids, has_more, cursor = next(script)
+        await batch(record_ids, has_more, cursor)
+        entry = await state.load()
+        assert entry is not None
+        return entry, has_more
+
+    executor = ContinuousExecutor(
+        host=_sqlite_host(state),
+        max_batches=10,
+        sleep=FakeSleep(),
+        clock=FakeClock(),
+    )
+    result = await executor.run(
+        scope=scope, attempt=_ATTEMPT, step=step, job_id="job-1", batch_size=2
+    )
+
+    assert result.status == "completed"
+    assert result.batches_completed == 2
+    assert await state.status_totals() == {"created": 3}
+
+    # a fresh handle over the same file sees the terminal journal state
+    reloaded_state = SqliteExecutionState(path, run_id="run-1", job_id="job-1")
+    reloaded = await reloaded_state.load()
+    assert reloaded is not None
+    assert reloaded.status == "completed"
+    assert reloaded.batches_completed == 2
+    assert reloaded.attempt_id == "job-1:1"
+    assert reloaded.scope is not None
+    assert list(reloaded.scope.selected_route_keys) == [_ACCOUNT_ROUTE]
+    state.close()
+    reloaded_state.close()
+
+
+async def test_sqlite_fences_an_older_attempt_without_writing(tmp_path: Any) -> None:
+    """Pinned: the fenced older attempt never writes — real store variant."""
+
+    path = tmp_path / "ferry.db"
+    newer_state = SqliteExecutionState(path, run_id="run-1", job_id="job-1")
+    scope = _scope(route_totals={_ACCOUNT_ROUTE: 3})
+    await newer_state.save(_queued_entry(scope))
+    newer = AttemptIdentity(attempt_id="job-1:2", attempt_number=2, task_run_id="job-1")
+    outcome, claimed = await newer_state.claim(newer)
+    assert outcome == "claimed" and claimed is not None
+    claimed.status = "running"
+    assert await newer_state.save(claimed) == "saved"
+
+    older_state = SqliteExecutionState(path, run_id="run-1", job_id="job-1")
+    older = AttemptIdentity(attempt_id="job-1:1", attempt_number=1, task_run_id="job-1")
+
+    async def never_step() -> tuple[JournalEntry, bool]:
+        raise AssertionError("a fenced older attempt must never run a batch")
+
+    executor = ContinuousExecutor(
+        host=_sqlite_host(older_state),
+        max_batches=10,
+        sleep=FakeSleep(),
+        clock=FakeClock(),
+    )
+    with pytest.raises(ExecutionFault) as fault:
+        await executor.run(scope=scope, attempt=older, step=never_step, job_id="job-1")
+
+    assert fault.value.code == "FERRY_EXECUTION_ATTEMPT_SUPERSEDED"
+    # the newer attempt's row is untouched: still running, still job-1:2
+    surviving = await newer_state.load()
+    assert surviving is not None
+    assert surviving.status == "running"
+    assert surviving.attempt_id == "job-1:2"
+    newer_state.close()
+    older_state.close()
