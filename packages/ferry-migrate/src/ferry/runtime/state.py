@@ -1,18 +1,26 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Run state: the store protocol and the SQLite reference implementation.
 
-Three tables carry a migration run:
+The lifecycle tables carry a migration run:
 
 - **runs** — spec (canonical JSON + hash), lifecycle status, the persisted
   inspection and plan documents (plan hash included — approvals bind to it).
-- **checkpoints** — per-route resume cursor and completion flag.
-- **ledger** — one row per (route, source record): the identity ledger that
-  makes writes idempotent and resume exact. A record with a terminal status
-  (created/updated/skipped) is never re-written; failed records are retried
-  on resume.
+- **checkpoints** — per-route resume cursor and completion flag (legacy;
+  the engine now checkpoints through the execution journal).
+- **ledger** — one row per (route, source record). **Deprecated**: the
+  engine's durable per-record results moved to the pair-keyed
+  ``execution_results`` table owned by
+  :class:`ferry.runtime.execution.local.SqliteExecutionState` (v0 routes
+  are filter-less, so a route and its object pair name the same records).
+  The table is still created and readable — and rows written by an older
+  release keep surfacing through :meth:`SqliteStateStore.ledger_summary` /
+  :meth:`SqliteStateStore.terminal_source_ids` — for one release after the
+  engine swap, after which it becomes purely historical.
 
 Embedders (e.g. a hosted control plane) implement :class:`StateStore` over
-their own persistence; the SQLite store is the local-runtime default.
+their own persistence; the SQLite store is the local-runtime default and
+also hands the engine its execution-state family (ledger/journal/fence)
+over the same file via :meth:`SqliteStateStore.execution_state`.
 """
 
 from __future__ import annotations
@@ -23,9 +31,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ferry.connector.records import BatchWriteStatus
+from ferry.runtime.mapping.record_mapping import mapping_group_key
+
+if TYPE_CHECKING:
+    from ferry.runtime.execution.local import SqliteExecutionState
 
 TERMINAL_WRITE_STATUSES: frozenset[str] = frozenset({"created", "updated", "skipped"})
 
@@ -38,6 +50,13 @@ class RunStatus(StrEnum):
     APPLIED = "applied"
     VERIFIED = "verified"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+    """A cancellation recorded by the execution journal won the run.
+
+    Additive for the engine's execution-family adoption: no v0 flow issues a
+    cancellation itself; the engine maps a journal that already records one
+    onto this lifecycle status at the apply boundary.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -82,17 +101,28 @@ class StateStore(Protocol):
 
     def save_plan(self, run_id: str, plan_json: str, plan_hash: str) -> None: ...
 
-    def get_checkpoint(self, run_id: str, route_key: str) -> tuple[str | None, bool]: ...
+    def get_checkpoint(self, run_id: str, route_key: str) -> tuple[str | None, bool]:
+        """Deprecated: the engine resumes from the execution journal now."""
+        ...
 
-    def save_checkpoint(
-        self, run_id: str, route_key: str, cursor: str | None, done: bool
-    ) -> None: ...
+    def save_checkpoint(self, run_id: str, route_key: str, cursor: str | None, done: bool) -> None:
+        """Deprecated: the engine checkpoints through the execution journal now."""
+        ...
 
-    def record_results(self, run_id: str, route_key: str, entries: list[LedgerEntry]) -> None: ...
+    def record_results(self, run_id: str, route_key: str, entries: list[LedgerEntry]) -> None:
+        """Deprecated: the engine persists results through the pair-keyed
+        execution ledger (:class:`ferry.runtime.execution.ExecutionLedger`)."""
+        ...
 
-    def terminal_source_ids(self, run_id: str, route_key: str) -> set[str]: ...
+    def terminal_source_ids(self, run_id: str, route_key: str) -> set[str]:
+        """Deprecated: engine-internal reads moved to the execution ledger's
+        ``terminal_destination_ids``; kept for embedder compatibility."""
+        ...
 
-    def ledger_summary(self, run_id: str) -> dict[str, dict[str, int]]: ...
+    def ledger_summary(self, run_id: str) -> dict[str, dict[str, int]]:
+        """Deprecated: engine-internal reads moved to the execution ledger's
+        ``pair_status_totals``; kept for embedder compatibility."""
+        ...
 
 
 _SCHEMA = """
@@ -145,6 +175,19 @@ class SqliteStateStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    def execution_state(self, run_id: str, *, job_id: str | None = None) -> SqliteExecutionState:
+        """The run's execution-state family (ledger/journal/fence) over this file.
+
+        Implements the engine's execution-state seam: the pair-keyed
+        ``execution_results`` ledger and the fenced ``execution_journal``
+        live in additive tables inside the same SQLite file (see
+        :mod:`ferry.runtime.execution.local`). Callers own the returned
+        handle and must ``close()`` it.
+        """
+        from ferry.runtime.execution.local import SqliteExecutionState
+
+        return SqliteExecutionState(self._path, run_id=run_id, job_id=job_id)
 
     # -- runs ---------------------------------------------------------------
 
@@ -219,9 +262,14 @@ class SqliteStateStore:
         )
         self._conn.commit()
 
-    # -- ledger -------------------------------------------------------------
+    # -- ledger (deprecated: superseded by the pair-keyed execution ledger) --
 
     def record_results(self, run_id: str, route_key: str, entries: list[LedgerEntry]) -> None:
+        """Deprecated: the engine writes through the execution ledger now.
+
+        Kept fully functional for one release so external callers and the
+        revert path keep a working route-keyed ledger.
+        """
         self._conn.executemany(
             "INSERT INTO ledger"
             " (run_id, route_key, source_record_id, destination_record_id, status, message)"
@@ -244,14 +292,41 @@ class SqliteStateStore:
         self._conn.commit()
 
     def terminal_source_ids(self, run_id: str, route_key: str) -> set[str]:
+        """Deprecated read, kept truthful across the ledger migration.
+
+        Unions the legacy route-keyed rows with the pair-keyed execution
+        ledger (a v0 route key is ``source|destination``, so the pair is
+        recoverable from the key) — runs applied before and after the engine
+        swap both resolve.
+        """
         rows = self._conn.execute(
             "SELECT source_record_id FROM ledger"
             " WHERE run_id = ? AND route_key = ? AND status IN ('created', 'updated', 'skipped')",
             (run_id, route_key),
         ).fetchall()
-        return {row["source_record_id"] for row in rows}
+        ids = {str(row["source_record_id"]) for row in rows}
+        pair = route_key.split("|")
+        if len(pair) >= 2:
+            try:
+                pair_rows = self._conn.execute(
+                    "SELECT source_record_id FROM execution_results"
+                    " WHERE run_id = ? AND source_object = ? AND destination_object = ?"
+                    " AND status IN ('created', 'updated', 'skipped')",
+                    (run_id, pair[0], pair[1]),
+                ).fetchall()
+            except sqlite3.OperationalError:  # execution tables not created yet
+                pair_rows = []
+            ids.update(str(row["source_record_id"]) for row in pair_rows)
+        return ids
 
     def ledger_summary(self, run_id: str) -> dict[str, dict[str, int]]:
+        """Deprecated read, kept truthful across the ledger migration.
+
+        Routes the engine has written through the pair-keyed execution
+        ledger report from there (the durable authority); routes only the
+        legacy ``ledger`` table knows (state files from before the engine
+        swap) keep reporting their historical counts.
+        """
         rows = self._conn.execute(
             "SELECT route_key, status, COUNT(*) AS n FROM ledger"
             " WHERE run_id = ? GROUP BY route_key, status",
@@ -260,6 +335,30 @@ class SqliteStateStore:
         summary: dict[str, dict[str, int]] = {}
         for row in rows:
             summary.setdefault(row["route_key"], {})[row["status"]] = row["n"]
+        summary.update(self._execution_result_summary(run_id))
+        return summary
+
+    def _execution_result_summary(self, run_id: str) -> dict[str, dict[str, int]]:
+        """Per-route counts from the pair-keyed execution ledger.
+
+        v0 plans emit filter-less routes (route key ``source|destination``),
+        so each object pair maps back to exactly one plan route key.
+        """
+        try:
+            rows = self._conn.execute(
+                "SELECT source_object, destination_object, status, COUNT(*) AS n"
+                " FROM execution_results WHERE run_id = ?"
+                " GROUP BY source_object, destination_object, status",
+                (run_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:  # execution tables not created yet
+            return {}
+        summary: dict[str, dict[str, int]] = {}
+        for row in rows:
+            route_key = mapping_group_key(
+                str(row["source_object"]), str(row["destination_object"]), None
+            )
+            summary.setdefault(route_key, {})[str(row["status"])] = int(row["n"])
         return summary
 
 

@@ -68,7 +68,12 @@ from ferry.runtime.execution.report_codec import (
     route_keys_by_pair,
     selected_route_keys,
 )
-from ferry.runtime.execution.routes import OnMissingIdentity, WritePolicies, run_batch
+from ferry.runtime.execution.routes import (
+    OnMissingIdentity,
+    WritePolicies,
+    WriteRetry,
+    run_batch,
+)
 from ferry.runtime.execution.scope import (
     execution_routes,
     freeze_route_high_water_marks,
@@ -118,6 +123,7 @@ __all__ = [
     "SaveOutcome",
     "SqliteExecutionState",
     "WritePolicies",
+    "WriteRetry",
     "WriteStatus",
     "apply_durable_route_results",
     "assemble_continuous_report",

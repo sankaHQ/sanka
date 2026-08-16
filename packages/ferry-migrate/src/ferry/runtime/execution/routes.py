@@ -22,22 +22,26 @@ vocabulary for a workspace, program, or channel.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from ferry.connector import (
+    BatchRelationshipWriteResult,
     BatchWriteInput,
+    BatchWriteResult,
     Credentials,
     DestinationConnector,
     RecordPage,
     RelationshipWrite,
+    RelationshipWriteResult,
     SourceConnector,
     SupportsBatchRelationshipWrites,
     SupportsBatchWrites,
     SupportsBoundedReads,
     SupportsOwnerDirectory,
     WriteOptions,
+    WriteResult,
 )
 from ferry.connector.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
 from ferry.runtime.execution.errors import ExecutionFault
@@ -77,6 +81,15 @@ Production drops such records silently (``"drop"``, behavior preservation);
 the open runtime defaults to ``"fail"`` — a synthetic failed result that
 holds the checkpoint, because a record the ledger cannot key can never be
 reconciled.
+"""
+
+WriteRetry = Callable[[Callable[[], Awaitable[Any]]], Awaitable[Any]]
+"""Host-supplied wrapper applied around every destination write dispatch.
+
+``None`` dispatches writes directly (production behavior — the host's
+adapters own their own retries). The open engine passes its retry/backoff
+policy here so transient connector errors back off instead of burning a
+failed result.
 """
 
 _MESSAGE_LIMIT = 500
@@ -125,12 +138,22 @@ class _OwnerDirectories:
     source_directory: SourceOwnerDirectory | None = None
 
 
-def _record_identity(record: Mapping[str, Any]) -> str:
+def _record_identity(record: Mapping[str, Any], identity_field: str | None = None) -> str:
+    if identity_field:
+        return str(record.get(identity_field) or "").strip()
     return str(record.get("Id") or record.get("id") or "").strip()
 
 
 def _failure_message(error: Exception) -> str:
     return str(error)[:_MESSAGE_LIMIT]
+
+
+async def _dispatch_write[T](retry: WriteRetry | None, operation: Callable[[], Awaitable[T]]) -> T:
+    """Dispatch one destination write, through the host's retry wrapper if any."""
+
+    if retry is None:
+        return await operation()
+    return cast("T", await retry(operation))
 
 
 async def _retry_parked_relationships(
@@ -172,6 +195,9 @@ async def _read_route_page(
 ) -> RecordPage:
     """Read one route page — bounded by the frozen mark when the scope has one."""
 
+    field_keys = source_field_keys(route.fields)
+    if route.source_identity_field and route.source_identity_field not in field_keys:
+        field_keys = sorted([*field_keys, route.source_identity_field])
     if upper_bound is not None:
         if not isinstance(source, SupportsBoundedReads):
             raise ExecutionFault(
@@ -181,7 +207,7 @@ async def _read_route_page(
         return await source.read_records_bounded(
             source_credentials,
             object_type=route.source_object,
-            field_keys=source_field_keys(route.fields),
+            field_keys=field_keys,
             limit=batch_size,
             cursor=cursor,
             source_filter=route.source_filter,
@@ -190,7 +216,7 @@ async def _read_route_page(
     return await source.read_records(
         source_credentials,
         object_type=route.source_object,
-        field_keys=source_field_keys(route.fields),
+        field_keys=field_keys,
         limit=batch_size,
         cursor=cursor,
         source_filter=route.source_filter,
@@ -320,6 +346,7 @@ async def run_batch(
     host: ExecutionHost,
     route_high_water_marks: Mapping[str, str | None] | None = None,
     on_missing_identity: OnMissingIdentity = "fail",
+    retry: WriteRetry | None = None,
 ) -> bool:
     """Run one batch pass over the selected routes; mutate ``snapshot``.
 
@@ -403,7 +430,7 @@ async def run_batch(
         page_source_ids = [
             source_record_id
             for record in page.records
-            if (source_record_id := _record_identity(record))
+            if (source_record_id := _record_identity(record, route.source_identity_field))
         ]
         batch_pages[route_key] = BatchPage(
             source_record_ids=tuple(page_source_ids),
@@ -443,7 +470,7 @@ async def run_batch(
         )
         missing_identity_count = 0
         for record in page.records:
-            source_record_id = _record_identity(record)
+            source_record_id = _record_identity(record, route.source_identity_field)
             if not source_record_id:
                 if on_missing_identity == "drop":
                     continue
@@ -485,12 +512,20 @@ async def run_batch(
                             )
                         )
                     else:
-                        result = await destination.write_record(
-                            destination_credentials,
-                            object_type=route.destination_object,
-                            properties=properties,
-                            options=write_options,
-                        )
+
+                        async def write_one(
+                            bound: dict[str, Any] = properties,
+                            destination_object: str = route.destination_object,
+                            options: WriteOptions = write_options,
+                        ) -> WriteResult:
+                            return await destination.write_record(
+                                destination_credentials,
+                                object_type=destination_object,
+                                properties=bound,
+                                options=options,
+                            )
+
+                        result = await _dispatch_write(retry, write_one)
                         state.status = result.status
                         state.destination_record_id = result.destination_record_id
                         state.message = result.message
@@ -504,13 +539,22 @@ async def run_batch(
             record_states.append(state)
 
         if batch_writer is not None and batch_write_inputs:
-            try:
-                batch_results = await batch_writer.write_records(
+
+            async def write_batch(
+                writer: SupportsBatchWrites = batch_writer,
+                destination_object: str = route.destination_object,
+                records: list[BatchWriteInput] = batch_write_inputs,
+                options: WriteOptions = write_options,
+            ) -> list[BatchWriteResult]:
+                return await writer.write_records(
                     destination_credentials,
-                    object_type=route.destination_object,
-                    records=batch_write_inputs,
-                    options=write_options,
+                    object_type=destination_object,
+                    records=records,
+                    options=options,
                 )
+
+            try:
+                batch_results = await _dispatch_write(retry, write_batch)
                 batch_results_by_trace = {result.trace_id: result for result in batch_results}
             except Exception as error:
                 batch_results_by_trace = {}
@@ -596,10 +640,16 @@ async def run_batch(
                             relationship_source_by_trace[trace_id] = state.source_record_id
                             relationship_pending_by_trace[trace_id] = parked_relationship
                         else:
-                            await destination.write_relationship(
-                                destination_credentials,
-                                relationship=relationship_write,
-                            )
+
+                            async def link_one(
+                                bound: RelationshipWrite = relationship_write,
+                            ) -> RelationshipWriteResult:
+                                return await destination.write_relationship(
+                                    destination_credentials,
+                                    relationship=bound,
+                                )
+
+                            await _dispatch_write(retry, link_one)
                     except Exception as error:
                         state.relationship_failed = True
                         state.pending_relationships[pending_key] = parked_relationship
@@ -608,11 +658,18 @@ async def run_batch(
                         ).strip()[:_MESSAGE_LIMIT]
 
         if relationship_batch_writer is not None and relationship_inputs:
-            try:
-                relationship_results = await relationship_batch_writer.write_relationships(
+
+            async def link_batch(
+                writer: SupportsBatchRelationshipWrites = relationship_batch_writer,
+                relationships: list[RelationshipWrite] = relationship_inputs,
+            ) -> list[BatchRelationshipWriteResult]:
+                return await writer.write_relationships(
                     destination_credentials,
-                    relationships=relationship_inputs,
+                    relationships=relationships,
                 )
+
+            try:
+                relationship_results = await _dispatch_write(retry, link_batch)
             except Exception as error:
                 relationship_results = []
                 relationship_batch_error = _failure_message(error)

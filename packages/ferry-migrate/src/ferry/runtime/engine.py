@@ -6,12 +6,21 @@ Safety properties (see docs/ARCHITECTURE.md tenets):
 - ``inspect`` and ``plan`` never call a write method.
 - ``apply`` is hash-bound: it executes exactly the persisted plan, and a
   caller-supplied ``plan_hash`` must match it.
-- Writes are idempotent through the identity ledger: records with a terminal
-  status are filtered out before writing, so re-running ``apply`` (after a
-  crash, or twice) converges instead of duplicating.
-- Progress checkpoints per page; resume picks up from the saved cursor.
+- ``apply`` delegates batch execution to the shared
+  :mod:`ferry.runtime.execution` family — the same route executor the
+  production host runs — so the local engine carries relationships,
+  references, owner mapping, frozen high-water-mark scope (when the source
+  supports it, degrading gracefully otherwise), and attempt-exact resume:
+  every batch lands in the fenced execution journal, and per-record results
+  land in the pair-keyed execution ledger with a count-verified fail-closed
+  write.
+- Writes are idempotent through that ledger: records with a terminal status
+  are skipped without a rewrite, so re-running ``apply`` (after a crash, or
+  twice) converges instead of duplicating; failed records hold the route
+  checkpoint and are retried on resume.
 - Retryable connector errors back off exponentially (honoring
-  ``retry_after_seconds``); non-retryable errors fail the run cleanly.
+  ``retry_after_seconds``); non-retryable errors fail the record, and a
+  batch that stops making progress fails the run for review.
 """
 
 from __future__ import annotations
@@ -19,33 +28,40 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import Any, Protocol, cast, runtime_checkable
 
-from ferry.connector import (
-    BatchWriteInput,
-    BatchWriteResult,
-    ConflictPolicy,
-    ConnectorError,
-    Credentials,
-    SupportsBatchWrites,
-    SupportsRecordCounts,
-    WriteOptions,
-    WriteResult,
-)
+from ferry.connector import ConflictPolicy, ConnectorError, Credentials, SupportsRecordCounts
 from ferry.connector.protocols import DestinationConnector, SourceConnector
+from ferry.runtime.execution import (
+    AttemptFence,
+    ExecutionFault,
+    ExecutionHost,
+    ExecutionJournal,
+    ExecutionLedger,
+    ExecutionRoute,
+    ExecutionScope,
+    ExecutionSnapshot,
+    ExecutionStatus,
+    JournalEntry,
+    WritePolicies,
+    freeze_scope,
+    normalized_attempt_identity,
+    run_batch,
+)
 from ferry.runtime.hashing import canonical_json
-from ferry.runtime.mapping.errors import MappingError
-from ferry.runtime.mapping.record_mapping import destination_properties, source_field_keys
+from ferry.runtime.mapping.record_mapping import MappingGroup, mapping_group_key
 from ferry.runtime.planner import MigrationPlan, RoutePlan, build_plan
 from ferry.runtime.registry import ConnectorRegistry
 from ferry.runtime.spec import EndpointSpec, MigrationSpec, resolve_env
-from ferry.runtime.state import TERMINAL_WRITE_STATUSES, LedgerEntry, RunStatus, StateStore
+from ferry.runtime.state import TERMINAL_WRITE_STATUSES, RunStatus, StateStore
 
 MAX_WRITE_ATTEMPTS = 5
 _BACKOFF_BASE_SECONDS = 0.5
 _BACKOFF_CAP_SECONDS = 30.0
+_FAILURE_MESSAGE_LIMIT = 500
 
 
 class ExecutionError(RuntimeError):
@@ -54,6 +70,56 @@ class ExecutionError(RuntimeError):
 
 class PlanMismatchError(ExecutionError):
     """The supplied plan hash does not match the persisted plan."""
+
+
+@runtime_checkable
+class ExecutionState(ExecutionLedger, ExecutionJournal, AttemptFence, Protocol):
+    """One run's bundled execution-state family: ledger, journal, and fence."""
+
+    def close(self) -> None: ...
+
+
+@runtime_checkable
+class ExecutionStateProvider(Protocol):
+    """Lifecycle stores that can hand out a run's execution-state family.
+
+    :class:`ferry.runtime.state.SqliteStateStore` provides it over the same
+    SQLite file; an embedder store implements this seam over its own
+    persistence to run ``apply``/``verify``.
+    """
+
+    def execution_state(self, run_id: str) -> ExecutionState: ...
+
+
+class _ExecutionIdentityLedger:
+    """Run-scoped identity lookups over the pair-keyed execution ledger.
+
+    The mapping family's reference/relationship resolution asks an
+    ``IdentityLedger`` for destination ids; in the local engine the durable
+    execution ledger is exactly that record — terminal rows whose
+    destination id is known.
+    """
+
+    def __init__(self, ledger: ExecutionLedger) -> None:
+        self._ledger = ledger
+
+    async def get_destination_record_ids(
+        self,
+        *,
+        source_object: str,
+        source_record_ids: Sequence[str],
+        destination_object: str,
+    ) -> dict[str, str]:
+        terminal = await self._ledger.terminal_destination_ids(
+            source_object=source_object,
+            source_record_ids=source_record_ids,
+            destination_object=destination_object,
+        )
+        return {
+            source_id: destination_id
+            for source_id, destination_id in terminal.items()
+            if destination_id
+        }
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -196,23 +262,44 @@ class MigrationEngine:
         spec = self._spec(run_id)
         source, source_credentials = self._source(spec)
         destination, destination_credentials = self._destination(spec)
-        conflict_policy = _conflict_policy(spec)
+        policies = WritePolicies(conflict_policy=_conflict_policy(spec))
 
+        state = self._execution_state(run_id)
+        host = ExecutionHost(
+            ledger=state,
+            journal=state,
+            fence=state,
+            identity_ledger=_ExecutionIdentityLedger(state),
+            shared_identity_ledger=None,
+        )
         self._store.set_status(run_id, RunStatus.APPLYING)
         try:
-            for route in plan.routes:
-                await self._apply_route(
-                    run_id,
-                    route,
-                    source=source,
-                    source_credentials=source_credentials,
-                    destination=destination,
-                    destination_credentials=destination_credentials,
-                    conflict_policy=conflict_policy,
-                )
+            final_status = await self._drive_apply(
+                run_id,
+                plan,
+                host=host,
+                source=source,
+                source_credentials=source_credentials,
+                destination=destination,
+                destination_credentials=destination_credentials,
+                policies=policies,
+            )
         except ConnectorError as error:
             self._store.set_status(run_id, RunStatus.FAILED)
             raise ExecutionError(f"run {run_id!r} failed ({error.category}): {error}") from error
+        except ExecutionFault as fault:
+            self._store.set_status(run_id, RunStatus.FAILED)
+            raise ExecutionError(f"run {run_id!r} failed ({fault.code}): {fault}") from fault
+        except ExecutionError:
+            self._store.set_status(run_id, RunStatus.FAILED)
+            raise
+        finally:
+            state.close()
+        if final_status == "cancelled":
+            # No v0 flow records a cancellation itself; honoring one found in
+            # the journal is the additive boundary mapping for RunStatus.
+            self._store.set_status(run_id, RunStatus.CANCELLED)
+            raise ExecutionError(f"run {run_id!r} was cancelled")
         self._store.set_status(run_id, RunStatus.APPLIED)
 
     async def verify(self, run_id: str) -> VerifyReport:
@@ -223,7 +310,7 @@ class MigrationEngine:
         spec = self._spec(run_id)
         source, source_credentials = self._source(spec)
         destination, destination_credentials = self._destination(spec)
-        summary = self._store.ledger_summary(run_id)
+        summary = await self._ledger_route_summary(run_id)
 
         destination_counts: dict[str, int] = {}
         canonical_types = {route.canonical_type for route in plan.routes}
@@ -257,139 +344,192 @@ class MigrationEngine:
 
     # -- internals ----------------------------------------------------------
 
-    async def _apply_route(
+    async def _drive_apply(
         self,
         run_id: str,
-        route: RoutePlan,
+        plan: MigrationPlan,
         *,
+        host: ExecutionHost,
         source: SourceConnector,
         source_credentials: Credentials,
         destination: DestinationConnector,
         destination_credentials: Credentials,
-        conflict_policy: ConflictPolicy,
-    ) -> None:
-        cursor, done = self._store.get_checkpoint(run_id, route.route_key)
-        if done:
-            return
-        terminal = self._store.terminal_source_ids(run_id, route.route_key)
-        field_keys = sorted(set(source_field_keys(route.field_mappings)) | {route.identity_field})
-        options = WriteOptions(
-            conflict_policy=conflict_policy,
-            identity_fields=route.identity_target_fields or None,
+        policies: WritePolicies,
+    ) -> ExecutionStatus:
+        """Claim the run's attempt and loop batches to a terminal status.
+
+        Single-shot local execution over the execution family: the journal
+        entry is loaded (or created), the attempt fence claims it, the scope
+        is frozen (or revalidated against the persisted one on resume), and
+        ``run_batch`` runs until no route holds more records — saving the
+        journal after every batch, so an interrupted apply resumes from the
+        exact batch it stopped at. A batch that makes no progress fails the
+        run for review instead of spinning.
+        """
+        journal = host.journal
+        entry = await journal.load()
+        if entry is not None and entry.status in ("completed", "cancelled"):
+            return entry.status  # idempotent re-apply / cancellation honored
+        attempt = normalized_attempt_identity(job_id=f"apply:{run_id}")
+        claim_outcome, claimed = await host.fence.claim(attempt)
+        if claim_outcome == "cancelled":
+            return "cancelled"
+        if claim_outcome == "superseded":
+            raise ExecutionError(
+                f"run {run_id!r} is owned by another execution attempt; not resuming"
+            )
+        if claimed is not None:
+            entry = claimed
+
+        routes = [_execution_route(route) for route in plan.routes]
+        scope = await self._freeze_apply_scope(
+            plan,
+            saved_scope=entry.scope if entry is not None else None,
+            source=source,
+            source_credentials=source_credentials,
         )
-
-        while True:
-            page = await source.read_records(
-                source_credentials,
-                object_type=route.source_object,
-                field_keys=field_keys,
-                limit=self._batch_size,
-                cursor=cursor,
-            )
-            entries = await self._write_page(
-                page.records,
-                route,
-                terminal=terminal,
-                destination=destination,
-                destination_credentials=destination_credentials,
-                options=options,
-            )
-            if entries:
-                self._store.record_results(run_id, route.route_key, entries)
-                terminal.update(
-                    e.source_record_id for e in entries if e.status in TERMINAL_WRITE_STATUSES
-                )
-            cursor = page.next_cursor
-            self._store.save_checkpoint(run_id, route.route_key, cursor, not page.has_more)
-            if not page.has_more:
-                return
-
-    async def _write_page(
-        self,
-        records: list[dict[str, Any]],
-        route: RoutePlan,
-        *,
-        terminal: set[str],
-        destination: DestinationConnector,
-        destination_credentials: Credentials,
-        options: WriteOptions,
-    ) -> list[LedgerEntry]:
-        entries: list[LedgerEntry] = []
-        pending: list[tuple[str, dict[str, Any]]] = []
-        for record in records:
-            raw_identity = record.get(route.identity_field)
-            if raw_identity is None or str(raw_identity) == "":
-                entries.append(
-                    LedgerEntry(
-                        source_record_id=f"missing-identity:{len(entries)}",
-                        status="failed",
-                        message=f"record missing identity field {route.identity_field!r}",
-                    )
-                )
-                continue
-            source_id = str(raw_identity)
-            if source_id in terminal:
-                continue
-            try:
-                properties = destination_properties(record, route.field_mappings)
-            except MappingError as error:
-                entries.append(
-                    LedgerEntry(
-                        source_record_id=source_id,
-                        status="failed",
-                        message=f"{error.code}: {error}",
-                    )
-                )
-                continue
-            pending.append((source_id, properties))
-
-        if not pending:
-            return entries
-
-        if isinstance(destination, SupportsBatchWrites):
-
-            async def write_batch() -> list[BatchWriteResult]:
-                return await destination.write_records(
-                    destination_credentials,
-                    object_type=route.target_object,
-                    records=[
-                        BatchWriteInput(trace_id=source_id, properties=properties)
-                        for source_id, properties in pending
-                    ],
-                    options=options,
-                )
-
-            results = await self._with_retries(write_batch)
-            entries.extend(
-                LedgerEntry(
-                    source_record_id=result.trace_id,
-                    status=result.status,
-                    destination_record_id=result.destination_record_id,
-                    message=result.message,
-                )
-                for result in results
+        now = _utc_now()
+        if entry is None:
+            entry = JournalEntry(
+                status="running",
+                snapshot=ExecutionSnapshot(),
+                job_id=None,  # manual single-shot execution
+                attempt_id=attempt.attempt_id,
+                batch_size=self._batch_size,
+                batches_completed=0,
+                started_at=now,
+                last_heartbeat_at=now,
+                resumed=False,
+                scope=scope,
+                durable_results_attempt_id=None,
             )
         else:
-            for source_id, properties in pending:
+            entry.status = "running"
+            entry.attempt_id = attempt.attempt_id
+            entry.batch_size = self._batch_size
+            entry.started_at = entry.started_at or now
+            entry.resumed = True
+            entry.scope = scope
 
-                async def write_one(bound: dict[str, Any] = properties) -> WriteResult:
-                    return await destination.write_record(
-                        destination_credentials,
-                        object_type=route.target_object,
-                        properties=bound,
-                        options=options,
-                    )
-
-                result = await self._with_retries(write_one)
-                entries.append(
-                    LedgerEntry(
-                        source_record_id=source_id,
-                        status=result.status,
-                        destination_record_id=result.destination_record_id,
-                        message=result.message,
-                    )
+        marks = dict(scope.route_high_water_marks)
+        previous_marker = entry.snapshot.progress_marker()
+        while True:
+            try:
+                has_more = await run_batch(
+                    routes=routes,
+                    source=source,
+                    source_credentials=source_credentials,
+                    destination=destination,
+                    destination_credentials=destination_credentials,
+                    policies=policies,
+                    batch_size=self._batch_size,
+                    snapshot=entry.snapshot,
+                    host=host,
+                    route_high_water_marks=marks,
+                    on_missing_identity="fail",
+                    retry=self._with_retries,
                 )
-        return entries
+            except (ConnectorError, ExecutionFault) as error:
+                await self._save_failed(journal, entry, message=str(error))
+                raise
+            entry.batches_completed += 1
+            marker = entry.snapshot.progress_marker()
+            stalled = has_more and marker == previous_marker
+            entry.status = "failed" if stalled else ("running" if has_more else "completed")
+            entry.last_heartbeat_at = _utc_now()
+            outcome = await journal.save(entry)
+            if outcome == "cancelled":
+                return "cancelled"
+            if outcome == "superseded":
+                raise ExecutionError(
+                    f"run {run_id!r} execution state was superseded; not overwriting"
+                )
+            if stalled:
+                failed_count = sum(
+                    counts.get("failed", 0) for counts in entry.snapshot.route_counts.values()
+                )
+                raise ExecutionError(
+                    f"run {run_id!r} stopped without progress; {failed_count} failed"
+                    " record(s) need review — fix the cause and re-apply to resume"
+                )
+            if not has_more:
+                return "completed"
+            previous_marker = marker
+
+    async def _freeze_apply_scope(
+        self,
+        plan: MigrationPlan,
+        *,
+        saved_scope: ExecutionScope | None,
+        source: SourceConnector,
+        source_credentials: Credentials,
+    ) -> ExecutionScope:
+        """Freeze (or revalidate) the bounded scope this apply is bound to.
+
+        The first apply freezes per-route high-water marks — sources without
+        the capability degrade gracefully to unbounded reads — and counts
+        the frozen route totals. A resumed apply requires the persisted
+        manifest to still describe the plan's routes and reuses the saved
+        marks, keeping the run bound to the originally frozen candidate set.
+        """
+        groups: list[MappingGroup] = [
+            (route.source_object, route.target_object, None, route.field_mappings)
+            for route in plan.routes
+        ]
+        saved_marks = dict(saved_scope.route_high_water_marks) if saved_scope is not None else {}
+        return await freeze_scope(
+            groups=groups,
+            source=source,
+            source_credentials=source_credentials,
+            expected_route_manifest=(
+                list(saved_scope.route_manifest) if saved_scope is not None else None
+            ),
+            route_high_water_marks=saved_marks or None,
+        )
+
+    async def _save_failed(
+        self, journal: ExecutionJournal, entry: JournalEntry, *, message: str
+    ) -> None:
+        """Best-effort failed journal save; never masks the original error."""
+        entry.status = "failed"
+        truncated = message[:_FAILURE_MESSAGE_LIMIT]
+        if truncated and truncated not in entry.snapshot.warnings:
+            entry.snapshot.warnings.append(truncated)
+        entry.last_heartbeat_at = _utc_now()
+        try:
+            await journal.save(entry)
+        except ExecutionFault:
+            return
+
+    async def _ledger_route_summary(self, run_id: str) -> dict[str, dict[str, int]]:
+        """Per-route status counts from the pair-keyed execution ledger.
+
+        v0 routes are filter-less, so each object pair names exactly one
+        plan route. Routes only the deprecated route-keyed store ledger
+        knows (state files from before the engine swap) fall back to their
+        historical counts.
+        """
+        state = self._execution_state(run_id)
+        try:
+            pair_totals = await state.pair_status_totals()
+        finally:
+            state.close()
+        summary: dict[str, dict[str, int]] = {}
+        for total in pair_totals:
+            route_key = mapping_group_key(total.source_object, total.destination_object, None)
+            summary.setdefault(route_key, {})[total.status] = total.count
+        for route_key, counts in self._store.ledger_summary(run_id).items():
+            summary.setdefault(route_key, dict(counts))
+        return summary
+
+    def _execution_state(self, run_id: str) -> ExecutionState:
+        if not isinstance(self._store, ExecutionStateProvider):
+            raise ExecutionError(
+                f"state store {type(self._store).__name__} does not provide the"
+                " execution-state family; implement execution_state(run_id)"
+                " (see ferry.runtime.execution) to apply or verify runs"
+            )
+        return self._store.execution_state(run_id)
 
     async def _with_retries[T](self, operation: Callable[[], Awaitable[T]]) -> T:
         attempt = 0
@@ -422,6 +562,22 @@ class MigrationEngine:
 
     def _destination(self, spec: MigrationSpec) -> tuple[DestinationConnector, Credentials]:
         return self._registry.destination(spec.target.type), _credentials(spec.target)
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _execution_route(route: RoutePlan) -> ExecutionRoute:
+    """The executable shape of one reviewed plan route (v0: filter-less)."""
+    return ExecutionRoute(
+        route_key=route.route_key,
+        source_object=route.source_object,
+        destination_object=route.target_object,
+        source_filter=None,
+        fields=route.field_mappings,
+        source_identity_field=route.identity_field,
+    )
 
 
 def _conflict_policy(spec: MigrationSpec) -> ConflictPolicy:
