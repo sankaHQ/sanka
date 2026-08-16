@@ -40,6 +40,14 @@ class ExecutionRoute:
     destination_object: str
     source_filter: SourceFilter | None
     fields: list[MigrationMappingField]
+    source_identity_field: str | None = None
+    """Source field carrying the record identity the ledger keys on.
+
+    ``None`` keeps the production convention (the raw ``Id``/``id`` record
+    keys). The open planner's routes name an explicit identity field per
+    source schema (``RoutePlan.identity_field``), which rides here so batch
+    execution keys records exactly as the reviewed plan does.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
