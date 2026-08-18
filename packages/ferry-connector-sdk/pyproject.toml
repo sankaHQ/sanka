@@ -23,5 +23,8 @@ Issues = "https://github.com/sankaHQ/sanka-migrate/issues"
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+skip-excluded-dirs = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ferry"]
