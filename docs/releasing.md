@@ -41,14 +41,21 @@ dependencies, entry points, and the complete artifact set, then runs
    owner must be `sankaHQ`, repository `sanka-migrate`, workflow
    `publish.yml`, and environment `pypi`.
 3. Configure the same package set on TestPyPI with environment `testpypi`.
-4. Create protected GitHub environments `testpypi` and `pypi`; require an
-   authorized human reviewer, prevent self-review where supported, and limit
-   deployment to tags.
+4. Create GitHub environments `testpypi` and `pypi` and limit deployment to
+   tags. Keep repository variable `SANKA_MIGRATE_PUBLISH_ENABLED` absent or
+   set to `false`; publish jobs cannot run without the exact value `true`.
 5. Protect `main`, require the `check` job, enable dependency alerts, secret
    scanning/push protection, code scanning, private vulnerability reporting,
    and Discussions before changing visibility.
 6. Confirm counsel-approved CLA/commercial-license text and activate the CLA
    signing gate before accepting external pull requests.
+
+The `sankaHQ` organization currently uses GitHub Team. GitHub does not offer
+required environment reviewers for private repositories on that plan. After
+the separately approved public-repository flip, require an authorized human
+reviewer on both environments, prevent self-review, verify those rules with a
+non-publishing test dispatch, and only then set
+`SANKA_MIGRATE_PUBLISH_ENABLED=true`.
 
 ## Publication gate
 
@@ -56,11 +63,13 @@ dependencies, entry points, and the complete artifact set, then runs
    `uv.lock`.
 2. Run `make check` and `make build-release` on the exact commit.
 3. Create and push `v<version>` only after review.
-4. Dispatch **Publish Python packages** while the workflow is checked out at
+4. Confirm the environment-reviewer rules are active and repository variable
+   `SANKA_MIGRATE_PUBLISH_ENABLED` is exactly `true`.
+5. Dispatch **Publish Python packages** while the workflow is checked out at
    that tag. Enter the exact confirmation phrase for TestPyPI first.
-5. Install every artifact from TestPyPI in a clean environment and run the CLI
+6. Install every artifact from TestPyPI in a clean environment and run the CLI
    and connector-discovery smoke tests.
-6. Obtain a new approval for the exact tag and artifact hashes, then dispatch
+7. Obtain a new approval for the exact tag and artifact hashes, then dispatch
    the PyPI target. PyPI releases are immutable; never overwrite or reuse a
    version.
 

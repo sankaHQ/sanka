@@ -46,7 +46,10 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI
-    if: inputs.target == 'testpypi' && inputs.confirmation == 'publish-testpypi'
+    if: >-
+      vars.SANKA_MIGRATE_PUBLISH_ENABLED == 'true' &&
+      inputs.target == 'testpypi' &&
+      inputs.confirmation == 'publish-testpypi'
     needs: build
     runs-on: ubuntu-latest
     environment: testpypi
@@ -65,7 +68,10 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    if: inputs.target == 'pypi' && inputs.confirmation == 'publish-pypi'
+    if: >-
+      vars.SANKA_MIGRATE_PUBLISH_ENABLED == 'true' &&
+      inputs.target == 'pypi' &&
+      inputs.confirmation == 'publish-pypi'
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
