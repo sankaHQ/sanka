@@ -35,6 +35,6 @@ licenses:
 	$(UV) run python scripts/check_dependency_licenses.py
 
 build-release:
-	$(UV) build --all-packages --out-dir dist --clear
+	$(UV) build --all-packages --out-dir dist --clear --no-create-gitignore
 	$(UV) run python scripts/check_release_artifacts.py dist
 	$(UV) publish --dry-run --trusted-publishing never dist/*
