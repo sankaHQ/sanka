@@ -38,4 +38,4 @@ build-backend = "hatchling.build"
 skip-excluded-dirs = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ferry"]
+packages = ["src/ferry", "src/sanka"]

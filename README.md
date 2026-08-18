@@ -131,7 +131,44 @@ point; see [connectors/](connectors/) for the pattern.
 
 ## Use it as a library
 
-The CLI is a thin wrapper over the engine — embed it directly:
+Install `sanka-migrate` plus the connectors your migration uses, then start
+from the Sanka facade:
+
+```bash
+pip install sanka-migrate sanka-migrate-connector-markdown sanka-migrate-connector-sqlite
+```
+
+```python
+import asyncio
+
+from sanka import Sanka
+
+async def main() -> None:
+    with Sanka() as sanka:
+        migration = sanka.migrate(
+            source="./content",
+            target="sqlite://content.db",
+        )
+
+        plan = await migration.plan()  # destination-write-free, reviewable
+        await migration.validate()  # destination-write-free
+        await migration.apply(plan_hash=plan.plan_hash)  # exact reviewed plan only
+        report = await migration.verify()
+
+    assert report.ok
+
+
+asyncio.run(main())
+```
+
+`Sanka.migrate(...)` creates or resumes a lifecycle handle; it does not write
+to the destination. The default local run state remains `.ferry/state.db` so
+existing migrations resume without conversion. Pass `EndpointSpec` from
+`sanka` when a path or URL does not carry enough connector information.
+
+The facade delegates to the same engine used by the CLI. Advanced embedders
+can continue to construct that engine directly when supplying a custom state
+store or registry:
 
 ```python
 from ferry.runtime.engine import MigrationEngine
@@ -204,8 +241,9 @@ The runtime is also available under a
 embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
 
 The public project and distribution names are defined in
-[docs/public-naming.md](docs/public-naming.md). Python imports, the
-`ferry.connectors` entry-point group, `FERRY_*` environment variables, and the
+[docs/public-naming.md](docs/public-naming.md). New applications use
+`from sanka import Sanka`; the historical `ferry.*` imports,
+`ferry.connectors` entry-point group, `FERRY_*` environment variables, and
 `ferry` CLI alias remain stable compatibility identifiers.
 
 ## Development

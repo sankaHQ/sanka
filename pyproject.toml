@@ -44,7 +44,7 @@ exclude = ["*.md"]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ferry"]
+known-first-party = ["ferry", "sanka"]
 
 [tool.mypy]
 strict = true

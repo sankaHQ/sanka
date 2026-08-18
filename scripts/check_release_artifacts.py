@@ -29,7 +29,7 @@ def _wheel_prefix(name: str) -> str:
     return name.replace("-", "_")
 
 
-def _metadata_from_wheel(path: Path) -> tuple[EmailMessage, str]:
+def _metadata_from_wheel(path: Path) -> tuple[EmailMessage, str, set[str]]:
     with zipfile.ZipFile(path) as archive:
         metadata_names = [
             name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
@@ -46,7 +46,7 @@ def _metadata_from_wheel(path: Path) -> tuple[EmailMessage, str]:
         license_files = [name for name in archive.namelist() if ".dist-info/licenses/" in name]
         if not any(name.endswith("/LICENSE") for name in license_files):
             raise ValueError(f"{path.name}: wheel does not contain a LICENSE file")
-        return metadata, entry_points
+        return metadata, entry_points, set(archive.namelist())
 
 
 def _sdist_has_license(path: Path) -> bool:
@@ -79,7 +79,7 @@ def main() -> int:
             continue
 
         try:
-            metadata, entry_points = _metadata_from_wheel(wheels[0])
+            metadata, entry_points, wheel_members = _metadata_from_wheel(wheels[0])
         except ValueError as exc:
             errors.append(str(exc))
             continue
@@ -111,6 +111,17 @@ def main() -> int:
                 for requirement in requirements
             ):
                 errors.append("sanka-migrate: public SDK distribution dependency is missing")
+            required_imports = {
+                "sanka/__init__.py",
+                "sanka/_client.py",
+                "ferry/runtime/__init__.py",
+            }
+            missing_imports = sorted(required_imports - wheel_members)
+            if missing_imports:
+                errors.append(
+                    "sanka-migrate: wheel is missing public/compatibility imports: "
+                    f"{missing_imports}"
+                )
         elif project_name != "sanka-migrate-connector-sdk":
             if "[ferry.connectors]" not in entry_points:
                 errors.append(f"{project_name}: stable ferry.connectors entry-point group moved")

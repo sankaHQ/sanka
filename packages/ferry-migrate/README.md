@@ -16,3 +16,32 @@ programmatic, with env-reference resolution and secret-key rejection) and
 canonical plan hashing (`ferry.runtime.hashing`) are in place, together with
 the engine, state store, and CLI lifecycle commands. APIs may still change
 before the first stable release.
+
+## Python quick start
+
+The distribution name and import name are intentionally different:
+
+```bash
+pip install sanka-migrate sanka-migrate-connector-markdown sanka-migrate-connector-sqlite
+```
+
+```python
+import asyncio
+
+from sanka import Sanka
+
+async def main() -> None:
+    with Sanka() as sanka:
+        migration = sanka.migrate("./content", "sqlite://content.db")
+        plan = await migration.plan()
+        await migration.apply(plan_hash=plan.plan_hash)
+        report = await migration.verify()
+
+    assert report.ok
+
+
+asyncio.run(main())
+```
+
+`ferry.runtime` and the `ferry` executable remain supported compatibility
+surfaces for existing integrations.

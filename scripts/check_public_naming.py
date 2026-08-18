@@ -64,6 +64,20 @@ def main() -> int:
         errors.append(f"runtime scripts must preserve the compatibility alias: {expected_scripts}")
     if "sanka-migrate-connector-sdk" not in runtime["project"].get("dependencies", []):
         errors.append("runtime must depend on the public SDK distribution name")
+    runtime_packages = (
+        runtime.get("tool", {})
+        .get("hatch", {})
+        .get("build", {})
+        .get("targets", {})
+        .get("wheel", {})
+        .get("packages", [])
+    )
+    expected_runtime_packages = {"src/ferry", "src/sanka"}
+    if set(runtime_packages) != expected_runtime_packages:
+        errors.append(
+            "runtime wheel must ship the public sanka facade and stable ferry namespace: "
+            f"{sorted(expected_runtime_packages)}"
+        )
 
     for relative_path in EXPECTED_PROJECTS:
         if not str(relative_path).startswith("connectors/"):
@@ -81,6 +95,10 @@ def main() -> int:
     for path in stable_paths:
         if not path.is_dir():
             errors.append(f"stable internal namespace path is missing: {path.relative_to(ROOT)}")
+
+    public_facade = ROOT / "packages/ferry-migrate/src/sanka/__init__.py"
+    if not public_facade.is_file():
+        errors.append("public sanka.Sanka facade is missing from the runtime distribution")
 
     if errors:
         print("public naming check failed:")

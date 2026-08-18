@@ -9,7 +9,7 @@ the decisions the scaffold encodes.
 | Package | Import root | License | Contents |
 |---|---|---|---|
 | `sanka-migrate-connector-sdk` | `ferry.connector` | Apache-2.0 | Connector protocols (source/destination + optional capability protocols), record/schema/graph types, credential-provider protocol, structured error taxonomy |
-| `sanka-migrate` | `ferry.runtime`, `ferry.cli` (later `ferry.spec`, `ferry.migrations`) | AGPL-3.0-only | Lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
+| `sanka-migrate` | `sanka` (public facade); `ferry.runtime`, `ferry.cli` (compatibility and embedding) | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
 | `connectors/*` | one package each | Apache-2.0 | First-party connectors; depend on the SDK only |
 
 License-dependency direction is one-way: Apache code never imports AGPL code.
@@ -31,6 +31,13 @@ Whether a tiny top-level facade should own `ferry/__init__.py` (to enable
 `import ferry; ferry.migrations.create(...)`) is deliberately deferred to the
 client-SDK phase — claiming `__init__.py` in any one distribution would break
 the namespace merge for the others.
+
+The runtime distribution separately owns the regular `sanka` import package.
+It is intentionally small: `Sanka` creates resumable migration handles and
+re-exports the public plan, report, status, endpoint, and error types. All
+behavior delegates to `ferry.runtime`, so the facade introduces no second
+engine or serialized contract. This yields `from sanka import Sanka` for new
+applications without moving the shared connector namespace.
 
 Distribution names follow the public project brand: the runtime publishes as
 **`sanka-migrate`** and the SDK as **`sanka-migrate-connector-sdk`**. The
