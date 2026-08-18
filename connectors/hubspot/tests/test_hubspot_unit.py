@@ -13,15 +13,15 @@ from collections.abc import Callable
 
 import httpx
 import pytest
-from ferry_connector_hubspot import CONNECTOR, HubSpotDestination, HubSpotSource
-from ferry_connector_hubspot._base import (
+from sanka_connector_hubspot import CONNECTOR, HubSpotDestination, HubSpotSource
+from sanka_connector_hubspot._base import (
     HubSpotGateway,
     HubSpotRequestError,
     custom_object_match_token,
     hubspot_property_type,
     mapped_error,
 )
-from ferry_connector_hubspot._destination import (
+from sanka_connector_hubspot._destination import (
     _custom_object_schema_is_compatible,
     _custom_object_schema_payload,
     _pipeline_is_compatible,
@@ -29,7 +29,7 @@ from ferry_connector_hubspot._destination import (
     _stage_probability,
 )
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     BatchWriteInput,
     ConflictError,
@@ -367,7 +367,7 @@ async def test_read_records_paginates_and_merges_associations() -> None:
 
 
 async def test_read_records_rejects_source_filters() -> None:
-    from ferry.connector import SourceFilter
+    from sanka.connector import SourceFilter
 
     with pytest.raises(UnsupportedFeatureError):
         await source(lambda request: httpx.Response(200, json={})).read_records(
@@ -523,7 +523,7 @@ async def test_write_record_custom_object_requires_identity() -> None:
             properties={"order_number": "42"},
             options=write_options(conflict_policy="skip_existing"),
         )
-    assert excinfo.value.details["code"] == "FERRY_DESTINATION_IDENTITY_REQUIRED"
+    assert excinfo.value.details["code"] == "SANKA_MIGRATE_DESTINATION_IDENTITY_REQUIRED"
 
     with pytest.raises(ValidationFailedError) as excinfo:
         await dest.write_record(
@@ -534,11 +534,11 @@ async def test_write_record_custom_object_requires_identity() -> None:
                 conflict_policy="skip_existing", identity_fields=["order_number"]
             ),
         )
-    assert excinfo.value.details["code"] == "FERRY_DESTINATION_IDENTITY_VALUE_REQUIRED"
+    assert excinfo.value.details["code"] == "SANKA_MIGRATE_DESTINATION_IDENTITY_VALUE_REQUIRED"
 
 
 async def test_write_record_missing_created_id_is_data_error() -> None:
-    from ferry.connector import DataError
+    from sanka.connector import DataError
 
     def respond(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/search"):
@@ -655,19 +655,19 @@ async def test_invalid_email_duplicate_conflict_message() -> None:
             None,
             ["email", "customer_code"],
             {"email": "x@@example.com", "customer_code": "C-1"},
-            "FERRY_INVALID_EMAIL_AUDIT_FIELD_REQUIRED",
+            "SANKA_MIGRATE_INVALID_EMAIL_AUDIT_FIELD_REQUIRED",
         ),
         (
             "customer_code",
             ["email", "customer_code"],
             {"email": "x@@example.com", "customer_code": "C-1"},
-            "FERRY_INVALID_EMAIL_AUDIT_FIELD_IDENTITY_CONFLICT",
+            "SANKA_MIGRATE_INVALID_EMAIL_AUDIT_FIELD_IDENTITY_CONFLICT",
         ),
         (
             "legacy_email",
             ["email"],
             {"email": "x@@example.com"},
-            "FERRY_INVALID_EMAIL_ALTERNATE_IDENTITY_REQUIRED",
+            "SANKA_MIGRATE_INVALID_EMAIL_ALTERNATE_IDENTITY_REQUIRED",
         ),
     ],
 )
@@ -1155,7 +1155,7 @@ async def test_reconcile_properties_confirm_creates_missing() -> None:
     options = payload["options"]
     assert isinstance(options, list)
     assert [option["value"] for option in options] == ["true", "false"]  # type: ignore[index]
-    assert payload["description"] == "Migrated from IsActive with Ferry."
+    assert payload["description"] == "Migrated from IsActive with Sanka Migrate."
 
 
 def _pipeline_definition() -> PipelineDefinition:
@@ -1518,7 +1518,7 @@ def test_custom_object_schema_payload_includes_provided_properties() -> None:
     assert primary["fieldType"] == "text"
     assert primary["hasUniqueValue"] is True
     assert primary["displayOrder"] == 0
-    assert primary["description"] == "Migrated from OrderNumber with Ferry."
+    assert primary["description"] == "Migrated from OrderNumber with Sanka Migrate."
     assert priority["type"] == "bool"
     assert priority["fieldType"] == "booleancheckbox"
     assert priority["hasUniqueValue"] is False
@@ -1765,7 +1765,7 @@ async def test_retry_on_429_honors_retry_after_and_counts_metrics() -> None:
     result = await dest.write_record(
         credentials(),
         object_type="deals",
-        properties={"dealname": "Ferry"},
+        properties={"dealname": "Sanka Migrate"},
         options=write_options(),
     )
     assert result.status == "created"
@@ -1792,7 +1792,7 @@ async def test_429_exhausts_after_five_attempts() -> None:
         await dest.write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Ferry"},
+            properties={"dealname": "Sanka Migrate"},
             options=write_options(),
         )
     assert attempts == 5
@@ -1816,7 +1816,7 @@ async def test_client_error_is_not_retried() -> None:
         await dest.write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Ferry"},
+            properties={"dealname": "Sanka Migrate"},
             options=write_options(),
         )
     assert attempts == 1
@@ -1859,7 +1859,7 @@ async def test_transient_5xx_retried_only_for_identity_bearing_writes() -> None:
         await destination(respond_create, clock=FakeClock()).write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Ferry"},
+            properties={"dealname": "Sanka Migrate"},
             options=write_options(),
         )
     assert attempts == 1
@@ -1903,7 +1903,7 @@ async def test_423_uses_fixed_two_second_backoff() -> None:
     result = await dest.write_record(
         credentials(),
         object_type="deals",
-        properties={"dealname": "Ferry"},
+        properties={"dealname": "Sanka Migrate"},
         options=write_options(),
     )
     assert result.status == "created"
@@ -1923,7 +1923,7 @@ async def test_min_interval_paces_consecutive_requests() -> None:
         await dest.write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Ferry"},
+            properties={"dealname": "Sanka Migrate"},
             options=write_options(),
         )
     assert clock.sleeps == [0.25]

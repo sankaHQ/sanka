@@ -21,9 +21,9 @@ header in every source file:
 
 | Zone | License | Import rule |
 |---|---|---|
-| `packages/ferry-connector-sdk/` | Apache-2.0 | must not import any `ferry.*` module outside `ferry.connector` |
-| `connectors/` | Apache-2.0 | may import `ferry.connector` only |
-| `packages/ferry-migrate/` | AGPL-3.0-only | may import anything |
+| `packages/sanka-migrate-connector-sdk/` | Apache-2.0 | must not import any `sanka.*` module outside `sanka.connector` |
+| `connectors/` | Apache-2.0 | may import `sanka.connector` only |
+| `packages/sanka-migrate/` | AGPL-3.0-only | may import anything |
 
 Apache code must never depend on the AGPL runtime. CI enforces both rules
 (`scripts/check_import_boundaries.py`, `scripts/check_license_headers.py`).

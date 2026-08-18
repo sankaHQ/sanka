@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enforce public Sanka Migrate names without moving stable Ferry internals."""
+"""Enforce the public Sanka Migrate naming contract."""
 
 from __future__ import annotations
 
@@ -10,10 +10,21 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka-migrate"
+RETIRED_TOKEN = "fer" + "ry"
+IGNORED_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+}
 
 EXPECTED_PROJECTS = {
-    Path("packages/ferry-connector-sdk/pyproject.toml"): "sanka-migrate-connector-sdk",
-    Path("packages/ferry-migrate/pyproject.toml"): "sanka-migrate",
+    Path("packages/sanka-migrate-connector-sdk/pyproject.toml"): "sanka-migrate-connector-sdk",
+    Path("packages/sanka-migrate/pyproject.toml"): "sanka-migrate",
     Path("connectors/clickhouse/pyproject.toml"): "sanka-migrate-connector-clickhouse",
     Path("connectors/csv/pyproject.toml"): "sanka-migrate-connector-csv",
     Path("connectors/hubspot/pyproject.toml"): "sanka-migrate-connector-hubspot",
@@ -29,9 +40,35 @@ def _load(path: Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
+def _retired_name_references() -> list[str]:
+    references: list[str] = []
+    for path in ROOT.rglob("*"):
+        relative = path.relative_to(ROOT)
+        if any(part in IGNORED_PARTS for part in relative.parts):
+            continue
+        if RETIRED_TOKEN in str(relative).lower():
+            references.append(f"path: {relative}")
+        if not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if RETIRED_TOKEN in content.lower():
+            references.append(f"content: {relative}")
+    return references
+
+
 def main() -> int:
     errors: list[str] = []
     versions: set[str] = set()
+
+    retired_references = _retired_name_references()
+    if retired_references:
+        errors.append(
+            "retired project name remains in the public source tree: "
+            + ", ".join(retired_references)
+        )
 
     root_project = _load(ROOT / "pyproject.toml")["project"]
     if root_project["name"] != "sanka-migrate-workspace":
@@ -57,11 +94,11 @@ def main() -> int:
             f"all published distributions must share one version, found {sorted(versions)}"
         )
 
-    runtime = _load(ROOT / "packages/ferry-migrate/pyproject.toml")
+    runtime = _load(ROOT / "packages/sanka-migrate/pyproject.toml")
     scripts = runtime["project"].get("scripts", {})
-    expected_scripts = {"sanka-migrate": "ferry.cli:main", "ferry": "ferry.cli:main"}
+    expected_scripts = {"sanka-migrate": "sanka.cli:main"}
     if scripts != expected_scripts:
-        errors.append(f"runtime scripts must preserve the compatibility alias: {expected_scripts}")
+        errors.append(f"runtime scripts must be exactly: {expected_scripts}")
     if "sanka-migrate-connector-sdk" not in runtime["project"].get("dependencies", []):
         errors.append("runtime must depend on the public SDK distribution name")
     runtime_packages = (
@@ -72,10 +109,10 @@ def main() -> int:
         .get("wheel", {})
         .get("packages", [])
     )
-    expected_runtime_packages = {"src/ferry", "src/sanka"}
+    expected_runtime_packages = {"src/sanka"}
     if set(runtime_packages) != expected_runtime_packages:
         errors.append(
-            "runtime wheel must ship the public sanka facade and stable ferry namespace: "
+            "runtime wheel must ship the public sanka namespace: "
             f"{sorted(expected_runtime_packages)}"
         )
 
@@ -84,19 +121,19 @@ def main() -> int:
             continue
         document = _load(ROOT / relative_path)
         entry_points = document["project"].get("entry-points", {})
-        if "ferry.connectors" not in entry_points:
-            errors.append(f"{relative_path}: stable ferry.connectors entry-point group moved")
+        if "sanka.connectors" not in entry_points:
+            errors.append(f"{relative_path}: canonical sanka.connectors entry-point group moved")
 
-    stable_paths = (
-        ROOT / "packages/ferry-migrate/src/ferry/runtime",
-        ROOT / "packages/ferry-migrate/src/ferry/cli",
-        ROOT / "packages/ferry-connector-sdk/src/ferry/connector",
+    package_paths = (
+        ROOT / "packages/sanka-migrate/src/sanka/runtime",
+        ROOT / "packages/sanka-migrate/src/sanka/cli",
+        ROOT / "packages/sanka-migrate-connector-sdk/src/sanka/connector",
     )
-    for path in stable_paths:
+    for path in package_paths:
         if not path.is_dir():
-            errors.append(f"stable internal namespace path is missing: {path.relative_to(ROOT)}")
+            errors.append(f"package namespace path is missing: {path.relative_to(ROOT)}")
 
-    public_facade = ROOT / "packages/ferry-migrate/src/sanka/__init__.py"
+    public_facade = ROOT / "packages/sanka-migrate/src/sanka/__init__.py"
     if not public_facade.is_file():
         errors.append("public sanka.Sanka facade is missing from the runtime distribution")
 

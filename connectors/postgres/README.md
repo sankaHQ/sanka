@@ -42,4 +42,4 @@ columns are stringified client-side, and strings are sent untyped so the
 server casts them into any column.
 
 Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `psycopg[binary]`.
-Integration tests need `FERRY_TEST_POSTGRES_DSN` and skip cleanly without it.
+Integration tests need `SANKA_MIGRATE_TEST_POSTGRES_DSN` and skip cleanly without it.

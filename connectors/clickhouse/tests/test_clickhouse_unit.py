@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
-from ferry_connector_clickhouse import (
+from sanka_connector_clickhouse import (
     CONNECTOR,
     ClickHouseDestination,
     _add_column_ddl,
@@ -19,7 +19,7 @@ from ferry_connector_clickhouse import (
     _supports_final,
 )
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     ConfigurationError,
     ConnectorError,

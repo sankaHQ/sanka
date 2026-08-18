@@ -12,8 +12,8 @@ dependencies = [
   "httpx>=0.27",
 ]
 
-[project.entry-points."ferry.connectors"]
-hubspot = "ferry_connector_hubspot:CONNECTOR"
+[project.entry-points."sanka.connectors"]
+hubspot = "sanka_connector_hubspot:CONNECTOR"
 
 [project.urls]
 Repository = "https://github.com/sankaHQ/sanka-migrate"
@@ -27,4 +27,4 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ferry_connector_hubspot"]
+packages = ["src/sanka_connector_hubspot"]

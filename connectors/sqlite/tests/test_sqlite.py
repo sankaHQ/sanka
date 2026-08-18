@@ -4,9 +4,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ferry_connector_sqlite import CONNECTOR, SqliteDestination
+from sanka_connector_sqlite import CONNECTOR, SqliteDestination
 
-from ferry.connector import Credentials, WriteOptions
+from sanka.connector import Credentials, WriteOptions
 
 
 def _credentials(path: Path) -> Credentials:

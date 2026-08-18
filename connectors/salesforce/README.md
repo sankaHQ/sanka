@@ -49,6 +49,6 @@ interpolated into SOQL; invalid input raises `ValidationFailedError`.
 bodies → `DataError`.
 
 Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `httpx`. Integration
-tests need `FERRY_TEST_SALESFORCE_INSTANCE_URL` and
-`FERRY_TEST_SALESFORCE_ACCESS_TOKEN`, run strictly read-only queries, and
+tests need `SANKA_MIGRATE_TEST_SALESFORCE_INSTANCE_URL` and
+`SANKA_MIGRATE_TEST_SALESFORCE_ACCESS_TOKEN`, run strictly read-only queries, and
 skip cleanly without them.

@@ -34,9 +34,8 @@ dependencies, entry points, and the complete artifact set, then runs
 
 ## One-time external configuration (separately approved)
 
-1. Rename the private repository from `sankaHQ/ferry` to
-   `sankaHQ/sanka-migrate`; verify GitHub's redirect and update the workspace
-   repo manifest.
+1. Rename this private repository to `sankaHQ/sanka-migrate`; verify GitHub's
+   redirect and update the workspace repo manifest.
 2. Configure pending PyPI trusted publishers for every prepared package. The
    owner must be `sankaHQ`, repository `sanka-migrate`, workflow
    `publish.yml`, and environment `pypi`.

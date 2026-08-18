@@ -1,4 +1,4 @@
-# Ferry Commercial License Agreement
+# Sanka Migrate Commercial License Agreement
 
 > **DRAFT v0.1 (2026-08-15) — template for review by Sanka, Inc. counsel.
 > This document is not an offer and is not in effect. Bracketed items are
@@ -7,23 +7,23 @@
 > AGPL open-core projects use commercially), with variable business terms
 > pushed to an Order Form.
 
-This Ferry Commercial License Agreement (the "**Agreement**") is entered into
+This Sanka Migrate Commercial License Agreement (the "**Agreement**") is entered into
 between **Sanka, Inc.** ("**Sanka**") and the customer identified on the
 applicable Order Form ("**Licensee**"), effective as of the effective date
 stated there (the "**Effective Date**").
 
-**Background.** Sanka publishes the Ferry Migration Runtime under the GNU
+**Background.** Sanka publishes the Sanka Migrate Runtime under the GNU
 Affero General Public License v3.0 only (AGPL-3.0-only). This Agreement
 grants Licensee the right to use the same software under alternative
 commercial terms, without the conditions of the AGPL.
 
 ## 1. Definitions
 
-1.1 "**Runtime**" means the Ferry Migration Runtime software: the
-`ferry-migrate` package and any other components of the `sankaHQ/ferry`
+1.1 "**Runtime**" means the Sanka Migrate Runtime software: the
+`sanka-migrate` package and any other components of the `sankaHQ/sanka-migrate`
 repositories that Sanka distributes under AGPL-3.0-only, in source or object
 form, including updates Sanka makes generally available during the Term.
-(Components Sanka distributes under Apache-2.0 — including the Ferry
+(Components Sanka distributes under Apache-2.0 — including the Sanka Migrate
 Connector SDK and first-party connectors — are licensed under their own
 terms and are not restricted by this Agreement.)
 
@@ -58,7 +58,7 @@ Products);
 
 (b) offer the Runtime, or a service whose primary value is the Runtime's
 migration functionality, as a hosted or managed service to third parties in a
-manner that competes with Sanka's Ferry Cloud offering;
+manner that competes with Sanka's Sanka Migrate Cloud offering;
 
 (c) remove or alter copyright, license, or attribution notices in the
 Runtime; or

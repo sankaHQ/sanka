@@ -75,7 +75,7 @@ run 8f3a1c2d9b04: verification OK
 Or check a migration into Git and run it like infrastructure:
 
 ```yaml
-# ferry.yaml
+# sanka-migrate.yaml
 source:
   type: postgres
   connection: $POSTGRES_URL
@@ -121,12 +121,12 @@ computed over the unresolved spec.
 | `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
 
 Connectors implement the **Apache-2.0**
-[`sanka-migrate-connector-sdk`](packages/ferry-connector-sdk/)
+[`sanka-migrate-connector-sdk`](packages/sanka-migrate-connector-sdk/)
 and never import the runtime — so building (or distributing) a connector
 never makes it a derivative of the AGPL engine. Optional behaviors are typed
 capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
 `SupportsSchemaProvisioning`, …) that the engine discovers with
-`isinstance`. New connectors register through the `ferry.connectors` entry
+`isinstance`. New connectors register through the `sanka.connectors` entry
 point; see [connectors/](connectors/) for the pattern.
 
 ## Use it as a library
@@ -162,26 +162,26 @@ asyncio.run(main())
 ```
 
 `Sanka.migrate(...)` creates or resumes a lifecycle handle; it does not write
-to the destination. The default local run state remains `.ferry/state.db` so
-existing migrations resume without conversion. Pass `EndpointSpec` from
-`sanka` when a path or URL does not carry enough connector information.
+to the destination. The default local run state is
+`.sanka/migrate/state.db`. Pass `EndpointSpec` from `sanka` when a path or URL
+does not carry enough connector information.
 
 The facade delegates to the same engine used by the CLI. Advanced embedders
 can continue to construct that engine directly when supplying a custom state
 store or registry:
 
 ```python
-from ferry.runtime.engine import MigrationEngine
-from ferry.runtime.registry import ConnectorRegistry
-from ferry.runtime.spec import EndpointSpec, MigrationSpec
-from ferry.runtime.state import SqliteStateStore
+from sanka.runtime.engine import MigrationEngine
+from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.spec import EndpointSpec, MigrationSpec
+from sanka.runtime.state import SqliteStateStore
 
 spec = MigrationSpec(
     source=EndpointSpec(type="postgres", connection="$POSTGRES_URL"),
     target=EndpointSpec(type="clickhouse", connection="$CLICKHOUSE_URL"),
 )
 engine = MigrationEngine(
-    store=SqliteStateStore(".ferry/state.db"),
+    store=SqliteStateStore(".sanka/migrate/state.db"),
     registry=ConnectorRegistry.discover(),
 )
 
@@ -232,8 +232,8 @@ boundary:
 
 | Path | License |
 |---|---|
-| `packages/ferry-migrate/` — `sanka-migrate`, the Migration Runtime (engine, planner, CLI) | AGPL-3.0-only |
-| `packages/ferry-connector-sdk/` — `sanka-migrate-connector-sdk`, connector interfaces & types | Apache-2.0 |
+| `packages/sanka-migrate/` — `sanka-migrate`, the Migration Runtime (engine, planner, CLI) | AGPL-3.0-only |
+| `packages/sanka-migrate-connector-sdk/` — `sanka-migrate-connector-sdk`, connector interfaces & types | Apache-2.0 |
 | `connectors/*` — first-party connectors | Apache-2.0 |
 
 The runtime is also available under a
@@ -242,9 +242,8 @@ embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
-`from sanka import Sanka`; the historical `ferry.*` imports,
-`ferry.connectors` entry-point group, `FERRY_*` environment variables, and
-`ferry` CLI alias remain stable compatibility identifiers.
+`from sanka import Sanka`; connector authors use `sanka.connector`, and the
+only executable installed by this project is `sanka-migrate`.
 
 ## Development
 
@@ -254,7 +253,7 @@ make check    # lint + strict mypy + tests + import-boundary + license-header gu
 ```
 
 Integration tests run against real databases when
-`FERRY_TEST_POSTGRES_DSN` / `FERRY_TEST_CLICKHOUSE_URL` are set (CI
+`SANKA_MIGRATE_TEST_POSTGRES_DSN` / `SANKA_MIGRATE_TEST_CLICKHOUSE_URL` are set (CI
 provisions both); they skip cleanly otherwise. Architecture notes:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

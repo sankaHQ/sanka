@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 LICENSE_ZONES: list[tuple[str, str]] = [
-    ("packages/ferry-connector-sdk", "Apache-2.0"),
-    ("packages/ferry-migrate", "AGPL-3.0-only"),
+    ("packages/sanka-migrate-connector-sdk", "Apache-2.0"),
+    ("packages/sanka-migrate", "AGPL-3.0-only"),
     ("connectors", "Apache-2.0"),
     ("scripts", "Apache-2.0"),
     ("tests", "Apache-2.0"),

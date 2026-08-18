@@ -4,14 +4,14 @@ Sanka Migrate monorepo — per-package licensing
 This repository contains packages under different licenses. The
 SPDX-License-Identifier header in each source file is authoritative.
 
-  packages/ferry-connector-sdk/   Apache-2.0       (LICENSE file in that directory)
-  packages/ferry-migrate/         AGPL-3.0-only    (LICENSE file in that directory)
+  packages/sanka-migrate-connector-sdk/   Apache-2.0       (LICENSE file in that directory)
+  packages/sanka-migrate/         AGPL-3.0-only    (LICENSE file in that directory)
   connectors/                     Apache-2.0
   scripts/, tests/, docs/         Apache-2.0
 
 The full license texts are in each package directory's LICENSE file.
 
-The Sanka Migrate Runtime (packages/ferry-migrate) is also available under a
+The Sanka Migrate Runtime (packages/sanka-migrate) is also available under a
 commercial license from Sanka, Inc. for use without AGPL-3.0 obligations —
 see docs/legal/commercial-license.md (draft).
 

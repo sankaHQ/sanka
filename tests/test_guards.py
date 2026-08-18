@@ -28,7 +28,7 @@ def test_boundaries_catch_connector_importing_runtime() -> None:
     fixture = ROOT / "tests" / "fixtures" / "boundary_violation"
     result = _run("check_import_boundaries.py", str(fixture))
     assert result.returncode == 1
-    assert "ferry.runtime" in result.stdout
+    assert "sanka.runtime" in result.stdout
 
 
 def test_license_headers_pass_on_repo() -> None:

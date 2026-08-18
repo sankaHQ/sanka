@@ -54,29 +54,27 @@ writes remain isolated behind `apply`, and `apply` requires the reviewed plan
 hash. The hosted client may add optional authentication later, but the open
 source facade does not expose an unused `api_key` parameter.
 
-## Stable internal and compatibility identifiers
+## Source and integration names
 
-The rebrand does not rename persisted or integration-facing identifiers. The
-following remain stable unless a later, separately reviewed compatibility
-migration explicitly replaces them:
+The public source tree uses one naming system from its first release:
 
-- Python imports under `ferry.*` and connector modules under
-  `ferry_connector_*` (the preferred application facade is additive);
-- the connector entry-point group `ferry.connectors`;
-- the compatibility CLI alias `ferry`;
-- local state and spec paths such as `.ferry/` and `ferry.yaml`;
-- environment variables prefixed `FERRY_`;
-- API paths under `/api/v2/public/ferry/**` and current edge host contracts;
-- database tables and JSON keys prefixed or namespaced with `ferry`;
-- error codes, report spellings, plan hashes, and serialized runtime contracts.
+- Python runtime imports live under `sanka.*`;
+- connector modules use `sanka_connector_<provider>`;
+- connector discovery uses the `sanka.connectors` entry-point group;
+- the CLI command is `sanka-migrate`;
+- the default spec is `sanka-migrate.yaml` and local state is stored under
+  `.sanka/migrate/`;
+- environment variables and machine-readable error codes use the
+  `SANKA_MIGRATE_` prefix.
 
-These are implementation and compatibility names, not independent public
-brands. New user-facing prose should say Sanka Migrate.
+Persisted identifiers in Sanka's separately deployed web application are not
+part of this package contract. They require their own coordinated database and
+API migration if they are ever changed.
 
 ## Release boundary
 
 This naming contract prepares artifacts only. It does not publish a package,
 rename a GitHub repository, change repository visibility, configure a PyPI
 trusted publisher, or adopt the draft CLA/commercial-license text. Those are
-separate approval gates. Legal documents still using the historical Ferry
-name must be re-reviewed by counsel before adoption.
+separate approval gates. The draft legal documents must be reviewed by counsel
+before adoption.

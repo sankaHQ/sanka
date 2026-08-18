@@ -1,42 +1,42 @@
 # Engine delegation: one execution runtime
 
 Phase 3 PR C design — sanka-api's record-runtime execution mechanics delegate
-to `ferry.runtime`, so execution semantics live once, in this repository.
+to `sanka.runtime`, so execution semantics live once, in this repository.
 
 - **Status**: design, not implemented. No production code changes ride with
   this document.
 - **Anchors**: every `file:line` reference below was verified against
   sanka-api `origin/main` @ `19afb0c4b` (post #2807/#2811/#2813/#2814) and
-  ferry `main` @ `32db881`. Line numbers drift with unrelated commits; the
+  sanka `main` @ `32db881`. Line numbers drift with unrelated commits; the
   symbol names do not.
 - **Prior art this design extends**: #2813 made the OSS mapping stack
-  (`ferry.runtime.mapping`) the single source of mapping semantics, with
+  (`sanka.runtime.mapping`) the single source of mapping semantics, with
   sanka-api keeping thin delegation shims and an error-shape bridge
-  (`app/service/ferry/oss_bridge.py`). #2814 put the OSS connector SPI
+  (`app/service/sanka/oss_bridge.py`). #2814 put the OSS connector SPI
   between the engine and the production adapters
-  (`app/service/ferry/sdk_adapters.py`). This document designs the same move
+  (`app/service/sanka/sdk_adapters.py`). This document designs the same move
   for the execution mechanics themselves.
 
 ## 1. Where the two engines stand
 
-**sanka-api** (`app/service/ferry/record_runtime.py`, 3,437 lines, plus the
-pure helpers in `app/service/ferry/execution_state.py`, 558 lines) runs
-production migrations. Its `FerryRecordRuntime` already speaks the OSS
-connector SPI (`ferry.connector` imports at `record_runtime.py:27-39`) and
+**sanka-api** (`app/service/sanka/record_runtime.py`, 3,437 lines, plus the
+pure helpers in `app/service/sanka/execution_state.py`, 558 lines) runs
+production migrations. Its `SankaMigrateRecordRuntime` already speaks the OSS
+connector SPI (`sanka.connector` imports at `record_runtime.py:27-39`) and
 already keeps control-plane concerns behind injected protocols
-(`FerryAccessGate` at `record_runtime.py:155-164`,
-`FerryProgramExecutionEntitlementGate` at `:167-175`,
-`FerryInventoryScanCompletionHook` at `:178-187`). What it has that the OSS
+(`SankaMigrateAccessGate` at `record_runtime.py:155-164`,
+`SankaMigrateProgramExecutionEntitlementGate` at `:167-175`,
+`SankaMigrateInventoryScanCompletionHook` at `:178-187`). What it has that the OSS
 engine lacks is the production execution machinery:
 
 - continuous execution with per-route keyset checkpoints and frozen
   high-water marks (`execute` at `record_runtime.py:1355-2171`,
   `execute_continuously` at `:2455-2747`);
 - Hatchet attempt claiming with `attempt_id = f"{task_run_id}:{attempt_number}"`
-  (`app/jobs/ferry/execution.py:73-78`, claim at
+  (`app/jobs/sanka/execution.py:73-78`, claim at
   `record_runtime.py:2490-2518`);
-- durable per-record result rows behind `FerryRuntimeRepository`
-  (`record_runtime.py:190-393`, backed by `data_ferryrecordresult` with
+- durable per-record result rows behind `SankaMigrateRuntimeRepository`
+  (`record_runtime.py:190-393`, backed by `data_sankarecordresult` with
   workspace/run scoping);
 - terminal-batch reconciliation and route reopening when a source page ends
   before the frozen total (`record_runtime.py:2873-2966`,
@@ -44,10 +44,10 @@ engine lacks is the production execution machinery:
 - heartbeat progress reports with per-route ETA
   (`record_runtime.py:3019-3212`);
 - deferred relationship linking with cross-run identity resolution (already
-  delegated to `ferry.runtime.mapping.pending_relationships` behind
+  delegated to `sanka.runtime.mapping.pending_relationships` behind
   `IdentityLedger` / `SharedIdentityLedger`).
 
-**ferry** (`packages/ferry-migrate/src/ferry/runtime/engine.py`, 507 lines)
+**sanka** (`packages/sanka-migrate/src/sanka/runtime/engine.py`, 507 lines)
 runs the local single-shot lifecycle: `create → inspect → plan → apply →
 verify` over a sync `StateStore` protocol (`state.py:69-95`) with a SQLite
 reference implementation (`state.py:135-263`). `apply` is hash-bound
@@ -57,14 +57,14 @@ is single-attempt, has no relationship/reference/owner phases, no frozen
 scope, no reconciliation against route totals, and no fencing.
 
 **Direction of travel** (binding): production mechanics move upstream into
-`ferry.runtime` as protocol-parameterized components; sanka-api then
+`sanka.runtime` as protocol-parameterized components; sanka-api then
 delegates. The OSS engine must not grow Sanka concepts — workspace, program,
 Hatchet, billing — those stay behind protocols the host implements. The
-precedent is already in-tree: `ferry.runtime.mapping.pending_relationships`
+precedent is already in-tree: `sanka.runtime.mapping.pending_relationships`
 keeps workspace/run/program/channel scoping out of the runtime ("callers
 pass an `IdentityLedger` … that close[s] over whatever scope the host
 runtime uses", `pending_relationships.py:15-21`), and sanka-api's
-`app/service/ferry/pending_relationships.py` closes its adapters over the
+`app/service/sanka/pending_relationships.py` closes its adapters over the
 pinned ids. Every protocol in this design follows that rule.
 
 ## 2. Inventory of record-runtime execution mechanics
@@ -86,16 +86,16 @@ sanka-api.
 | 8 | Continuous batch loop | Fenced loop: per-batch supersede/cancel checks, stall detection via progress marker, batch safety limit (1,000,000, `:152`), 0.25 s pause | `record_runtime.py:2566-2747` | stage reads (fencing), Hatchet ids | (a) loop / (b) fencing |
 | 9 | Route reopening on frozen-total shortfall | `Σ(created,updated,skipped) < frozen total` reopens the route from the last safe keyset checkpoint; refuses when no checkpoint exists | `execution_state.py:384-419`, `:422-459`; call sites `record_runtime.py:2624-2644` | none (pure) | (a) |
 | 10 | Progress / ETA / heartbeat report assembly | Per-route processed/remaining/percent/ETA rows, overall progress, stall warnings, `lastHeartbeatAt` | `record_runtime.py:3019-3212` | repository pair summaries for unique-pair fallback (`:3064-3082`); `retry_metrics` provider control (`:3160-3167`) | (a) |
-| 11 | Scope freeze (high-water marks + frozen totals) | Freeze per-route HWMs at queue time; count the frozen set with bounded counts | `record_runtime.py:2846-2871`, `:2770-2844` | SDK capability refinements (now upstream: `ferry.connector.protocols` `SupportsHighWaterMark:158`, `SupportsBoundedReads:171`, `SupportsBoundedCounts:188`) | (a) |
-| 12 | Snapshot codec + manifest canonicalization | Normalize checkpoints/counts/pending/failed/batch-page dicts, canonicalize + verify route manifests, resolve route selection, remap legacy source-keyed checkpoints, validate saved HWM maps | `execution_state.py:69-160`, `:223-305`, `:308-381`, `:462-558` | pydantic `FerrySourceFilter`, `AppError` | (a) |
+| 11 | Scope freeze (high-water marks + frozen totals) | Freeze per-route HWMs at queue time; count the frozen set with bounded counts | `record_runtime.py:2846-2871`, `:2770-2844` | SDK capability refinements (now upstream: `sanka.connector.protocols` `SupportsHighWaterMark:158`, `SupportsBoundedReads:171`, `SupportsBoundedCounts:188`) | (a) |
+| 12 | Snapshot codec + manifest canonicalization | Normalize checkpoints/counts/pending/failed/batch-page dicts, canonicalize + verify route manifests, resolve route selection, remap legacy source-keyed checkpoints, validate saved HWM maps | `execution_state.py:69-160`, `:223-305`, `:308-381`, `:462-558` | pydantic `SankaMigrateSourceFilter`, `AppError` | (a) |
 | 13 | Dry-run route sampling | Per route: read a sample, map, collect capped rejects with deduped reasons; never touches a destination adapter | `record_runtime.py:1174-1273` (core), `execution_state.py:26-66` (reject shaping) | stage-report envelope (stays) | (a) |
 | 14 | Owner-directory acquisition | Lazily build destination/source owner directories once per execution via `SupportsOwnerDirectory` | `record_runtime.py:1468-1485` | none (mapping itself already upstream) | (a) |
 | 15 | Heartbeat freshness test | "Active job" = heartbeat within 5 minutes | `execution_state.py:491-498` | none (pure) | (a) |
 | 16 | Attempt claiming | Compare-and-set claim of `(job_id, attempt_id, attempt_number, task_run_id)` on the transfer stage | `record_runtime.py:2490-2518`; repository `:256-266` | Hatchet identity, stage rows | (b) → `AttemptFence` |
-| 17 | Fenced snapshot persistence + cancelled race | Job-fenced stage save; on fence loss, distinguish cancelled (finalize with cancelled report) from superseded | `record_runtime.py:2099-2153`, `:2665-2690`; repository `:245-254`; concrete `app/repository/ferry/repository.py:1344` | stage rows, report envelope | (b) → `ExecutionJournal` |
-| 18 | Durable record results | Terminal-id page reads, count-verified bulk upsert, aggregate and per-pair summaries, failed-id listing | repository protocol `record_runtime.py:303-384`; fail-closed check `:1918-1932` | `data_ferryrecordresult`, workspace/run scoping | (b) → `ExecutionLedger` |
-| 19 | Cross-run identity resolution | Run-scoped + program-shared destination-id lookup with ambiguity blocking | `app/service/ferry/pending_relationships.py` (adapter); upstream `ferry/runtime/mapping/pending_relationships.py:43-64` | **already upstream** — the pattern this design copies | (b) done |
-| 20 | Structured execution events | `ferry.transfer.record_failed`, queue/complete/fail logs with workspace/run context | `record_runtime.py:1963-1972`, `:2361-2368`, `:2835-2842` | `app.core.logging`, ctx ids | (b) → `ExecutionObserver` |
+| 17 | Fenced snapshot persistence + cancelled race | Job-fenced stage save; on fence loss, distinguish cancelled (finalize with cancelled report) from superseded | `record_runtime.py:2099-2153`, `:2665-2690`; repository `:245-254`; concrete `app/repository/sanka/repository.py:1344` | stage rows, report envelope | (b) → `ExecutionJournal` |
+| 18 | Durable record results | Terminal-id page reads, count-verified bulk upsert, aggregate and per-pair summaries, failed-id listing | repository protocol `record_runtime.py:303-384`; fail-closed check `:1918-1932` | `data_sankarecordresult`, workspace/run scoping | (b) → `ExecutionLedger` |
+| 19 | Cross-run identity resolution | Run-scoped + program-shared destination-id lookup with ambiguity blocking | `app/service/sanka/pending_relationships.py` (adapter); upstream `sanka/runtime/mapping/pending_relationships.py:43-64` | **already upstream** — the pattern this design copies | (b) done |
+| 20 | Structured execution events | `sanka.transfer.record_failed`, queue/complete/fail logs with workspace/run context | `record_runtime.py:1963-1972`, `:2361-2368`, `:2835-2842` | `app.core.logging`, ctx ids | (b) → `ExecutionObserver` |
 | 21 | Cancellation observation | Stage/execution-state cancelled test, polled between batches | `execution_state.py:462-472`; polls `record_runtime.py:2583-2584` | stage rows | (b) → journal `load()` status |
 | 22 | Access gate | Feature flag + product line + platform/object permission checks | protocol `record_runtime.py:155-164`; impl `runtime_service.py:596-626` | flags, permissions | (c) |
 | 23 | Execution entitlement | Billing gate (402) before destination writes | protocol `record_runtime.py:167-175`; impl `runtime_service.py:510-550` | plans/billing | (c) |
@@ -106,13 +106,13 @@ sanka-api.
 | 28 | Destination property/resource provisioning + persistence | Reconcile properties/resources, persist results into the inventory stage report; HubSpot schema-admin credential vetting (portal pinning, scope checks) | `record_runtime.py:485-801` | credentials manager, `HUBSPOT_SCHEMA_ADMIN_REQUIRED_SCOPES`, stage reports | (c) |
 | 29 | Run binding, status transitions, serialization | Channel-bound run requirement; `running`/`needs_review` transitions; run/stage DTO serialization | `record_runtime.py:396-411`, `:2162-2166`, `:3421-3437` | run/stage rows, API DTOs | (c) |
 | 30 | Route-manifest stage persistence | Load mapping fields from the map stage, persist the canonical manifest back, refuse reconstruction after durable progress | `record_runtime.py:3266-3332`, `:3334-3376` | stage rows (the *checks* it calls are class (a), item 12) | (c) |
-| 31 | Hatchet job wrapper | Task entry, attempt identity derivation, failure marking on final attempt | `app/jobs/ferry/execution.py` | Hatchet | (c) |
+| 31 | Hatchet job wrapper | Task entry, attempt identity derivation, failure marking on final attempt | `app/jobs/sanka/execution.py` | Hatchet | (c) |
 | 32 | Credentials + adapter wiring | Channel-credential resolution, provider-pair support checks, SPI bridging | `record_runtime.py:414-436`, `:3391-3409`; `sdk_adapters.py` | channels, integrations | (c) |
-| 33 | Data-platform runtime | Postgres→ClickHouse ClickPipes replication | `app/service/ferry/data_platform_runtime.py` | ClickPipes, preflight | (c) permanently (see §7) |
+| 33 | Data-platform runtime | Postgres→ClickHouse ClickPipes replication | `app/service/sanka/data_platform_runtime.py` | ClickPipes, preflight | (c) permanently (see §7) |
 
 Tally: **15 × (a)**, **6 × (b)** (one already done), **12 × (c)**.
 
-## 3. The seam: `ferry.runtime.execution`
+## 3. The seam: `sanka.runtime.execution`
 
 ### 3.1 Design rule
 
@@ -130,8 +130,8 @@ vocabulary for switching scope.
 ### 3.2 Relation to `StateStore`: sibling, not extension
 
 Recommendation: a **sibling protocol family** in a new
-`ferry.runtime.execution` package, not an extension of
-`ferry.runtime.state.StateStore`.
+`sanka.runtime.execution` package, not an extension of
+`sanka.runtime.state.StateStore`.
 
 Justification:
 
@@ -144,14 +144,14 @@ Justification:
    sanka to fake spec persistence it does not have.
 2. **Sync vs async.** `StateStore` is synchronous by contract and its SQLite
    implementation is synchronous. Production execution state is async
-   end-to-end (`FerryRuntimeRepository` is all `async def`,
+   end-to-end (`SankaMigrateRuntimeRepository` is all `async def`,
    `record_runtime.py:190-393`). Growing `StateStore` with ~10 async methods
    would break every existing implementer and split the protocol's calling
    convention.
 3. **One engine, two hosts.** With siblings, the SQLite reference store
    implements *both* families over the same file (lifecycle rows stay as
    they are; execution rows are new tables), and sanka-api implements only
-   the execution family over `FerryRuntimeRepository`. `MigrationEngine`
+   the execution family over `SankaMigrateRuntimeRepository`. `MigrationEngine`
    keeps `StateStore` for lifecycle and adopts the execution family for
    `apply` (PR F-5 in §6).
 
@@ -160,13 +160,13 @@ Shared vocabulary stays shared: `TERMINAL_WRITE_STATUSES`
 
 ### 3.3 Errors
 
-Same pattern as `ferry.runtime.mapping.errors.MappingError`: production
+Same pattern as `sanka.runtime.mapping.errors.MappingError`: production
 error codes verbatim, no HTTP envelope; sanka-api's `oss_bridge` maps codes
 to the exact `AppError` status codes (extending the existing
 `STATUS_BY_MAPPING_ERROR_CODE` table pattern, `oss_bridge.py:46-74`).
 
 ```python
-# ferry/runtime/execution/errors.py  (AGPL-3.0-only)
+# sanka/runtime/execution/errors.py  (AGPL-3.0-only)
 class ExecutionFault(RuntimeError):
     """An execution invariant failed; carries the production error code."""
 
@@ -178,30 +178,30 @@ class ExecutionFault(RuntimeError):
 ```
 
 Codes preserved verbatim (409/422 mapping stays host-side):
-`FERRY_EXECUTION_JOB_SUPERSEDED`, `FERRY_EXECUTION_ATTEMPT_SUPERSEDED`,
-`FERRY_ROUTE_MANIFEST_MISSING`, `FERRY_ROUTE_MANIFEST_INVALID`,
-`FERRY_ROUTE_MANIFEST_CHANGED`, `FERRY_ROUTE_CHECKPOINT_MISMATCH`,
-`FERRY_EXECUTION_HIGH_WATER_MARK_INVALID`, `FERRY_SOURCE_CHECKPOINT_MISSING`,
-`FERRY_SOURCE_HIGH_WATER_MARK_UNSUPPORTED`,
-`FERRY_EXECUTION_ROUTE_INVALID`, `FERRY_EXECUTION_ROUTE_CHANGED`,
-`FERRY_REQUIRED_REFERENCE_SOURCE_FIELD_EMPTY`,
-`FERRY_REFERENCE_SOURCE_ID_AMBIGUOUS`, `FERRY_REFERENCE_TARGET_PENDING`,
-`FERRY_EMPTY_DESTINATION_RECORD`, `FERRY_OWNER_MAPPING_UNSUPPORTED`,
-`FERRY_RECORD_RESULT_BULK_SAVE_INCOMPLETE`.
+`SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED`, `SANKA_MIGRATE_EXECUTION_ATTEMPT_SUPERSEDED`,
+`SANKA_MIGRATE_ROUTE_MANIFEST_MISSING`, `SANKA_MIGRATE_ROUTE_MANIFEST_INVALID`,
+`SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED`, `SANKA_MIGRATE_ROUTE_CHECKPOINT_MISMATCH`,
+`SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID`, `SANKA_MIGRATE_SOURCE_CHECKPOINT_MISSING`,
+`SANKA_MIGRATE_SOURCE_HIGH_WATER_MARK_UNSUPPORTED`,
+`SANKA_MIGRATE_EXECUTION_ROUTE_INVALID`, `SANKA_MIGRATE_EXECUTION_ROUTE_CHANGED`,
+`SANKA_MIGRATE_REQUIRED_REFERENCE_SOURCE_FIELD_EMPTY`,
+`SANKA_MIGRATE_REFERENCE_SOURCE_ID_AMBIGUOUS`, `SANKA_MIGRATE_REFERENCE_TARGET_PENDING`,
+`SANKA_MIGRATE_EMPTY_DESTINATION_RECORD`, `SANKA_MIGRATE_OWNER_MAPPING_UNSUPPORTED`,
+`SANKA_MIGRATE_RECORD_RESULT_BULK_SAVE_INCOMPLETE`.
 
 ### 3.4 The working-state model
 
 ```python
-# ferry/runtime/execution/model.py  (AGPL-3.0-only)
+# sanka/runtime/execution/model.py  (AGPL-3.0-only)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
-from ferry.connector import SourceFilter
-from ferry.runtime.hashing import content_hash
-from ferry.runtime.mapping.model import MigrationMappingField
-from ferry.runtime.mapping.pending_relationships import PendingRelationshipsByRoute
+from sanka.connector import SourceFilter
+from sanka.runtime.hashing import content_hash
+from sanka.runtime.mapping.model import MigrationMappingField
+from sanka.runtime.mapping.pending_relationships import PendingRelationshipsByRoute
 
 ExecutionStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 WriteStatus = Literal["created", "updated", "skipped", "failed"]
@@ -344,7 +344,7 @@ Notes:
 ### 3.5 The protocol family
 
 ```python
-# ferry/runtime/execution/state.py  (AGPL-3.0-only)
+# sanka/runtime/execution/state.py  (AGPL-3.0-only)
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -374,7 +374,7 @@ class ExecutionLedger(Protocol):
 
     async def upsert_results(self, results: Sequence[RecordWriteOutcome]) -> int:
         """Returns the number persisted. The engine fails closed
-        (FERRY_RECORD_RESULT_BULK_SAVE_INCOMPLETE) when it differs from
+        (SANKA_MIGRATE_RECORD_RESULT_BULK_SAVE_INCOMPLETE) when it differs from
         len(results) — preserving record_runtime.py:1918-1932."""
         ...
 
@@ -395,8 +395,8 @@ class ExecutionJournal(Protocol):
     (production: update_transfer_stage_for_job returning None, then the
     cancelled-race path record_runtime.py:2108-2153 /
     finalize_cancelled_transfer_execution,
-    app/repository/ferry/repository.py:1344).
-    `load` raises ExecutionFault(FERRY_EXECUTION_JOB_SUPERSEDED) when the
+    app/repository/sanka/repository.py:1344).
+    `load` raises ExecutionFault(SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED) when the
     journal's job is no longer the owner; a cancelled entry loads normally
     with status "cancelled".
     """
@@ -422,7 +422,7 @@ class ExecutionObserver(Protocol):
     """Side-channel for logs/metrics. Sync, fire-and-forget, no return values.
 
     The sanka adapter maps these onto the structured events the engine emits
-    today (ferry.transfer.record_failed at record_runtime.py:1963-1972, the
+    today (sanka.transfer.record_failed at record_runtime.py:1963-1972, the
     queue/fail/complete events, and the route-count-failed warning at
     :2835-2842), closing over workspace/run context ids.
     """
@@ -443,7 +443,7 @@ class ExecutionHost:
     ledger: ExecutionLedger
     journal: ExecutionJournal
     fence: AttemptFence
-    identity_ledger: IdentityLedger                      # ferry.runtime.mapping.pending_relationships
+    identity_ledger: IdentityLedger                      # sanka.runtime.mapping.pending_relationships
     shared_identity_ledger: SharedIdentityLedger | None
     observer: ExecutionObserver = NULL_OBSERVER
 ```
@@ -456,13 +456,13 @@ the batch executor and the continuous reconciler while the fence is not.
 
 ### 3.6 Sanka-side adapters (sketch)
 
-One adapter module (`app/service/ferry/execution_host.py`, new) constructs
+One adapter module (`app/service/sanka/execution_host.py`, new) constructs
 the `ExecutionHost` per execution, closing over the pinned ids — the same
 shape `pending_relationships.py` already uses for its ledgers:
 
 ```python
 class SankaExecutionLedger:
-    def __init__(self, *, repository: FerryRuntimeRepository, workspace_id: str, run_id: str) -> None: ...
+    def __init__(self, *, repository: SankaMigrateRuntimeRepository, workspace_id: str, run_id: str) -> None: ...
 
     async def terminal_destination_ids(self, *, source_object, source_record_ids, destination_object):
         return await self._repository.get_terminal_destination_record_ids(   # record_runtime.py:312-320
@@ -495,7 +495,7 @@ class SankaExecutionJournal:
     """Owns the transfer stage report envelope.
 
     load(): get_stage("transfer") → job fence check → codec parse → JournalEntry
-            (raises FERRY_EXECUTION_JOB_SUPERSEDED when another job owns it).
+            (raises SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED when another job owns it).
     save(): codec render (mechanics keys byte-identical; envelope copy from
             status→summary table) →
             job_id set:  update_transfer_stage_for_job (record_runtime.py:245-254);
@@ -518,7 +518,7 @@ around the delegation call — they are API surface, not mechanics.
 
 ### 3.7 Local runtime implementation (sketch)
 
-`ferry/runtime/execution/local.py` implements all three protocols over the
+`sanka/runtime/execution/local.py` implements all three protocols over the
 same SQLite file the `SqliteStateStore` uses:
 
 ```sql
@@ -595,7 +595,7 @@ engine until PR F-5 swaps `apply` onto this family.
 
 ## 4. Component decomposition
 
-New package `ferry/runtime/execution/` in `ferry-migrate` (AGPL-3.0-only).
+New package `sanka/runtime/execution/` in `sanka-migrate` (AGPL-3.0-only).
 LOC bounds are production-source lines per implementation PR (tests
 excluded, themselves bounded by porting the pinned sanka behaviors listed in
 §6 tripwires).
@@ -646,55 +646,55 @@ workspace) and `docs/ARCHITECTURE.md` tenets 2-4.
 | Invariant | Today (anchors) | At the seam |
 |---|---|---|
 | **One execution, one workspace** (runbook "Required pinned identifiers") | Every repository call carries `workspace_id`/`run_id` explicitly (`record_runtime.py:190-393`) | Protocols are scope-free (§3.1); the host adapter closes over the pinned UUIDs at construction. Upstream code cannot express a workspace switch. |
-| **Hash-bound scope** (tenet 3; runbook "deterministic high-water mark and candidate-set hash") | Manifest canonicalized + compared on every queue/claim/batch (`execution_state.py:69-160`; `record_runtime.py:2524-2551`, `:3292-3301`); HWM map validated against the manifest (`execution_state.py:271-305`); OSS plan hash (`engine.py:191-194`) | `ExecutionScope` is frozen and carries `scope_hash` (`content_hash` over manifest + selection + HWMs, `hashing.py:32-35`). `ContinuousExecutor` re-derives the scope from the claimed journal entry and refuses on any mismatch (`FERRY_ROUTE_MANIFEST_CHANGED` / `FERRY_EXECUTION_HIGH_WATER_MARK_INVALID`). Structural comparison is preserved for parity; the hash gives approvals a stable handle (§8 Q3). |
+| **Hash-bound scope** (tenet 3; runbook "deterministic high-water mark and candidate-set hash") | Manifest canonicalized + compared on every queue/claim/batch (`execution_state.py:69-160`; `record_runtime.py:2524-2551`, `:3292-3301`); HWM map validated against the manifest (`execution_state.py:271-305`); OSS plan hash (`engine.py:191-194`) | `ExecutionScope` is frozen and carries `scope_hash` (`content_hash` over manifest + selection + HWMs, `hashing.py:32-35`). `ContinuousExecutor` re-derives the scope from the claimed journal entry and refuses on any mismatch (`SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED` / `SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID`). Structural comparison is preserved for parity; the hash gives approvals a stable handle (§8 Q3). |
 | **Exact-ID pilot sets** (runbook "A pilot must use an exact saved ID set (and its hash)") | Operator procedure only; product contract = frozen HWM + bounded reads/counts + reopen-to-total | `ExecutionScope` grows a tagged variant `ExactIdScope(candidate_ids_by_route, candidate_hash)` (PR F-6): `run_batch` intersects every page with the candidate set, refuses completion until the ledger covers exactly the candidate ids, and the reconciliation identity is checked against `len(candidate_ids)`. New capability, sequenced after parity — not smuggled into the behavior-preserving swap. |
 | **Write-free validation** (tenet 2; runbook "do not call a destination adapter") | `dry_run` discards the destination connector and never invokes it (`record_runtime.py:1166` binds only the source; the loop at `:1192-1273` performs source reads and pure mapping only) | `validate.py`'s signature admits no `DestinationConnector` and no `ExecutionLedger` — write-freedom is visible in the type, not a convention. |
-| **Attempt idempotency** (`attempt_id = task_run_id:attempt_number`) | Derivation `app/jobs/ferry/execution.py:73-78`; CAS claim `record_runtime.py:2490-2518`; per-batch fence re-check `:2585-2590`; durable-rebuild-per-attempt marker `durableResultsAttemptId` `:1445-1464`, `:2097`; failed→skipped repair `:1933-1956`; idempotent ledger upsert (OSS `state.py:224-243`) | `AttemptFence.claim` returns `claimed/superseded/cancelled`; `ExecutionJournal.save` returns the same dispositions so a fenced-out writer can never clobber a newer attempt; `ExecutionLedger.upsert_results` is upsert-by-key and count-verified (fail closed on shortfall); `JournalEntry.durable_results_attempt_id` preserves the rebuild-once-per-attempt marker. |
+| **Attempt idempotency** (`attempt_id = task_run_id:attempt_number`) | Derivation `app/jobs/sanka/execution.py:73-78`; CAS claim `record_runtime.py:2490-2518`; per-batch fence re-check `:2585-2590`; durable-rebuild-per-attempt marker `durableResultsAttemptId` `:1445-1464`, `:2097`; failed→skipped repair `:1933-1956`; idempotent ledger upsert (OSS `state.py:224-243`) | `AttemptFence.claim` returns `claimed/superseded/cancelled`; `ExecutionJournal.save` returns the same dispositions so a fenced-out writer can never clobber a newer attempt; `ExecutionLedger.upsert_results` is upsert-by-key and count-verified (fail closed on shortfall); `JournalEntry.durable_results_attempt_id` preserves the rebuild-once-per-attempt marker. |
 | **Reconciliation identity** (runbook `created + updated + skipped + failed = candidate count`) | Frozen totals per route (`record_runtime.py:2770-2844`); a route may complete only when `Σ(created, updated, skipped) = frozen total` — shortfall reopens it from a safe keyset checkpoint (`execution_state.py:384-459`, `record_runtime.py:2624-2644`); `failed` is a deduped id set counted disjointly (`:1975-1985`) and any stall surfaces as `failed` status for review (`:2645`, `:2662-2663`) | `ContinuousExecutor` takes `route_totals` inside the scope and will not emit `status="completed"` while any selected route's terminal count is short; the durable authority is `ExecutionLedger.pair_status_totals` (not in-memory counters); failed records keep the run in `failed`-for-review rather than silently closing. The identity is checked where the runbook checks it: terminal counts + failed set against the frozen candidate count. |
 | **Fail-closed persistence** | `record_runtime.py:1918-1932` raises when the bulk save persisted fewer rows than the batch produced | Preserved as a protocol contract on `upsert_results` (§3.5) — the engine, not the adapter, enforces it, so every host inherits it. |
-| **No resumption of superseded work** (runbook "Never resume an old partial run…") | Job/attempt supersede checks before and during every batch (`record_runtime.py:2473-2478`, `:2567-2590`) | `ExecutionJournal.load` raises `FERRY_EXECUTION_JOB_SUPERSEDED` for a non-owning job; every save is disposition-checked. |
+| **No resumption of superseded work** (runbook "Never resume an old partial run…") | Job/attempt supersede checks before and during every batch (`record_runtime.py:2473-2478`, `:2567-2590`) | `ExecutionJournal.load` raises `SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED` for a non-owning job; every save is disposition-checked. |
 
 ## 6. Migration sequence
 
 Rules of the road for every PR below:
 
 - **Delivery mechanism** sanka-side: revendor the wheels per
-  `vendor/ferry/PROVENANCE.txt` (pinned ferry commit, `uv build` from a
-  clean worktree, sha256s recorded). Ferry-side PRs land first; the matching
+  `vendor/sanka/PROVENANCE.txt` (pinned sanka commit, `uv build` from a
+  clean worktree, sha256s recorded). Sanka Migrate-side PRs land first; the matching
   sanka PR pins their commit.
 - **Tripwires** sanka-side always include:
-  `tests/unit/service/ferry/test_runtime_service.py` (≈70 pinned behaviors,
+  `tests/unit/service/sanka/test_runtime_service.py` (≈70 pinned behaviors,
   4,069 lines) and the #2811 characterization suite
-  `tests/api/test_ferry_record_runtime_contract_api.py` (1,048 lines pinning
+  `tests/api/test_sanka_record_runtime_contract_api.py` (1,048 lines pinning
   HTTP codes, envelopes, and load-bearing report keys), run with bounded
-  workers and diffed against the known-failures baseline. Ferry-side always
-  include `packages/ferry-migrate/tests/` (engine e2e, pg→CH flagship e2e,
+  workers and diffed against the known-failures baseline. Sanka Migrate-side always
+  include `packages/sanka-migrate/tests/` (engine e2e, pg→CH flagship e2e,
   state store, planner) plus the import-boundary and license scripts.
 - **Rollback** sanka-side is always `git revert` + redeploy: every PR is
   code-only, and the codec contract (§3.4) keeps persisted stage-report
   spellings and result-row shapes byte-identical, so state written before,
   during, and after any PR is mutually readable. No schema migrations until
-  F-5 (ferry-local only, additive).
+  F-5 (sanka-migrate-local only, additive).
 - **Bound**: ≤ ~600 production-source LOC per PR.
 
 | # | Side | Scope | Tripwire | Rollback |
 |---|---|---|---|---|
-| S-1 | sanka | Revendor wheels at ferry `32db881`+; swap the engine's capability probes to the SDK refinements that already landed there (commit `887c58a`: `ferry.connector.protocols` `:158`, `:171`, `:188`, `:279`); delete the now-duplicate local protocols `sdk_adapters.py:87-141` (`SupportsHighWaterMark`/`SupportsBoundedReads`/`SupportsBoundedCounts`/`SupportsPropertyProvisioning` — signatures verified identical). The SDK also ships `SupportsResourceProvisioning` (`protocols.py:292`), but its signature speaks SDK `PipelineDefinition`/`CustomObjectDefinition` while the sanka bridge still passes pydantic inputs (`sdk_adapters.py:144-158`, pass-through documented at `:27-33`); `runtime_checkable` isinstance checks method presence only, so the probe may switch either way — keep the local refinement until the dialect closes (§8 Q2). Independently valuable: one protocol set, and the vendored SDK gains the provisioning fields (`b98231e`) that cleanup needs. | `test_sdk_adapters.py`, unit runtime suite, contract suite | revert (wheels revert with the commit) |
-| F-1 | ferry | `ferry.runtime.execution` seam v1: `errors.py`, `model.py`, `state.py` (§3.3-3.5) + unit tests. Pure additions; no engine change. | new tests; existing suites untouched | revert (additive) |
-| F-2 | ferry | `report_codec.py` + `local.py` (§3.4 codec, §3.7 store) + round-trip tests built from real production report fixtures (checkpoints, legacy source-keyed checkpoints, pending relationships, batch pages). | codec round-trip property tests; `test_state_store.py` untouched | revert (additive; new tables only) |
+| S-1 | sanka | Revendor wheels at sanka `32db881`+; swap the engine's capability probes to the SDK refinements that already landed there (commit `887c58a`: `sanka.connector.protocols` `:158`, `:171`, `:188`, `:279`); delete the now-duplicate local protocols `sdk_adapters.py:87-141` (`SupportsHighWaterMark`/`SupportsBoundedReads`/`SupportsBoundedCounts`/`SupportsPropertyProvisioning` — signatures verified identical). The SDK also ships `SupportsResourceProvisioning` (`protocols.py:292`), but its signature speaks SDK `PipelineDefinition`/`CustomObjectDefinition` while the sanka bridge still passes pydantic inputs (`sdk_adapters.py:144-158`, pass-through documented at `:27-33`); `runtime_checkable` isinstance checks method presence only, so the probe may switch either way — keep the local refinement until the dialect closes (§8 Q2). Independently valuable: one protocol set, and the vendored SDK gains the provisioning fields (`b98231e`) that cleanup needs. | `test_sdk_adapters.py`, unit runtime suite, contract suite | revert (wheels revert with the commit) |
+| F-1 | sanka | `sanka.runtime.execution` seam v1: `errors.py`, `model.py`, `state.py` (§3.3-3.5) + unit tests. Pure additions; no engine change. | new tests; existing suites untouched | revert (additive) |
+| F-2 | sanka | `report_codec.py` + `local.py` (§3.4 codec, §3.7 store) + round-trip tests built from real production report fixtures (checkpoints, legacy source-keyed checkpoints, pending relationships, batch pages). | codec round-trip property tests; `test_state_store.py` untouched | revert (additive; new tables only) |
 | S-2 | sanka | `execution_state.py` becomes a delegation shim over `report_codec.py` (the #2813 `record_mapping.py` pattern), re-exporting the same underscore names; `oss_bridge.py` gains the execution-fault→`AppError` status table (§3.3). Byte-identical report dicts by codec contract. | full unit runtime suite (report-key assertions), contract suite | revert shim to the pure implementation |
-| F-3 | ferry | `scope.py` + `routes.py` (§4): `run_batch` with write, reference, owner, relationship, repair, and bookkeeping phases; ports the pinned sanka behaviors as OSS tests (per-route checkpoints, batch partial failure not advancing past a failed record, relationship batching preserving the record checkpoint, terminal-record no-rewrite, count-verified fail-closed persistence). | new routes/scope tests; engine e2e untouched | revert (additive) |
+| F-3 | sanka | `scope.py` + `routes.py` (§4): `run_batch` with write, reference, owner, relationship, repair, and bookkeeping phases; ports the pinned sanka behaviors as OSS tests (per-route checkpoints, batch partial failure not advancing past a failed record, relationship batching preserving the record checkpoint, terminal-record no-rewrite, count-verified fail-closed persistence). | new routes/scope tests; engine e2e untouched | revert (additive) |
 | S-3 | sanka | `record_runtime.execute()` delegates its route loop (`:1465-2033`) to `run_batch` through the `ExecutionHost` adapters (§3.6, new `execution_host.py`); report assembly for the single-batch path rides the codec. `on_missing_identity="drop"`. | execute-family unit tests (`test_execute_*`, ≈40), contract suite, reconciliation tests (`test_execute_batch_partial_failure_does_not_advance_past_failed_record`, `test_execute_uses_destination_batch_write_and_persists_each_result`, `test_execute_fails_closed_when_bulk_result_persistence_is_incomplete`, `test_execute_does_not_rewrite_terminal_record_without_destination_id`) | revert; persisted formats unchanged |
-| F-4 | ferry | `continuous.py` (§4): `ContinuousExecutor`, `BatchStep`, stall detection, terminal-batch reconciliation, frozen-total reopening, durable rebuild, progress/heartbeat assembly, failure marking; production defaults as constructor params (`max_batches=1_000_000`, `pause_seconds=0.25`, injectable `sleep`/clock). | new continuous tests porting the pinned behaviors (stall→reopen→resume, ten-thousand-batch resume, fenced older attempt, terminal-page recheck before stall failure) | revert (additive) |
-| S-4 | sanka | `execute_continuously` (`:2455-2747`), `_reconcile_terminal_batch_pages` (`:2873-2966`), `_durable_route_result_state` (`:2968-3017`), and `_continuous_execution_report` (`:3019-3212`) delegate to `ContinuousExecutor`; `SankaAttemptFence` + journal own the claim/cancel races; **fix the latent protocol gap**: add `finalize_cancelled_transfer_execution` to `FerryRuntimeRepository` (called at `record_runtime.py:2126`, declared only on the concrete repository `app/repository/ferry/repository.py:1344`, absent from the protocol `:190-393`). | continuous-family unit tests (`test_continuous_*`, ≈15 incl. `test_older_hatchet_attempt_is_fenced_before_destination_writes`, `test_terminal_page_is_rechecked_before_stall_failure`, `test_continuous_execution_can_resume_beyond_ten_thousand_batches`), contract suite | revert; formats unchanged |
-| F-5 | ferry | v0 `MigrationEngine.apply` adopts the family: `_apply_route`/`_write_page` (`engine.py:260-392`) replaced by `run_batch` + `SqliteExecutionState`; `RunStatus` gains `CANCELLED` (additive); local `ledger` table migrates to the pair-keyed `execution_results` (v0 routes are filter-less, `planner.py:187`, so the rewrite is mechanical). The OSS engine gains relationships, references, owner mapping, bounded scope, and attempt-exact resume — the concrete payoff of "execution semantics live once". | `test_engine_e2e.py`, `test_engine_postgres_e2e.py`, `test_engine_pg_to_clickhouse_e2e.py`, CLI tests | revert; keep the old `ledger` table until one release after |
-| F-6 | ferry | New capability, post-parity: `validate.py` (write-free sampling; optional CLI `ferry validate`) and `ExactIdScope` in `scope.py` (§5). | new tests; e2e untouched | revert (additive) |
+| F-4 | sanka | `continuous.py` (§4): `ContinuousExecutor`, `BatchStep`, stall detection, terminal-batch reconciliation, frozen-total reopening, durable rebuild, progress/heartbeat assembly, failure marking; production defaults as constructor params (`max_batches=1_000_000`, `pause_seconds=0.25`, injectable `sleep`/clock). | new continuous tests porting the pinned behaviors (stall→reopen→resume, ten-thousand-batch resume, fenced older attempt, terminal-page recheck before stall failure) | revert (additive) |
+| S-4 | sanka | `execute_continuously` (`:2455-2747`), `_reconcile_terminal_batch_pages` (`:2873-2966`), `_durable_route_result_state` (`:2968-3017`), and `_continuous_execution_report` (`:3019-3212`) delegate to `ContinuousExecutor`; `SankaAttemptFence` + journal own the claim/cancel races; **fix the latent protocol gap**: add `finalize_cancelled_transfer_execution` to `SankaMigrateRuntimeRepository` (called at `record_runtime.py:2126`, declared only on the concrete repository `app/repository/sanka/repository.py:1344`, absent from the protocol `:190-393`). | continuous-family unit tests (`test_continuous_*`, ≈15 incl. `test_older_hatchet_attempt_is_fenced_before_destination_writes`, `test_terminal_page_is_rechecked_before_stall_failure`, `test_continuous_execution_can_resume_beyond_ten_thousand_batches`), contract suite | revert; formats unchanged |
+| F-5 | sanka | v0 `MigrationEngine.apply` adopts the family: `_apply_route`/`_write_page` (`engine.py:260-392`) replaced by `run_batch` + `SqliteExecutionState`; `RunStatus` gains `CANCELLED` (additive); local `ledger` table migrates to the pair-keyed `execution_results` (v0 routes are filter-less, `planner.py:187`, so the rewrite is mechanical). The OSS engine gains relationships, references, owner mapping, bounded scope, and attempt-exact resume — the concrete payoff of "execution semantics live once". | `test_engine_e2e.py`, `test_engine_postgres_e2e.py`, `test_engine_pg_to_clickhouse_e2e.py`, CLI tests | revert; keep the old `ledger` table until one release after |
+| F-6 | sanka | New capability, post-parity: `validate.py` (write-free sampling; optional CLI `sanka-migrate validate`) and `ExactIdScope` in `scope.py` (§5). | new tests; e2e untouched | revert (additive) |
 | S-5 | sanka | `dry_run` core delegates to `validate.py`; optionally adopt `ExactIdScope` as the product-level exact-scope pilot contract the workspace runbook currently implements by operator procedure. | dry-run unit family, contract suite | revert |
 
 Sequencing properties: S-1 and F-1 are independently useful and small; the
 single-batch swap (S-3) lands before the continuous swap (S-4) to keep the
 first destination-writing change on the lower-volume manual path; every
-sanka swap is preceded by the ferry PR that its wheels pin, and no PR mixes
+sanka swap is preceded by the sanka PR that its wheels pin, and no PR mixes
 "move code upstream" with "change behavior" — behavior changes (F-6/S-5)
 are explicitly labeled new capability.
 
@@ -706,18 +706,18 @@ architecture pins (hosts depend on the runtime; the runtime knows no host).
 
 - **Hatchet specifics** — task registration, `run_no_wait` submission,
   ctx-id propagation, attempt-identity derivation
-  (`app/service/ferry/execution_scheduler.py`,
-  `app/service/ferry/scan_scheduler.py`, `app/jobs/ferry/execution.py`).
+  (`app/service/sanka/execution_scheduler.py`,
+  `app/service/sanka/scan_scheduler.py`, `app/jobs/sanka/execution.py`).
   The runtime's contract is `AttemptIdentity` + the fence; *which* queue
   produced the attempt is invisible by design.
 - **Program/billing hooks** — execution entitlement (402s), pack pricing,
   scan-pricing side effects (`runtime_service.py:510-594`,
-  `app/service/ferry/plans.py`, `billing.py`). Commercial policy is not
+  `app/service/sanka/plans.py`, `billing.py`). Commercial policy is not
   execution semantics.
 - **Access control** — feature flags, product-line access, workspace object
   permissions (`runtime_service.py:596-626`).
 - **Channel credentials and provider registries** —
-  `FerryChannelCredentialManager`, `FerryAdapterRegistry`, and the pydantic
+  `SankaMigrateChannelCredentialManager`, `SankaMigrateAdapterRegistry`, and the pydantic
   adapter dialect behind `sdk_adapters.py`. The runtime receives resolved
   `Credentials` and SPI connectors, never a credential store.
 - **HubSpot schema-admin vetting** — portal pinning and scope checks for
@@ -726,7 +726,7 @@ architecture pins (hosts depend on the runtime; the runtime knows no host).
 - **Stage-report envelopes and API DTOs** — summary copy, serializers, run
   status transitions, and the REST surface pinned by the contract suite.
 - **data_platform runtime** — the Postgres→ClickHouse ClickPipes path
-  (`app/service/ferry/data_platform_runtime.py`) is a different execution
+  (`app/service/sanka/data_platform_runtime.py`) is a different execution
   model (replication service orchestration, not record movement) with its
   own repository methods (`record_runtime.py:386-393`); folding it into the
   record engine would blur tenet 1 (finite migrations) for no reuse gain.
@@ -740,7 +740,7 @@ architecture pins (hosts depend on the runtime; the runtime knows no host).
    status→copy table in the sanka journal adapter; the codec round-trips
    unknown keys through `JournalEntry.extras` untouched. Revisit only if a
    second host needs the same copy.
-2. **Closing the `reconcile_resources` pydantic pass-through.** Ferry
+2. **Closing the `reconcile_resources` pydantic pass-through.** Sanka Migrate
    `b98231e` added stage `probability` and custom-object `properties` to the
    SDK provisioning types, removing the reason for the pass-through
    documented at `sdk_adapters.py:27-33` and the pydantic-signature
@@ -768,6 +768,6 @@ architecture pins (hosts depend on the runtime; the runtime knows no host).
    *Recommendation*: keep it in the report for parity (the UI reads it);
    revisit when the observer grows a metrics consumer.
 7. **Wheel cadence vs PyPI.** Every sanka PR revendors pinned wheels today;
-   once `ferry-migrate` publishes to PyPI at OSS launch, the pin becomes a
+   once `sanka-migrate` publishes to PyPI at OSS launch, the pin becomes a
    version requirement. *Recommendation*: keep vendoring through S-4 (exact
    sha256 provenance during the swap), switch to PyPI pins afterwards.

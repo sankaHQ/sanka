@@ -670,7 +670,7 @@ wheels = [
 [[package]]
 name = "sanka-migrate"
 version = "0.1.0.dev0"
-source = { editable = "packages/ferry-migrate" }
+source = { editable = "packages/sanka-migrate" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sanka-migrate-connector-sdk" },
@@ -679,7 +679,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
-    { name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
 ]
 
 [[package]]
@@ -694,7 +694,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "clickhouse-connect", specifier = ">=0.8" },
-    { name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
 ]
 
 [[package]]
@@ -706,7 +706,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" }]
+requires-dist = [{ name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" }]
 
 [[package]]
 name = "sanka-migrate-connector-hubspot"
@@ -720,7 +720,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
-    { name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
 ]
 
 [[package]]
@@ -735,7 +735,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
-    { name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
 ]
 
 [[package]]
@@ -750,7 +750,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
 ]
 
 [[package]]
@@ -765,13 +765,13 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
-    { name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
 ]
 
 [[package]]
 name = "sanka-migrate-connector-sdk"
 version = "0.1.0.dev0"
-source = { editable = "packages/ferry-connector-sdk" }
+source = { editable = "packages/sanka-migrate-connector-sdk" }
 
 [[package]]
 name = "sanka-migrate-connector-sqlite"
@@ -782,7 +782,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-migrate-connector-sdk", editable = "packages/ferry-connector-sdk" }]
+requires-dist = [{ name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" }]
 
 [[package]]
 name = "sanka-migrate-workspace"

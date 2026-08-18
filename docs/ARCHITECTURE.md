@@ -8,8 +8,8 @@ the decisions the scaffold encodes.
 
 | Package | Import root | License | Contents |
 |---|---|---|---|
-| `sanka-migrate-connector-sdk` | `ferry.connector` | Apache-2.0 | Connector protocols (source/destination + optional capability protocols), record/schema/graph types, credential-provider protocol, structured error taxonomy |
-| `sanka-migrate` | `sanka` (public facade); `ferry.runtime`, `ferry.cli` (compatibility and embedding) | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
+| `sanka-migrate-connector-sdk` | `sanka.connector` | Apache-2.0 | Connector protocols (source/destination + optional capability protocols), record/schema/graph types, credential-provider protocol, structured error taxonomy |
+| `sanka-migrate` | `sanka` (public facade); `sanka.runtime`, `sanka.cli` | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
 | `connectors/*` | one package each | Apache-2.0 | First-party connectors; depend on the SDK only |
 
 License-dependency direction is one-way: Apache code never imports AGPL code.
@@ -18,32 +18,26 @@ runtime. `scripts/check_import_boundaries.py` enforces this in CI, and
 `scripts/check_license_headers.py` keeps every file's SPDX header consistent
 with its zone.
 
-## Namespace packaging
+## Shared package layout
 
-All packages share the PEP 420 namespace `ferry` — there is **no**
-`ferry/__init__.py` anywhere, so multiple distributions (including editable
-installs inside this uv workspace) can contribute `ferry.*` subpackages
-side by side.
+The Apache SDK and AGPL runtime contribute non-overlapping modules under the
+`sanka` package. The SDK ships `sanka.connector` without a root
+`sanka/__init__.py`, so connector authors can install and import the SDK by
+itself. The runtime owns the root `sanka/__init__.py`, which provides the
+`Sanka` facade and extends the package search path before loading runtime
+modules. That explicit path extension keeps `sanka.connector` visible when
+editable installs place the two distributions in different directories.
 
-Consequence: the import style is `from ferry import migrations` /
-`import ferry.connector`, not attribute access on a bare `import ferry`.
-Whether a tiny top-level facade should own `ferry/__init__.py` (to enable
-`import ferry; ferry.migrations.create(...)`) is deliberately deferred to the
-client-SDK phase — claiming `__init__.py` in any one distribution would break
-the namespace merge for the others.
-
-The runtime distribution separately owns the regular `sanka` import package.
-It is intentionally small: `Sanka` creates resumable migration handles and
-re-exports the public plan, report, status, endpoint, and error types. All
-behavior delegates to `ferry.runtime`, so the facade introduces no second
-engine or serialized contract. This yields `from sanka import Sanka` for new
-applications without moving the shared connector namespace.
+The facade is intentionally small: `Sanka` creates resumable migration handles
+and re-exports the public plan, report, status, endpoint, and error types. All
+behavior delegates to `sanka.runtime`, so there is one engine and one set of
+serialized contracts. The Apache SDK is not copied into the AGPL wheel.
 
 Distribution names follow the public project brand: the runtime publishes as
 **`sanka-migrate`** and the SDK as **`sanka-migrate-connector-sdk`**. The
-primary CLI is `sanka-migrate`. The `ferry` import namespace, connector entry
-point, environment variables, state paths, and CLI alias remain stable
-compatibility contracts; see `docs/public-naming.md`.
+primary CLI is `sanka-migrate`. The `sanka` import namespace, connector entry
+point, environment variables, and state paths follow the contract in
+`docs/public-naming.md`.
 
 ## Design tenets
 
@@ -75,7 +69,7 @@ they bind every later phase:
   (`discover_objects` / `inventory` / `read_records` / `write_record`) rather
   than renaming to the PRD's conceptual verbs — port fidelity makes internal
   adoption a signature-compatible swap; the verb mapping is documented in
-  `ferry.connector.protocols`.
+  `sanka.connector.protocols`.
 - **Phase 2 (done)** — engine, SQLite state store, resumable execution,
   verification, CLI lifecycle commands, production mapping stack, and the
   `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`, `salesforce`, and

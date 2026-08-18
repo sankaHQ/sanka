@@ -13,11 +13,11 @@ format:
 	$(UV) run ruff check --fix .
 
 typecheck:
-	$(UV) run mypy packages/ferry-connector-sdk/src packages/ferry-migrate/src \
+	$(UV) run mypy packages/sanka-migrate-connector-sdk/src packages/sanka-migrate/src \
 		connectors/clickhouse/src connectors/csv/src connectors/hubspot/src \
 		connectors/markdown/src connectors/postgres/src connectors/salesforce/src \
 		connectors/sqlite/src \
-		packages/ferry-connector-sdk/tests packages/ferry-migrate/tests scripts
+		packages/sanka-migrate-connector-sdk/tests packages/sanka-migrate/tests scripts
 
 test:
 	$(UV) run pytest

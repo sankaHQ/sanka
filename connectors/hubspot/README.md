@@ -90,6 +90,6 @@ otherwise preserved):
   keyword arguments.
 
 Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `httpx`. Integration
-tests need `FERRY_TEST_HUBSPOT_ACCESS_TOKEN` (a private-app token for a
+tests need `SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN` (a private-app token for a
 disposable portal — they create and archive clearly marked test contacts)
 and skip cleanly without it.

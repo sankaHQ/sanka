@@ -96,16 +96,12 @@ def main() -> int:
         if f"Repository, {REPOSITORY_URL}" not in project_urls:
             errors.append(f"{project_name}: missing canonical Repository project URL")
         requirements = metadata.get_all("Requires-Dist", []) or []
-        if any(str(requirement).lower().startswith("ferry-") for requirement in requirements):
-            errors.append(f"{project_name}: artifact still depends on a legacy Ferry distribution")
         if not _sdist_has_license(sdists[0]):
             errors.append(f"{sdists[0].name}: sdist does not contain a LICENSE file")
 
         if project_name == "sanka-migrate":
-            if "sanka-migrate = ferry.cli:main" not in entry_points:
+            if "sanka-migrate = sanka.cli:main" not in entry_points:
                 errors.append("sanka-migrate: primary CLI entry point is missing")
-            if "ferry = ferry.cli:main" not in entry_points:
-                errors.append("sanka-migrate: Ferry compatibility CLI alias is missing")
             if not any(
                 str(requirement).lower().startswith("sanka-migrate-connector-sdk")
                 for requirement in requirements
@@ -114,17 +110,16 @@ def main() -> int:
             required_imports = {
                 "sanka/__init__.py",
                 "sanka/_client.py",
-                "ferry/runtime/__init__.py",
+                "sanka/runtime/__init__.py",
             }
             missing_imports = sorted(required_imports - wheel_members)
             if missing_imports:
                 errors.append(
-                    "sanka-migrate: wheel is missing public/compatibility imports: "
-                    f"{missing_imports}"
+                    f"sanka-migrate: wheel is missing public runtime imports: {missing_imports}"
                 )
         elif project_name != "sanka-migrate-connector-sdk":
-            if "[ferry.connectors]" not in entry_points:
-                errors.append(f"{project_name}: stable ferry.connectors entry-point group moved")
+            if "[sanka.connectors]" not in entry_points:
+                errors.append(f"{project_name}: canonical sanka.connectors entry-point group moved")
 
     expected_files = len(EXPECTED_LICENSES) * 2
     release_files = list(dist.glob("*.whl")) + list(dist.glob("*.tar.gz"))
