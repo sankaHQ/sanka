@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The ``ferry`` CLI: plan / validate / apply / verify / status, plus the
-``ferry migrate SRC DST`` shorthand.
+"""The ``sanka-migrate`` CLI: plan / validate / apply / verify / status.
+
+The historical ``ferry`` executable remains a compatibility alias.
 
 Spec-driven flow (migration-as-code)::
 
-    ferry plan     -f ferry.yaml
-    ferry validate -f ferry.yaml
-    ferry apply    -f ferry.yaml
-    ferry verify   -f ferry.yaml
+    sanka-migrate plan     -f ferry.yaml
+    sanka-migrate validate -f ferry.yaml
+    sanka-migrate apply    -f ferry.yaml
+    sanka-migrate verify   -f ferry.yaml
 
 ``validate`` is write-free by construction: it samples live source records
 through the reviewed plan and reports rejects without ever resolving the
@@ -15,7 +16,7 @@ destination connector, exiting non-zero when invalid records exist.
 
 Shorthand::
 
-    ferry migrate ./content sqlite://content.db
+    sanka-migrate migrate ./content sqlite://content.db
 
 Run state lives in a local SQLite file (default ``.ferry/state.db``), so
 ``apply`` resumes where an interrupted run stopped.
@@ -57,10 +58,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ferry",
-        description="Ferry — plan, execute, and verify finite migrations.",
+        prog="sanka-migrate",
+        description="Sanka Migrate — plan, execute, and verify finite migrations.",
     )
-    parser.add_argument("--version", action="version", version=f"ferry {__version__}")
+    parser.add_argument("--version", action="version", version=f"sanka-migrate {__version__}")
     parser.set_defaults(command=None)
     commands = parser.add_subparsers(dest="command")
 

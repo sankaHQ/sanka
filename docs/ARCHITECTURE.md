@@ -1,6 +1,6 @@
-# Ferry architecture
+# Sanka Migrate architecture
 
-Ferry is an open-core monorepo: an Apache-2.0 connector SDK, an AGPL-3.0-only
+Sanka Migrate is an open-core monorepo: an Apache-2.0 connector SDK, an AGPL-3.0-only
 migration runtime, and Apache-2.0 first-party connectors. This document pins
 the decisions the scaffold encodes.
 
@@ -8,8 +8,8 @@ the decisions the scaffold encodes.
 
 | Package | Import root | License | Contents |
 |---|---|---|---|
-| `ferry-connector-sdk` | `ferry.connector` | Apache-2.0 | Connector protocols (source/destination + optional capability protocols), record/schema/graph types, credential-provider protocol, structured error taxonomy |
-| `ferry-migrate` | `ferry.runtime`, `ferry.cli` (later `ferry.spec`, `ferry.migrations`) | AGPL-3.0-only | Lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
+| `sanka-migrate-connector-sdk` | `ferry.connector` | Apache-2.0 | Connector protocols (source/destination + optional capability protocols), record/schema/graph types, credential-provider protocol, structured error taxonomy |
+| `sanka-migrate` | `ferry.runtime`, `ferry.cli` (later `ferry.spec`, `ferry.migrations`) | AGPL-3.0-only | Lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
 | `connectors/*` | one package each | Apache-2.0 | First-party connectors; depend on the SDK only |
 
 License-dependency direction is one-way: Apache code never imports AGPL code.
@@ -32,17 +32,19 @@ Whether a tiny top-level facade should own `ferry/__init__.py` (to enable
 client-SDK phase — claiming `__init__.py` in any one distribution would break
 the namespace merge for the others.
 
-Distribution names: PyPI `ferry` is squatted, so the runtime publishes as
-**`ferry-migrate`** and the SDK as **`ferry-connector-sdk`**; the CLI binary
-and import namespace are plain `ferry`.
+Distribution names follow the public project brand: the runtime publishes as
+**`sanka-migrate`** and the SDK as **`sanka-migrate-connector-sdk`**. The
+primary CLI is `sanka-migrate`. The `ferry` import namespace, connector entry
+point, environment variables, state paths, and CLI alias remain stable
+compatibility contracts; see `docs/public-naming.md`.
 
 ## Design tenets
 
-These come from the Ferry PRD and from operating production migrations, and
+These come from the migration PRD and from operating production migrations, and
 they bind every later phase:
 
 1. **Finite migrations.** A migration has a desired end state and completes.
-   Ferry is not a continuous ETL/CDC platform.
+   Sanka Migrate is not a continuous ETL/CDC platform.
 2. **`plan` is write-free.** Planning and validation never construct a
    destination writer; nothing changes during planning — provably, not by
    convention.
@@ -67,10 +69,9 @@ they bind every later phase:
   than renaming to the PRD's conceptual verbs — port fidelity makes internal
   adoption a signature-compatible swap; the verb mapping is documented in
   `ferry.connector.protocols`.
-- **Phase 2 (in progress)** — engine, SQLite state store, verification v0,
-  CLI lifecycle commands, and the `markdown` + `sqlite` connectors are done;
-  remaining: `csv`, `postgres`, `clickhouse` connectors, richer verification
-  (field sampling), and wiring the ported mapping/auto-mapping modules into
-  the planner.
-- **Later** — `salesforce` and `hubspot` connectors; managed OAuth
-  connections, hosted execution, AI planning/remediation via Ferry Cloud.
+- **Phase 2 (done)** — engine, SQLite state store, resumable execution,
+  verification, CLI lifecycle commands, production mapping stack, and the
+  `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`, `salesforce`, and
+  `hubspot` connectors.
+- **Later** — managed OAuth connections, hosted execution, and AI-assisted
+  planning/remediation through Sanka's hosted product.

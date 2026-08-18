@@ -1,8 +1,8 @@
 UV ?= uv
 
-.PHONY: check lint format typecheck test boundaries headers
+.PHONY: check lint format typecheck test boundaries headers naming licenses build-release
 
-check: lint typecheck test boundaries headers
+check: lint typecheck test boundaries headers naming licenses
 
 lint:
 	$(UV) run ruff check .
@@ -27,3 +27,14 @@ boundaries:
 
 headers:
 	$(UV) run python scripts/check_license_headers.py
+
+naming:
+	$(UV) run python scripts/check_public_naming.py
+
+licenses:
+	$(UV) run python scripts/check_dependency_licenses.py
+
+build-release:
+	$(UV) build --all-packages --out-dir dist --clear
+	$(UV) run python scripts/check_release_artifacts.py dist
+	$(UV) publish --dry-run --trusted-publishing never dist/*

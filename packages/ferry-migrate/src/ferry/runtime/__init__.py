@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Ferry Migration Runtime — planner, engine, state, and verification.
+"""Sanka Migrate Runtime — planner, engine, state, and verification.
 
 Everything under ``ferry.runtime`` is AGPL-3.0-only. Connectors must not
 import this package; they depend on the Apache-2.0 ``ferry.connector`` SPI

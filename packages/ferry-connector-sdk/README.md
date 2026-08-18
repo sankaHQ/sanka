@@ -1,11 +1,12 @@
-# ferry-connector-sdk
+# sanka-migrate-connector-sdk
 
-The Apache-2.0 interface layer for [Ferry](https://github.com/sankaHQ/ferry)
+The Apache-2.0 interface layer for
+[Sanka Migrate](https://github.com/sankaHQ/sanka-migrate)
 migration connectors: the connector protocols, capability declarations, record
 and schema types, credential-provider protocol, and structured error taxonomy.
 
 Connectors depend on **this package only** — never on the AGPL-licensed
-runtime (`ferry-migrate`) — so a connector is never a derivative work of the
+runtime (`sanka-migrate`) — so a connector is never a derivative work of the
 runtime. CI enforces that boundary.
 
 **Status: pre-release, SPI v1 in place** — ported from Sanka's production

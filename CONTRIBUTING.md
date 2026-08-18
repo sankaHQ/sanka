@@ -1,10 +1,10 @@
-# Contributing to Ferry
+# Contributing to Sanka Migrate
 
 Thanks for your interest! Two things to know before opening a pull request.
 
 ## 1. CLA (required)
 
-Ferry is dual-licensed (AGPL-3.0-only runtime + commercial licenses, with an
+Sanka Migrate is dual-licensed (AGPL-3.0-only runtime + commercial licenses, with an
 Apache-2.0 connector SDK). That model requires every contribution to be covered
 by a signed Contributor License Agreement:
 [individual CLA](docs/legal/individual-cla.md) ·

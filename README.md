@@ -1,21 +1,21 @@
-# Ferry — The Migration API
+# Sanka Migrate — The Migration API
 
 > Plan, execute, and verify migrations between databases, warehouses, files, and business systems — with one API.
 
-Ferry turns migration into a reusable developer primitive. Instead of writing
-a one-off script for every migration, you (or your AI agent) point Ferry at a
-source and a target; Ferry inspects both sides, proposes a reviewable plan,
+Sanka Migrate turns migration into a reusable developer primitive. Instead of
+writing a one-off script for every migration, you (or your AI agent) point it at
+a source and a target; Sanka Migrate inspects both sides, proposes a reviewable plan,
 executes it with checkpoints and retries, and verifies the result. Then it's
-**done** — Ferry is for finite migrations (move from A to B and finish), not
+**done** — Sanka Migrate is for finite migrations (move from A to B and finish), not
 continuous ETL.
 
 > **Status: pre-release.** The runtime, CLI, and every connector below work
 > end to end — the database connectors are exercised in CI against live
 > databases, and the Salesforce/HubSpot connectors are ports of the adapters
 > running production migrations at Sanka. APIs may still move and nothing is
-> published to PyPI yet; the REST API and Ferry Cloud are in progress.
+> published to PyPI yet; the hosted API is in progress.
 
-## Why Ferry?
+## Why Sanka Migrate?
 
 Markdown → SQLite. CSV → PostgreSQL. PostgreSQL → ClickHouse. Salesforce →
 HubSpot. Every one of these is usually built as a custom project, yet they
@@ -25,7 +25,7 @@ all share the same workflow:
 Source → Inspect → Plan → Map / Transform → Transfer → Remediate → Verify → Target
 ```
 
-Ferry is that workflow as infrastructure, with the safety rules production
+Sanka Migrate is that workflow as infrastructure, with the safety rules production
 migrations actually need:
 
 - **Nothing changes during planning.** Inspection and planning are write-free
@@ -37,7 +37,7 @@ migrations actually need:
   checkpoints, and an identity ledger (source ID → destination ID) that makes
   re-running an interrupted migration converge instead of duplicating.
 - **Verification is first-class.** A migration isn't successful because the
-  transfer exited zero: Ferry reconciles source counts, the ledger, and
+  transfer exited zero: Sanka Migrate reconciles source counts, the ledger, and
   destination readback before calling it done.
 
 ## Quick start
@@ -46,14 +46,14 @@ Not on PyPI yet — run from a checkout (Python ≥ 3.12 +
 [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-git clone https://github.com/sankaHQ/ferry.git && cd ferry
+git clone https://github.com/sankaHQ/sanka-migrate.git && cd sanka-migrate
 uv sync --all-packages
 ```
 
 Migrate a Markdown folder into SQLite:
 
 ```bash
-uv run ferry migrate ./content sqlite://content.db
+uv run sanka-migrate migrate ./content sqlite://content.db
 ```
 
 ```text
@@ -85,10 +85,10 @@ target:
 ```
 
 ```bash
-uv run ferry plan     # inspect both sides, print the reviewable plan + hash
-uv run ferry apply    # execute exactly the reviewed plan; resumable
-uv run ferry verify   # reconcile source, ledger, and destination
-uv run ferry status   # run status + per-route ledger counts
+uv run sanka-migrate plan     # inspect both sides, print the reviewable plan + hash
+uv run sanka-migrate apply    # execute exactly the reviewed plan; resumable
+uv run sanka-migrate verify   # reconcile source, ledger, and destination
+uv run sanka-migrate status   # run status + per-route ledger counts
 ```
 
 Specs never contain secrets: `$ENV_VAR` references resolve only at execution
@@ -120,7 +120,8 @@ computed over the unresolved spec.
 | `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
 | `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
 
-Connectors implement the **Apache-2.0** [`ferry-connector-sdk`](packages/ferry-connector-sdk/)
+Connectors implement the **Apache-2.0**
+[`sanka-migrate-connector-sdk`](packages/ferry-connector-sdk/)
 and never import the runtime — so building (or distributing) a connector
 never makes it a derivative of the AGPL engine. Optional behaviors are typed
 capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
@@ -159,30 +160,30 @@ default, not a requirement.
 
 ## For AI agents
 
-Ferry is built to be driven by agents safely: plans are structured, hashable
+Sanka Migrate is built to be driven by agents safely: plans are structured, hashable
 documents an agent can present for approval, and `apply` executes only the
 approved hash. A typed client SDK, REST API, and an MCP server are planned as
-part of Ferry Cloud.
+part of the hosted Sanka Migrate API.
 
-## Open source vs Ferry Cloud
+## Open source vs hosted Sanka Migrate
 
-Ferry follows an open-core model (the same shape as Firecrawl's AGPL core +
+Sanka Migrate follows an open-core model (the same shape as Firecrawl's AGPL core +
 permissive SDKs — we use Apache-2.0 for the SDK so it carries a patent
 grant):
 
-| | Ferry Open Source | [Ferry Cloud](https://sanka.com/ferry) |
+| | Sanka Migrate Open Source | [Hosted Sanka Migrate](https://sanka.com/migrate/) |
 |---|:---:|:---:|
 | Migration runtime, CLI, local state | ✅ | ✅ |
 | Connector SDK + dev-wedge connectors | ✅ | ✅ |
 | Plan / apply / verify lifecycle | ✅ | ✅ |
-| Managed OAuth connections (`ferry connect`) | — | ✅ |
+| Managed OAuth connections (`sanka-migrate connect`) | — | ✅ |
 | Hosted execution & large migrations | — | ✅ |
 | AI-assisted planning & remediation | — | ✅ |
 | Observability, reports, history | — | ✅ |
 | Expert-led migration programs | — | ✅ |
 | Enterprise controls (RBAC, SSO, audit, approvals) | — | ✅ |
 
-The cloud version lives at [sanka.com/ferry](https://sanka.com/ferry) and is
+The hosted version lives at [sanka.com/migrate](https://sanka.com/migrate/) and is
 operated by [Sanka](https://sanka.com), where this runtime powers production
 migrations.
 
@@ -194,13 +195,18 @@ boundary:
 
 | Path | License |
 |---|---|
-| `packages/ferry-migrate/` — the Migration Runtime (engine, planner, CLI) | AGPL-3.0-only |
-| `packages/ferry-connector-sdk/` — connector interfaces & types | Apache-2.0 |
+| `packages/ferry-migrate/` — `sanka-migrate`, the Migration Runtime (engine, planner, CLI) | AGPL-3.0-only |
+| `packages/ferry-connector-sdk/` — `sanka-migrate-connector-sdk`, connector interfaces & types | Apache-2.0 |
 | `connectors/*` — first-party connectors | Apache-2.0 |
 
 The runtime is also available under a
 [commercial license](docs/legal/commercial-license.md) from Sanka, Inc. for
 embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
+
+The public project and distribution names are defined in
+[docs/public-naming.md](docs/public-naming.md). Python imports, the
+`ferry.connectors` entry-point group, `FERRY_*` environment variables, and the
+`ferry` CLI alias remain stable compatibility identifiers.
 
 ## Development
 

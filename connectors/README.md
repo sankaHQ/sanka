@@ -1,4 +1,4 @@
-# Ferry connectors
+# Sanka Migrate connectors
 
 First-party connectors live here, one package per connector, all licensed
 **Apache-2.0**.
