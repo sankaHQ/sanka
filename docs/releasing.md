@@ -27,7 +27,7 @@ remaining outside the AGPL runtime namespace.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0.dev0 tag
+uv run python scripts/check_release_tag.py v0.1.0a1 tag
 ```
 
 `make build-release` creates wheels and sdists, checks licenses, project URLs,

@@ -1,6 +1,6 @@
 [project]
 name = "sanka-migrate-connector-hubspot"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Sanka Migrate connector: migrate CRM data out of and into HubSpot"
 readme = "README.md"
 requires-python = ">=3.12"
