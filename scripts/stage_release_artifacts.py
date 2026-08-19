@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +24,24 @@ def _project_artifacts(source: Path, project_name: str) -> tuple[Path, Path]:
             f"sdists={[path.name for path in sdists]}"
         )
     return wheels[0], sdists[0]
+
+
+def _source_commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def stage_release_artifacts(source: Path, destination: Path) -> None:
@@ -59,6 +79,13 @@ def stage_release_artifacts(source: Path, destination: Path) -> None:
             raise ValueError(
                 f"staged all-project release must contain {expected_artifacts} artifacts"
             )
+
+        checksum_lines = [
+            f"{_sha256(path)}  all/{path.name}"
+            for path in sorted(all_projects.iterdir(), key=lambda item: item.name)
+        ]
+        (staged / "SHA256SUMS").write_text("\n".join(checksum_lines) + "\n")
+        (staged / "SOURCE_COMMIT").write_text(_source_commit() + "\n")
 
         if destination.exists():
             shutil.rmtree(destination)

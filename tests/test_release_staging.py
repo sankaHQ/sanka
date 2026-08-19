@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,19 @@ def test_stage_release_artifacts_builds_all_and_per_project_sets(tmp_path: Path)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert len(list((destination / "all").iterdir())) == len(EXPECTED_PROJECTS) * 2
+    source_commit = (destination / "SOURCE_COMMIT").read_text().strip()
+    assert len(source_commit) == 40
+    assert all(character in "0123456789abcdef" for character in source_commit)
+
+    checksum_lines = (destination / "SHA256SUMS").read_text().splitlines()
+    assert len(checksum_lines) == len(EXPECTED_PROJECTS) * 2
+    expected_checksums = []
+    for artifact in sorted((destination / "all").iterdir(), key=lambda item: item.name):
+        expected_checksums.append(
+            f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  all/{artifact.name}"
+        )
+    assert checksum_lines == expected_checksums
+
     for project_name in EXPECTED_PROJECTS:
         assert sorted(
             path.name for path in (destination / "packages" / project_name).iterdir()

@@ -32,7 +32,9 @@ uv run python scripts/check_release_tag.py v0.1.0a1 tag
 
 `make build-release` creates wheels and sdists, checks licenses, project URLs,
 dependencies, entry points, and the complete artifact set, then runs
-`uv publish --dry-run`. It does not upload anything.
+`uv publish --dry-run`. It also writes `release/SOURCE_COMMIT` and
+`release/SHA256SUMS`; the publication workflow retains both beside the staged
+artifacts. It does not upload anything.
 
 ## One-time external configuration (separately approved)
 
