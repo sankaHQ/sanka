@@ -43,3 +43,21 @@ asyncio.run(main())
 ```
 
 Advanced integrations can use the typed `sanka.runtime` modules directly.
+
+## Public research and assessment
+
+The CLI also reads Sanka Migrate's cited, keyless research API and can submit
+a free migration assessment:
+
+```bash
+sanka-migrate research eol --after 2027-01 --type shutdown
+sanka-migrate research tco salesforce --lang en
+sanka-migrate research compare crm-migration --platforms salesforce,hubspot
+sanka-migrate assess --source "SAP ECC" --destination "HubSpot"
+```
+
+Research output includes per-claim vendor sources and terminal attribution.
+Use `--json` for the unwrapped API data payload. Filtered queries with no rows
+exit `2`; API or transport failures exit `1`. The default public API base is
+`https://api.sanka.com/v2/migrate`; set `SANKA_MIGRATE_API_BASE` only when
+testing an explicitly trusted staging deployment.
