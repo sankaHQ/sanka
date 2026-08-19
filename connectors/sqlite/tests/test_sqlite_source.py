@@ -5,9 +5,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from ferry_connector_sqlite import CONNECTOR, SqliteSource
+from sanka_connector_sqlite import CONNECTOR, SqliteSource
 
-from ferry.connector import (
+from sanka.connector import (
     ConfigurationError,
     Credentials,
     SupportsRecordCounts,

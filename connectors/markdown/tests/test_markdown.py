@@ -4,9 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from ferry_connector_markdown import CONNECTOR, MarkdownSource
+from sanka_connector_markdown import CONNECTOR, MarkdownSource
 
-from ferry.connector import ConfigurationError, Credentials
+from sanka.connector import ConfigurationError, Credentials
 
 
 def _credentials(root: Path) -> Credentials:

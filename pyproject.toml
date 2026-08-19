@@ -1,8 +1,8 @@
 # Workspace root — not a published package. Shared tooling config for all packages.
 [project]
-name = "ferry-workspace"
+name = "sanka-migrate-workspace"
 version = "0.0.0"
-description = "Development workspace for the Ferry Migration Runtime monorepo"
+description = "Development workspace for the Sanka Migrate open-source monorepo"
 requires-python = ">=3.12"
 
 [tool.uv]
@@ -44,7 +44,7 @@ exclude = ["*.md"]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ferry"]
+known-first-party = ["sanka"]
 
 [tool.mypy]
 strict = true
@@ -52,8 +52,8 @@ python_version = "3.12"
 namespace_packages = true
 explicit_package_bases = true
 mypy_path = [
-  "packages/ferry-connector-sdk/src",
-  "packages/ferry-migrate/src",
+  "packages/sanka-migrate-connector-sdk/src",
+  "packages/sanka-migrate/src",
   "connectors/csv/src",
   "connectors/hubspot/src",
   "connectors/markdown/src",
@@ -67,8 +67,8 @@ mypy_path = [
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = [
-  "packages/ferry-connector-sdk/tests",
-  "packages/ferry-migrate/tests",
+  "packages/sanka-migrate-connector-sdk/tests",
+  "packages/sanka-migrate/tests",
   "connectors/csv/tests",
   "connectors/hubspot/tests",
   "connectors/markdown/tests",

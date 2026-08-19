@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enforce Ferry's license/import boundaries.
+"""Enforce Sanka Migrate's license/import boundaries.
 
 Rules (see docs/ARCHITECTURE.md):
 
-- ``packages/ferry-connector-sdk`` (Apache-2.0) must not import any ``ferry.*``
-  module outside ``ferry.connector`` — Apache code must never depend on the
+- ``packages/sanka-migrate-connector-sdk`` (Apache-2.0) must not import any ``sanka.*``
+  module outside ``sanka.connector`` — Apache code must never depend on the
   AGPL runtime.
-- ``connectors/*`` (Apache-2.0) may import ``ferry.connector`` only.
-- ``packages/ferry-migrate`` (AGPL-3.0-only) may import anything.
+- ``connectors/*`` (Apache-2.0) may import ``sanka.connector`` only.
+- ``packages/sanka-migrate`` (AGPL-3.0-only) may import anything.
 
 Usage: ``python scripts/check_import_boundaries.py [repo_root]``
 """
@@ -18,8 +18,8 @@ import ast
 import sys
 from pathlib import Path
 
-ALLOWED_PREFIX = "ferry.connector"
-RESTRICTED_ZONES = ("packages/ferry-connector-sdk", "connectors")
+ALLOWED_PREFIX = "sanka.connector"
+RESTRICTED_ZONES = ("packages/sanka-migrate-connector-sdk", "connectors")
 
 
 def _imported_modules(tree: ast.AST) -> list[str]:
@@ -35,7 +35,7 @@ def _imported_modules(tree: ast.AST) -> list[str]:
 def _violates(module: str) -> bool:
     if module == ALLOWED_PREFIX or module.startswith(ALLOWED_PREFIX + "."):
         return False
-    return module == "ferry" or module.startswith("ferry.")
+    return module == "sanka" or module.startswith("sanka.")
 
 
 def check(root: Path) -> list[str]:

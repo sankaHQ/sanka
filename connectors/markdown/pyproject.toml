@@ -1,29 +1,30 @@
 [project]
-name = "ferry-connector-markdown"
+name = "sanka-migrate-connector-markdown"
 version = "0.1.0.dev0"
-description = "Ferry connector: read a Markdown directory (frontmatter + body) as a migration source"
+description = "Sanka Migrate connector: read a Markdown directory (frontmatter + body) as a migration source"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
 dependencies = [
-  "ferry-connector-sdk",
+  "sanka-migrate-connector-sdk",
   "pyyaml>=6",
 ]
 
-[project.entry-points."ferry.connectors"]
-markdown = "ferry_connector_markdown:CONNECTOR"
+[project.entry-points."sanka.connectors"]
+markdown = "sanka_connector_markdown:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/ferry"
+Repository = "https://github.com/sankaHQ/sanka-migrate"
+Issues = "https://github.com/sankaHQ/sanka-migrate/issues"
 
 [tool.uv.sources]
-ferry-connector-sdk = { workspace = true }
+sanka-migrate-connector-sdk = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ferry_connector_markdown"]
+packages = ["src/sanka_connector_markdown"]

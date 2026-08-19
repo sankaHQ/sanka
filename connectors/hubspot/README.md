@@ -1,6 +1,6 @@
-# ferry-connector-hubspot
+# sanka-migrate-connector-hubspot
 
-HubSpot connector for Ferry, registering both roles under the `hubspot` type.
+HubSpot connector for Sanka Migrate, registering both roles under the `hubspot` type.
 This is a port of the HubSpot migration adapter that runs Sanka's production
 migrations — the batch, retry, conflict, and provisioning semantics below are
 the production semantics, not a reimplementation.
@@ -77,7 +77,7 @@ on 500/502/503/504/transport errors when the operation is idempotent-safe
 (`requests`, `retries`, `rateLimitRetries`, `throttleWaitMs`, `lastRetryAt`)
 surface via `retry_metrics()` (`SupportsRetryMetrics`).
 
-**Errors** map onto the Ferry taxonomy: 401 → `AuthenticationError`, 403 →
+**Errors** map onto the runtime taxonomy: 401 → `AuthenticationError`, 403 →
 `PermissionDeniedError` (with a scope hint), 404 → `NotFoundError`, 409 →
 `ConflictError`, 423/429 → `RateLimitError` with `retry_after_seconds`,
 5xx/transport → `TransientProviderError`, timeouts → `ProviderTimeoutError`,
@@ -89,7 +89,7 @@ otherwise preserved):
 - Write policies arrive bundled in `WriteOptions` instead of separate
   keyword arguments.
 
-Apache-2.0; depends only on `ferry-connector-sdk` and `httpx`. Integration
-tests need `FERRY_TEST_HUBSPOT_ACCESS_TOKEN` (a private-app token for a
+Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `httpx`. Integration
+tests need `SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN` (a private-app token for a
 disposable portal — they create and archive clearly marked test contacts)
 and skip cleanly without it.

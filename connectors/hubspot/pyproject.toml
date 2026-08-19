@@ -1,29 +1,30 @@
 [project]
-name = "ferry-connector-hubspot"
+name = "sanka-migrate-connector-hubspot"
 version = "0.1.0.dev0"
-description = "Ferry connector: migrate CRM data out of and into HubSpot"
+description = "Sanka Migrate connector: migrate CRM data out of and into HubSpot"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
 dependencies = [
-  "ferry-connector-sdk",
+  "sanka-migrate-connector-sdk",
   "httpx>=0.27",
 ]
 
-[project.entry-points."ferry.connectors"]
-hubspot = "ferry_connector_hubspot:CONNECTOR"
+[project.entry-points."sanka.connectors"]
+hubspot = "sanka_connector_hubspot:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/ferry"
+Repository = "https://github.com/sankaHQ/sanka-migrate"
+Issues = "https://github.com/sankaHQ/sanka-migrate/issues"
 
 [tool.uv.sources]
-ferry-connector-sdk = { workspace = true }
+sanka-migrate-connector-sdk = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ferry_connector_hubspot"]
+packages = ["src/sanka_connector_hubspot"]

@@ -11,8 +11,8 @@ from decimal import Decimal
 
 import psycopg
 import pytest
-from ferry_connector_postgres import CONNECTOR, PostgresDestination, PostgresSource
-from ferry_connector_postgres._base import (
+from sanka_connector_postgres import CONNECTOR, PostgresDestination, PostgresSource
+from sanka_connector_postgres._base import (
     SKIPPED_BINARY,
     cursor_param,
     cursor_text,
@@ -21,14 +21,14 @@ from ferry_connector_postgres._base import (
     json_safe,
     mapped_error,
 )
-from ferry_connector_postgres._destination import (
+from sanka_connector_postgres._destination import (
     _column_type,
     _index_name,
     _required_type,
     _write_param,
 )
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
@@ -145,7 +145,7 @@ async def test_dsn_validation_errors() -> None:
 
 
 async def test_source_filter_is_rejected_not_ignored() -> None:
-    from ferry.connector import SourceFilter
+    from sanka.connector import SourceFilter
 
     source = PostgresSource()
     with pytest.raises(UnsupportedFeatureError):
@@ -205,7 +205,7 @@ def test_type_promotion_ladder() -> None:
 
 
 def test_index_name_is_deterministic_and_bounded() -> None:
-    assert _index_name("documents", ["path"]) == "documents_path_ferry_uq"
+    assert _index_name("documents", ["path"]) == "documents_path_sanka_uq"
     long = _index_name("t" * 40, ["c" * 40])
     assert len(long) <= 63
     assert long == _index_name("t" * 40, ["c" * 40])

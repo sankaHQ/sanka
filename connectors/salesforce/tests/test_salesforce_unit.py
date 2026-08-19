@@ -9,9 +9,9 @@ from urllib.parse import parse_qsl
 
 import httpx
 import pytest
-from ferry_connector_salesforce import CONNECTOR, HttpSalesforceGateway, SalesforceSource
+from sanka_connector_salesforce import CONNECTOR, HttpSalesforceGateway, SalesforceSource
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     ConfigurationError,
     ConnectorError,
@@ -789,6 +789,6 @@ async def test_source_filter_requires_a_field() -> None:
 def test_unsupported_feature_error_is_exported_for_filters() -> None:
     # Guard the public contract: filter misuse surfaces as the taxonomy's
     # UnsupportedFeatureError / ValidationFailedError, both importable from
-    # ferry.connector.
+    # sanka.connector.
     assert issubclass(UnsupportedFeatureError, ConnectorError)
     assert issubclass(ValidationFailedError, ConnectorError)

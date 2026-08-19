@@ -1,6 +1,6 @@
-# ferry-connector-postgres
+# sanka-migrate-connector-postgres
 
-PostgreSQL connector for Ferry, registering both roles under the `postgres`
+PostgreSQL connector for Sanka Migrate, registering both roles under the `postgres`
 type. The DSN arrives in `settings["connection"]` (`postgres://…`,
 `postgresql://…`, or a libpq keyword string); `settings["schema"]` selects the
 schema (default `public`). Uses psycopg 3's async API with one cached
@@ -41,5 +41,5 @@ written to jsonb are JSON-encoded too), non-string values headed for text
 columns are stringified client-side, and strings are sent untyped so the
 server casts them into any column.
 
-Apache-2.0; depends only on `ferry-connector-sdk` and `psycopg[binary]`.
-Integration tests need `FERRY_TEST_POSTGRES_DSN` and skip cleanly without it.
+Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `psycopg[binary]`.
+Integration tests need `SANKA_MIGRATE_TEST_POSTGRES_DSN` and skip cleanly without it.

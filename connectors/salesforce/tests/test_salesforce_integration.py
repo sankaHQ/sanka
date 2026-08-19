@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Integration tests against a live Salesforce org — strictly read-only.
 
-Set both ``FERRY_TEST_SALESFORCE_INSTANCE_URL`` (for example
+Set both ``SANKA_MIGRATE_TEST_SALESFORCE_INSTANCE_URL`` (for example
 ``https://yourcompany.my.salesforce.com``) and
-``FERRY_TEST_SALESFORCE_ACCESS_TOKEN`` (an OAuth access token with API scope)
+``SANKA_MIGRATE_TEST_SALESFORCE_ACCESS_TOKEN`` (an OAuth access token with API scope)
 to run these; without them the whole module is skipped so ``make check``
 stays green offline. A Developer Edition or sandbox org works fine. Every
 call these tests make is a query, a describe, or a catalog read — nothing in
@@ -15,17 +15,18 @@ from __future__ import annotations
 import os
 
 import pytest
-from ferry_connector_salesforce import SalesforceSource
+from sanka_connector_salesforce import SalesforceSource
 
-from ferry.connector import Credentials
+from sanka.connector import Credentials
 
-INSTANCE_URL = os.environ.get("FERRY_TEST_SALESFORCE_INSTANCE_URL", "")
-ACCESS_TOKEN = os.environ.get("FERRY_TEST_SALESFORCE_ACCESS_TOKEN", "")
+INSTANCE_URL = os.environ.get("SANKA_MIGRATE_TEST_SALESFORCE_INSTANCE_URL", "")
+ACCESS_TOKEN = os.environ.get("SANKA_MIGRATE_TEST_SALESFORCE_ACCESS_TOKEN", "")
 
 pytestmark = pytest.mark.skipif(
     not (INSTANCE_URL and ACCESS_TOKEN),
     reason=(
-        "FERRY_TEST_SALESFORCE_INSTANCE_URL and FERRY_TEST_SALESFORCE_ACCESS_TOKEN are not set"
+        "SANKA_MIGRATE_TEST_SALESFORCE_INSTANCE_URL and "
+        "SANKA_MIGRATE_TEST_SALESFORCE_ACCESS_TOKEN are not set"
     ),
 )
 

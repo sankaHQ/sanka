@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Integration tests against a live ClickHouse server.
 
-Set ``FERRY_TEST_CLICKHOUSE_URL`` (e.g. ``http://localhost:8123/default``) to
+Set ``SANKA_MIGRATE_TEST_CLICKHOUSE_URL`` (e.g. ``http://localhost:8123/default``) to
 run these; without it the whole module is skipped so ``make check`` stays
 green offline. A disposable server works fine::
 
@@ -18,18 +18,20 @@ from collections.abc import Callable, Iterator
 import clickhouse_connect
 import pytest
 from clickhouse_connect.driver.client import Client
-from ferry_connector_clickhouse import ClickHouseDestination, _parse_connection
+from sanka_connector_clickhouse import ClickHouseDestination, _parse_connection
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     BatchWriteInput,
     Credentials,
     WriteOptions,
 )
 
-CLICKHOUSE_URL = os.environ.get("FERRY_TEST_CLICKHOUSE_URL", "")
+CLICKHOUSE_URL = os.environ.get("SANKA_MIGRATE_TEST_CLICKHOUSE_URL", "")
 
-pytestmark = pytest.mark.skipif(not CLICKHOUSE_URL, reason="FERRY_TEST_CLICKHOUSE_URL is not set")
+pytestmark = pytest.mark.skipif(
+    not CLICKHOUSE_URL, reason="SANKA_MIGRATE_TEST_CLICKHOUSE_URL is not set"
+)
 
 
 def _credentials() -> Credentials:
@@ -58,7 +60,7 @@ def scratch_table() -> Iterator[Callable[[], str]]:
     created: list[str] = []
 
     def make() -> str:
-        name = f"ferry_it_{uuid.uuid4().hex[:12]}"
+        name = f"sanka_migrate_it_{uuid.uuid4().hex[:12]}"
         created.append(name)
         return name
 
@@ -212,7 +214,9 @@ async def test_wrong_credentials_map_to_authentication_error(
 ) -> None:
     target = _parse_connection(_credentials())
     scheme = "https" if target.interface == "https" else "http"
-    bad_url = f"{scheme}://ferry_no_such_user:wrong@{target.host}:{target.port}/{target.database}"
+    bad_url = (
+        f"{scheme}://sanka_migrate_no_such_user:wrong@{target.host}:{target.port}/{target.database}"
+    )
     destination = ClickHouseDestination()
     with pytest.raises(AuthenticationError):
         await destination.write_record(

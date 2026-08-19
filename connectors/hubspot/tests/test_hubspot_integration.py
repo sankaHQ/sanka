@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Integration tests against a live HubSpot portal.
 
-Set ``FERRY_TEST_HUBSPOT_ACCESS_TOKEN`` (a private-app token for a
+Set ``SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN`` (a private-app token for a
 **disposable/test portal** with CRM object + schema read scopes and contact
 write scope) to run these; without it the whole module is skipped so
 ``make check`` stays green offline.
 
 The tests restrict themselves to clearly marked test contacts
-(``ferry-connector-test-…@example.com`` with firstname ``Ferry Connector
+(``sanka-migrate-connector-test-…@example.com`` with firstname ``Sanka Migrate Connector
 Test``), poll for search-index visibility instead of assuming immediate
 consistency, and archive every record they create.
 """
@@ -22,18 +22,18 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
 import pytest
-from ferry_connector_hubspot import HubSpotDestination, HubSpotSource
-from ferry_connector_hubspot._base import HUBSPOT_CRM_OBJECTS_URL, HubSpotGateway
+from sanka_connector_hubspot import HubSpotDestination, HubSpotSource
+from sanka_connector_hubspot._base import HUBSPOT_CRM_OBJECTS_URL, HubSpotGateway
 
-from ferry.connector import Credentials, WriteOptions
+from sanka.connector import Credentials, WriteOptions
 
-ACCESS_TOKEN = os.environ.get("FERRY_TEST_HUBSPOT_ACCESS_TOKEN", "")
+ACCESS_TOKEN = os.environ.get("SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN", "")
 
 pytestmark = pytest.mark.skipif(
-    not ACCESS_TOKEN, reason="FERRY_TEST_HUBSPOT_ACCESS_TOKEN is not set"
+    not ACCESS_TOKEN, reason="SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN is not set"
 )
 
-TEST_FIRSTNAME = "Ferry Connector Test"
+TEST_FIRSTNAME = "Sanka Migrate Connector Test"
 SEARCH_VISIBILITY_TIMEOUT_SECONDS = 90.0
 
 
@@ -46,7 +46,7 @@ def _credentials() -> Credentials:
 
 
 def _test_email() -> str:
-    return f"ferry-connector-test-{uuid.uuid4().hex[:12]}@example.com"
+    return f"sanka-migrate-connector-test-{uuid.uuid4().hex[:12]}@example.com"
 
 
 async def _archive_contact(record_id: str) -> None:

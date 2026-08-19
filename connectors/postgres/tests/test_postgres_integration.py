@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Integration tests against a real PostgreSQL server.
 
-Gated on ``FERRY_TEST_POSTGRES_DSN``; the whole module skips when it is not
+Gated on ``SANKA_MIGRATE_TEST_POSTGRES_DSN``; the whole module skips when it is not
 set. Every test works inside a scratch schema with a random suffix and drops
 it on teardown, so any database the DSN user can create schemas in works
 (CI uses a postgres:16 service container).
@@ -18,11 +18,11 @@ from typing import Any
 
 import psycopg
 import pytest
-from ferry_connector_postgres import PostgresDestination, PostgresSource
 from psycopg import sql
 from psycopg.types.json import Json
+from sanka_connector_postgres import PostgresDestination, PostgresSource
 
-from ferry.connector import (
+from sanka.connector import (
     Credentials,
     DataError,
     SourceFilter,
@@ -30,9 +30,9 @@ from ferry.connector import (
     WriteOptions,
 )
 
-_DSN = os.environ.get("FERRY_TEST_POSTGRES_DSN")
+_DSN = os.environ.get("SANKA_MIGRATE_TEST_POSTGRES_DSN")
 
-pytestmark = pytest.mark.skipif(not _DSN, reason="FERRY_TEST_POSTGRES_DSN is not set")
+pytestmark = pytest.mark.skipif(not _DSN, reason="SANKA_MIGRATE_TEST_POSTGRES_DSN is not set")
 
 
 def _credentials(schema: str) -> Credentials:
@@ -49,7 +49,7 @@ async def admin() -> AsyncIterator[psycopg.AsyncConnection[Any]]:
 
 @pytest.fixture
 async def schema(admin: psycopg.AsyncConnection[Any]) -> AsyncIterator[str]:
-    name = f"ferry_it_{secrets.token_hex(4)}"
+    name = f"sanka_migrate_it_{secrets.token_hex(4)}"
     await admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
     yield name
     await admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
@@ -341,7 +341,7 @@ async def test_destination_create_update_skip_and_evolution(
         "SELECT indexname FROM pg_indexes WHERE schemaname = %s AND tablename = 'documents'",
         (schema,),
     )
-    assert ("documents_path_ferry_uq",) in await index_cursor.fetchall()
+    assert ("documents_path_sanka_uq",) in await index_cursor.fetchall()
 
     rows_cursor = await admin.execute(
         sql.SQL("SELECT path, title, published, views, score, tags, extra FROM {table}").format(

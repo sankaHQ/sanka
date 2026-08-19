@@ -1,6 +1,6 @@
-# ferry-connector-sqlite
+# sanka-migrate-connector-sqlite
 
-SQLite as either side of a Ferry migration.
+SQLite as either side of a Sanka Migrate run.
 
 As a **source**, every user table becomes a migratable object: fields and
 types come from `PRAGMA table_info`, the identity is the table's
@@ -14,4 +14,4 @@ As a **destination**, records are written into one table per target object
 identity-based upserts honoring the run's conflict policy and JSON-encoded
 complex values. Inventory reads back table row counts for verification.
 
-Apache-2.0; depends only on `ferry-connector-sdk` (stdlib `sqlite3`).
+Apache-2.0; depends only on `sanka-migrate-connector-sdk` (stdlib `sqlite3`).

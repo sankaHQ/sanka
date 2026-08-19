@@ -10,17 +10,17 @@
 |---|---|
 | [`individual-cla.md`](individual-cla.md) | Individual Contributor License Agreement — signed once by each external contributor before their first merged contribution |
 | [`corporate-cla.md`](corporate-cla.md) | Corporate CLA — signed by an employer whose employees contribute on work time |
-| [`commercial-license.md`](commercial-license.md) | Commercial license for the AGPL-3.0-only Ferry Migration Runtime — alternative terms for organizations that cannot accept AGPL obligations |
+| [`commercial-license.md`](commercial-license.md) | Commercial license for the AGPL-3.0-only Sanka Migrate Runtime — alternative terms for organizations that cannot accept AGPL obligations |
 
 ## Why a CLA at all
 
-The Ferry Migration Runtime is dual-licensed: AGPL-3.0-only publicly, plus
+The Sanka Migrate Runtime is dual-licensed: AGPL-3.0-only publicly, plus
 commercial licenses sold by Sanka, Inc. Dual licensing requires that Sanka can
 relicense the entire work. Sanka's own code poses no problem (Sanka holds the
 copyright), but an external contribution accepted *without* a CLA would be
 licensed to us only under AGPL-3.0 — freezing the combined work as
 AGPL-3.0-only forever and breaking both the commercial runtime license and the
-ability to ship contributed fixes inside proprietary Ferry Cloud. The CLAs
+ability to ship contributed fixes inside proprietary Sanka Migrate Cloud. The CLAs
 below grant Sanka the explicit right to relicense contributions, which is the
 single clause that keeps the model working.
 

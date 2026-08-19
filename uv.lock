@@ -9,16 +9,16 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "ferry-connector-clickhouse",
-    "ferry-connector-csv",
-    "ferry-connector-hubspot",
-    "ferry-connector-markdown",
-    "ferry-connector-postgres",
-    "ferry-connector-salesforce",
-    "ferry-connector-sdk",
-    "ferry-connector-sqlite",
-    "ferry-migrate",
-    "ferry-workspace",
+    "sanka-migrate",
+    "sanka-migrate-connector-clickhouse",
+    "sanka-migrate-connector-csv",
+    "sanka-migrate-connector-hubspot",
+    "sanka-migrate-connector-markdown",
+    "sanka-migrate-connector-postgres",
+    "sanka-migrate-connector-salesforce",
+    "sanka-migrate-connector-sdk",
+    "sanka-migrate-connector-sqlite",
+    "sanka-migrate-workspace",
 ]
 
 [[package]]
@@ -212,148 +212,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
-]
-
-[[package]]
-name = "ferry-connector-clickhouse"
-version = "0.1.0.dev0"
-source = { editable = "connectors/clickhouse" }
-dependencies = [
-    { name = "clickhouse-connect" },
-    { name = "ferry-connector-sdk" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "clickhouse-connect", specifier = ">=0.8" },
-    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
-]
-
-[[package]]
-name = "ferry-connector-csv"
-version = "0.1.0.dev0"
-source = { editable = "connectors/csv" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" }]
-
-[[package]]
-name = "ferry-connector-hubspot"
-version = "0.1.0.dev0"
-source = { editable = "connectors/hubspot" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
-    { name = "httpx", specifier = ">=0.27" },
-]
-
-[[package]]
-name = "ferry-connector-markdown"
-version = "0.1.0.dev0"
-source = { editable = "connectors/markdown" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-    { name = "pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
-    { name = "pyyaml", specifier = ">=6" },
-]
-
-[[package]]
-name = "ferry-connector-postgres"
-version = "0.1.0.dev0"
-source = { editable = "connectors/postgres" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-    { name = "psycopg", extra = ["binary"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-]
-
-[[package]]
-name = "ferry-connector-salesforce"
-version = "0.1.0.dev0"
-source = { editable = "connectors/salesforce" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
-    { name = "httpx", specifier = ">=0.27" },
-]
-
-[[package]]
-name = "ferry-connector-sdk"
-version = "0.1.0.dev0"
-source = { editable = "packages/ferry-connector-sdk" }
-
-[[package]]
-name = "ferry-connector-sqlite"
-version = "0.1.0.dev0"
-source = { editable = "connectors/sqlite" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" }]
-
-[[package]]
-name = "ferry-migrate"
-version = "0.1.0.dev0"
-source = { editable = "packages/ferry-migrate" }
-dependencies = [
-    { name = "ferry-connector-sdk" },
-    { name = "pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ferry-connector-sdk", editable = "packages/ferry-connector-sdk" },
-    { name = "pyyaml", specifier = ">=6" },
-]
-
-[[package]]
-name = "ferry-workspace"
-version = "0.0.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.14" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "ruff", specifier = ">=0.12" },
-    { name = "types-pyyaml", specifier = ">=6" },
 ]
 
 [[package]]
@@ -807,6 +665,148 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/78/9b/475b927cf27a5cbbda3c7bafb69ed6ff77e1d7923d5d85f17c2749d7ae32/ruff-0.16.3-py3-none-win32.whl", hash = "sha256:388cdf2166642bd9b13d52b5932d3170f34f8abed7e8d9a855f1d84b83645a0a", size = 10931415, upload-time = "2026-08-13T15:17:05.726Z" },
     { url = "https://files.pythonhosted.org/packages/b2/99/e2a2bfc4fbf0a1e8a916bc9ebe6fe6c58cc34c28e0ffc6ce281d572d1c2e/ruff-0.16.3-py3-none-win_amd64.whl", hash = "sha256:e80a7d69ca2a6d1c4d352ec91458cdca6e56c83cdbcabd93e4abe1e53591d948", size = 11445993, upload-time = "2026-08-13T15:17:08.353Z" },
     { url = "https://files.pythonhosted.org/packages/69/3e/4132e539aed78c148854d4997a2685b0ed4dc4e87110b59ce528564e184e/ruff-0.16.3-py3-none-win_arm64.whl", hash = "sha256:b8ca152da82c1acc1fa8d5874b15951935f0eef46f10e6954c83859011b6178a", size = 11399302, upload-time = "2026-08-13T15:17:10.908Z" },
+]
+
+[[package]]
+name = "sanka-migrate"
+version = "0.1.0.dev0"
+source = { editable = "packages/sanka-migrate" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
+]
+
+[[package]]
+name = "sanka-migrate-connector-clickhouse"
+version = "0.1.0.dev0"
+source = { editable = "connectors/clickhouse" }
+dependencies = [
+    { name = "clickhouse-connect" },
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "clickhouse-connect", specifier = ">=0.8" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
+]
+
+[[package]]
+name = "sanka-migrate-connector-csv"
+version = "0.1.0.dev0"
+source = { editable = "connectors/csv" }
+dependencies = [
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" }]
+
+[[package]]
+name = "sanka-migrate-connector-hubspot"
+version = "0.1.0.dev0"
+source = { editable = "connectors/hubspot" }
+dependencies = [
+    { name = "httpx" },
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
+]
+
+[[package]]
+name = "sanka-migrate-connector-markdown"
+version = "0.1.0.dev0"
+source = { editable = "connectors/markdown" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
+]
+
+[[package]]
+name = "sanka-migrate-connector-postgres"
+version = "0.1.0.dev0"
+source = { editable = "connectors/postgres" }
+dependencies = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
+]
+
+[[package]]
+name = "sanka-migrate-connector-salesforce"
+version = "0.1.0.dev0"
+source = { editable = "connectors/salesforce" }
+dependencies = [
+    { name = "httpx" },
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" },
+]
+
+[[package]]
+name = "sanka-migrate-connector-sdk"
+version = "0.1.0.dev0"
+source = { editable = "packages/sanka-migrate-connector-sdk" }
+
+[[package]]
+name = "sanka-migrate-connector-sqlite"
+version = "0.1.0.dev0"
+source = { editable = "connectors/sqlite" }
+dependencies = [
+    { name = "sanka-migrate-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-migrate-connector-sdk", editable = "packages/sanka-migrate-connector-sdk" }]
+
+[[package]]
+name = "sanka-migrate-workspace"
+version = "0.0.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "ruff", specifier = ">=0.12" },
+    { name = "types-pyyaml", specifier = ">=6" },
 ]
 
 [[package]]
