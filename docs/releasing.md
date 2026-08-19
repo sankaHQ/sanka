@@ -34,10 +34,10 @@ dependencies, entry points, and the complete artifact set, then runs
 
 ## One-time external configuration (separately approved)
 
-1. Rename this private repository to `sankaHQ/sanka-migrate`; verify GitHub's
-   redirect and update the workspace repo manifest.
+1. Verify the completed repository rename to `sankaHQ/sanka`, GitHub's redirect,
+   and the matching workspace repository manifest entry.
 2. Configure pending PyPI trusted publishers for every prepared package. The
-   owner must be `sankaHQ`, repository `sanka-migrate`, workflow
+   owner must be `sankaHQ`, repository `sanka`, workflow
    `publish.yml`, and environment `pypi`.
 3. Configure the same package set on TestPyPI with environment `testpypi`.
 4. Create GitHub environments `testpypi` and `pypi` and limit deployment to

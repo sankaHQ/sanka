@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-REPOSITORY_URL = "https://github.com/sankaHQ/sanka-migrate"
+REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 RETIRED_TOKEN = "fer" + "ry"
 IGNORED_PARTS = {
     ".git",
