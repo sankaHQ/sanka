@@ -16,8 +16,8 @@ dependencies = [
 postgres = "sanka_connector_postgres:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/sanka-migrate"
-Issues = "https://github.com/sankaHQ/sanka-migrate/issues"
+Repository = "https://github.com/sankaHQ/sanka"
+Issues = "https://github.com/sankaHQ/sanka/issues"
 
 [tool.uv.sources]
 sanka-migrate-connector-sdk = { workspace = true }

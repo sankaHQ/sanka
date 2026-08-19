@@ -22,7 +22,7 @@ EXPECTED_LICENSES = {
     "sanka-migrate-connector-salesforce": "Apache-2.0",
     "sanka-migrate-connector-sqlite": "Apache-2.0",
 }
-REPOSITORY_URL = "https://github.com/sankaHQ/sanka-migrate"
+REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 
 
 def _wheel_prefix(name: str) -> str:

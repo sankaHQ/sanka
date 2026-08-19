@@ -15,8 +15,8 @@ dependencies = [
 csv = "sanka_connector_csv:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/sanka-migrate"
-Issues = "https://github.com/sankaHQ/sanka-migrate/issues"
+Repository = "https://github.com/sankaHQ/sanka"
+Issues = "https://github.com/sankaHQ/sanka/issues"
 
 [tool.uv.sources]
 sanka-migrate-connector-sdk = { workspace = true }

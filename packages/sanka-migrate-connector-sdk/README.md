@@ -1,7 +1,7 @@
 # sanka-migrate-connector-sdk
 
 The Apache-2.0 interface layer for
-[Sanka Migrate](https://github.com/sankaHQ/sanka-migrate)
+[Sanka Migrate](https://github.com/sankaHQ/sanka)
 migration connectors: the connector protocols, capability declarations, record
 and schema types, credential-provider protocol, and structured error taxonomy.
 

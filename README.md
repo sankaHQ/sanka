@@ -46,7 +46,7 @@ Not on PyPI yet — run from a checkout (Python ≥ 3.12 +
 [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-git clone https://github.com/sankaHQ/sanka-migrate.git && cd sanka-migrate
+git clone https://github.com/sankaHQ/sanka.git && cd sanka
 uv sync --all-packages
 ```
 

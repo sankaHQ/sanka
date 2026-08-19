@@ -10,7 +10,7 @@ and third-party references use the full name.
 | Surface | Name |
 |---|---|
 | Project and product | Sanka Migrate |
-| GitHub repository after the separately approved rename/public flip | `sankaHQ/sanka-migrate` |
+| GitHub repository | `sankaHQ/sanka` |
 | Runtime distribution | `sanka-migrate` |
 | Preferred Python facade | `from sanka import Sanka` |
 | Connector SDK distribution | `sanka-migrate-connector-sdk` |
@@ -19,12 +19,13 @@ and third-party references use the full name.
 | Future standalone research MCP distribution | `sanka-migrate-mcp` |
 | Marketing and docs route | `https://sanka.com/migrate/` |
 
-The bare name `sanka` is intentionally not used for this repository,
-distribution, or executable. It is the umbrella brand; the `sanka` Python
-distribution is owned by an unrelated publisher; the `sanka` executable is
-already owned by `sanka-cli`; and `sankaHQ/sanka` is the archived V1 monolith.
-The `sanka-migrate` distribution does provide the `sanka` **import package**
-and its `Sanka` facade—Python distribution and import names are independent.
+The bare name `sanka` is used for the GitHub repository and Python import
+package. It is intentionally not used for the distribution or executable: the
+`sanka` Python distribution is owned by an unrelated publisher, and the
+`sanka` executable is already owned by `sanka-cli`. The retired V1 monolith is
+preserved separately as `sankaHQ/sanka-monolith`. The `sanka-migrate`
+distribution provides the `sanka` import package and its `Sanka` facade—Python
+distribution and import names are independent.
 
 ## Python API contract
 
@@ -74,7 +75,6 @@ API migration if they are ever changed.
 ## Release boundary
 
 This naming contract prepares artifacts only. It does not publish a package,
-rename a GitHub repository, change repository visibility, configure a PyPI
-trusted publisher, or adopt the draft CLA/commercial-license text. Those are
-separate approval gates. The draft legal documents must be reviewed by counsel
-before adoption.
+change repository visibility, configure a PyPI trusted publisher, or adopt the
+draft CLA/commercial-license text. Those are separate approval gates. The draft
+legal documents must be reviewed by counsel before adoption.
