@@ -26,9 +26,16 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
+from sanka.cli._research import (
+    SankaMigrateApiClient,
+    SankaMigrateApiError,
+    print_research,
+    signup_url,
+)
 from sanka.runtime.__about__ import __version__
 from sanka.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
@@ -51,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
         return int(asyncio.run(args.handler(args)))
     except (SpecError, UnknownConnectorError, ExecutionError, FileNotFoundError) as error:
         print(f"error: {error}", file=sys.stderr)
+        return 1
+    except SankaMigrateApiError as error:
+        retry = f"; retry after {error.retry_after}s" if error.retry_after else ""
+        print(f"error: {error.code}: {error.message}{retry}", file=sys.stderr)
         return 1
 
 
@@ -111,7 +122,57 @@ def _build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("-y", "--yes", action="store_true", help="apply without confirmation")
     migrate.set_defaults(handler=_cmd_migrate)
 
+    research = commands.add_parser(
+        "research",
+        help="query cited Sanka Migrate lifecycle, cost, and comparison research",
+    )
+    research_commands = research.add_subparsers(dest="research_command", required=True)
+
+    eol = research_commands.add_parser("eol", help="query software lifecycle events")
+    eol.add_argument("product", nargs="?")
+    eol.add_argument("--category")
+    eol.add_argument(
+        "--type",
+        choices=("shutdown", "end_of_support", "maintenance_end", "version_lifecycle"),
+    )
+    eol.add_argument("--after", help="inclusive YYYY-MM lower bound")
+    eol.add_argument("--before", help="inclusive YYYY-MM upper bound")
+    _research_output_options(eol)
+    eol.set_defaults(handler=_cmd_research_eol)
+
+    tco = research_commands.add_parser("tco", help="query published cost benchmarks")
+    tco.add_argument("product", nargs="?")
+    tco.add_argument("--category")
+    _research_output_options(tco)
+    tco.set_defaults(handler=_cmd_research_tco)
+
+    compare = research_commands.add_parser("compare", help="compare migration capabilities")
+    compare.add_argument("category")
+    compare.add_argument("--platforms", help="comma-separated platform slugs (maximum 10)")
+    _research_output_options(compare)
+    compare.set_defaults(handler=_cmd_research_compare)
+
+    assess = commands.add_parser("assess", help="submit a free migration assessment")
+    assess.add_argument("--source")
+    assess.add_argument("--destination")
+    assess.add_argument("--volume")
+    assess.add_argument("--timing")
+    assess.add_argument("--concerns")
+    assess.add_argument("--category")
+    assess.add_argument("--lang", choices=("en", "ja"), default="en")
+    assess.add_argument("--json", action="store_true", help="print the API data payload as JSON")
+    assess.set_defaults(handler=_cmd_assess, form_started_at_ms=int(time.time() * 1000))
+
     return parser
+
+
+def _research_output_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--lang", choices=("en", "ja"), dest="locale")
+    parser.add_argument("--json", action="store_true", help="print the API data payload as JSON")
+
+
+def _research_client() -> SankaMigrateApiClient:
+    return SankaMigrateApiClient()
 
 
 def _engine(state_path: str) -> MigrationEngine:
@@ -205,6 +266,124 @@ async def _cmd_migrate(args: argparse.Namespace) -> int:
     report = await engine.verify(run_id)
     _print_verify(report)
     return 0 if report.ok else 1
+
+
+async def _cmd_research_eol(args: argparse.Namespace) -> int:
+    data = await asyncio.to_thread(
+        _research_client().research_eol,
+        product=args.product,
+        category=args.category,
+        event_type=args.type,
+        after=args.after,
+        before=args.before,
+        locale=args.locale,
+    )
+    return _print_research_result(data, kind="eol", locale=args.locale, as_json=args.json)
+
+
+async def _cmd_research_tco(args: argparse.Namespace) -> int:
+    data = await asyncio.to_thread(
+        _research_client().research_tco,
+        product=args.product,
+        category=args.category,
+        locale=args.locale,
+    )
+    return _print_research_result(data, kind="tco", locale=args.locale, as_json=args.json)
+
+
+async def _cmd_research_compare(args: argparse.Namespace) -> int:
+    if args.platforms and len([item for item in args.platforms.split(",") if item.strip()]) > 10:
+        raise SankaMigrateApiError(
+            "SANKA_MIGRATE_INPUT_INVALID",
+            "--platforms accepts at most 10 comma-separated values.",
+        )
+    data = await asyncio.to_thread(
+        _research_client().research_compare,
+        category=args.category,
+        platforms=args.platforms,
+        locale=args.locale,
+    )
+    return _print_research_result(data, kind="compare", locale=args.locale, as_json=args.json)
+
+
+async def _cmd_assess(args: argparse.Namespace) -> int:
+    answers = [
+        args.source,
+        args.destination,
+        args.volume,
+        args.timing,
+        args.concerns,
+        args.category,
+    ]
+    if not any(value is not None for value in answers):
+        args.source = input("Source system: ").strip()
+        args.destination = input("Destination system: ").strip()
+        args.volume = input("Data volume: ").strip()
+        args.timing = input("Target timing: ").strip()
+        args.concerns = input("Main concerns: ").strip()
+    if not str(args.source or "").strip():
+        raise SankaMigrateApiError(
+            "SANKA_MIGRATE_INPUT_INVALID",
+            "--source is required outside interactive mode.",
+        )
+    elapsed_ms = int(time.time() * 1000) - int(args.form_started_at_ms)
+    if elapsed_ms < 2000:
+        await asyncio.sleep((2000 - elapsed_ms) / 1000)
+    data = await asyncio.to_thread(
+        _research_client().assess,
+        {
+            "source": args.source,
+            "destination": args.destination or "",
+            "volume": args.volume or "",
+            "timing": args.timing or "",
+            "concerns": args.concerns or "",
+            "category": args.category or "",
+            "lang": args.lang,
+            "attribution": {"channel": "cli"},
+            "website": "",
+            "form_started_at": args.form_started_at_ms,
+        },
+    )
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0
+    assessment_id = str(data.get("assessment_id") or "")
+    if not assessment_id:
+        raise SankaMigrateApiError(
+            "SANKA_MIGRATE_API_INVALID_RESPONSE",
+            "Assessment response did not include an assessment_id.",
+        )
+    print(f"assessment submitted: {assessment_id}")
+    print("next: create your workspace and Sakura will build the grounded report")
+    print(f"  {signup_url(assessment_id, lang=args.lang)}")
+    return 0
+
+
+def _print_research_result(
+    data: dict[str, Any],
+    *,
+    kind: str,
+    locale: str | None,
+    as_json: bool,
+) -> int:
+    if as_json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0 if _research_has_results(data, kind=kind) else 2
+    return print_research(data, kind=kind, locale=locale)
+
+
+def _research_has_results(data: dict[str, Any], *, kind: str) -> bool:
+    if kind == "eol":
+        if isinstance(data.get("events"), list):
+            return bool(data["events"])
+        product = data.get("product")
+        return isinstance(product, dict) and bool(product.get("events"))
+    if kind == "tco":
+        if isinstance(data.get("benchmarks"), list):
+            return bool(data["benchmarks"])
+        product = data.get("product")
+        return isinstance(product, dict) and bool(product.get("plans"))
+    return bool(data.get("platforms"))
 
 
 def _infer_endpoint(value: str, *, role: str) -> EndpointSpec:

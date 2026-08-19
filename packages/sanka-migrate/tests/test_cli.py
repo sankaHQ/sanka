@@ -1,14 +1,22 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request
 
 import pytest
 
 import sanka.connector
 import sanka.runtime
 from sanka.cli import DEFAULT_SPEC_FILE, DEFAULT_STATE_FILE, main
+from sanka.cli._research import SankaMigrateApiClient, SankaMigrateApiError, signup_url
 from sanka.runtime.engine import MigrationEngine
 
 
@@ -37,7 +45,7 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
     # `validate` joined the subcommand set in F-6; argparse renders the choices
     # line from the full set, so this is the one pre-existing assertion the
     # additive subcommand forces to grow.
-    assert "{plan,validate,apply,verify,status,migrate}" in output
+    assert "{plan,validate,apply,verify,status,migrate,research,assess}" in output
 
 
 # -- sanka-migrate validate ---------------------------------------------------
@@ -188,3 +196,189 @@ def test_validate_rejects_a_non_positive_sample(
     assert main(["validate", "--sample", "0", *base]) == 1
 
     assert "SANKA_MIGRATE_DRY_RUN_LIMIT_INVALID" in capsys.readouterr().err
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._body = json.dumps(payload).encode()
+        self.headers: dict[str, str] = {}
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def test_research_client_uses_public_branded_base_and_unwraps_data() -> None:
+    requests: list[tuple[Request, float]] = []
+
+    @contextmanager
+    def opener(request: Request, *, timeout: float) -> Iterator[_FakeResponse]:
+        requests.append((request, timeout))
+        yield _FakeResponse({"success": True, "data": {"events": [], "dataset": {}}})
+
+    client = SankaMigrateApiClient(opener=opener)
+    data = client.research_eol(
+        product=None,
+        category="erp-migration",
+        event_type="shutdown",
+        after="2027-01",
+        before=None,
+        locale="ja",
+    )
+
+    assert data == {"events": [], "dataset": {}}
+    request, timeout = requests[0]
+    parsed = urlparse(request.full_url)
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
+        "https://api.sanka.com/v2/migrate/research/eol"
+    )
+    assert parse_qs(parsed.query) == {
+        "category": ["erp-migration"],
+        "type": ["shutdown"],
+        "after": ["2027-01"],
+        "locale": ["ja"],
+    }
+    assert timeout == 10.0
+
+
+def test_research_client_surfaces_standard_error_and_retry_after() -> None:
+    def opener(request: Request, *, timeout: float) -> Any:
+        body = BytesIO(
+            json.dumps(
+                {
+                    "success": False,
+                    "error": {"code": "SANKA_MIGRATE_RATE_LIMITED", "message": "Slow down."},
+                }
+            ).encode()
+        )
+        headers = Message()
+        headers["Retry-After"] = "60"
+        raise HTTPError(request.full_url, 429, "Too Many Requests", headers, body)
+
+    client = SankaMigrateApiClient(opener=opener)
+
+    with pytest.raises(SankaMigrateApiError) as excinfo:
+        client.research_tco(product=None, category=None, locale=None)
+
+    assert excinfo.value.code == "SANKA_MIGRATE_RATE_LIMITED"
+    assert excinfo.value.retry_after == "60"
+
+
+class _FakeResearchClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def research_eol(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("eol", kwargs))
+        return {
+            "events": [
+                {
+                    "product": {
+                        "slug": "opsgenie",
+                        "name": {"en": "Opsgenie", "ja": "オプスジーニー"},
+                    },
+                    "date": "2027-04-05",
+                    "event_type": "shutdown",
+                    "change": "Support ends",
+                    "citations": [
+                        {
+                            "kind": "vendor_primary",
+                            "source_url": "https://vendor.example/eol",
+                            "verified_on": "2026-08-09",
+                        }
+                    ],
+                }
+            ],
+            "dataset": {"name": "eol", "version": "2026-08-19.eol0001"},
+            "attribution": {
+                "name": "Sanka Migrate Research",
+                "url": "https://sanka.com/docs/migrate/eol/",
+                "license": "CC BY 4.0",
+            },
+        }
+
+    def research_tco(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("tco", kwargs))
+        return {"benchmarks": [], "dataset": {}, "attribution": {}}
+
+    def research_compare(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("compare", kwargs))
+        return {"platforms": [], "dataset": {}, "attribution": {}}
+
+    def assess(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("assess", payload))
+        return {"assessment_id": "7c9d1e42-0000-4000-8000-000000000000", "status": "submitted"}
+
+
+def test_research_cli_renders_citations_and_attribution(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = _FakeResearchClient()
+    monkeypatch.setattr("sanka.cli._research_client", lambda: fake)
+
+    assert main(["research", "eol", "--after", "2027-01", "--lang", "en"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Opsgenie" in output
+    assert "Support ends [1]" in output
+    assert "https://vendor.example/eol  (verified 2026-08-09)" in output
+    assert output.rstrip().endswith(
+        "Sanka Migrate Research — https://sanka.com/docs/migrate/eol/  (CC BY 4.0)"
+    )
+    assert fake.calls == [
+        (
+            "eol",
+            {
+                "product": None,
+                "category": None,
+                "event_type": None,
+                "after": "2027-01",
+                "before": None,
+                "locale": "en",
+            },
+        )
+    ]
+
+
+def test_research_json_is_unwrapped_and_empty_result_exits_two(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = _FakeResearchClient()
+    monkeypatch.setattr("sanka.cli._research_client", lambda: fake)
+
+    assert main(["research", "tco", "--json"]) == 2
+
+    assert json.loads(capsys.readouterr().out) == {
+        "benchmarks": [],
+        "dataset": {},
+        "attribution": {},
+    }
+
+
+def test_assess_waits_honestly_and_prints_branded_handoff(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = _FakeResearchClient()
+    times = iter((1_000.0, 1_003.0))
+    monkeypatch.setattr("sanka.cli._research_client", lambda: fake)
+    monkeypatch.setattr("sanka.cli.time.time", lambda: next(times))
+
+    assert main(["assess", "--source", "SAP ECC", "--lang", "en"]) == 0
+
+    output = capsys.readouterr().out
+    assert "assessment submitted: 7c9d1e42-0000-4000-8000-000000000000" in output
+    assert "%2Fmigrate-onboarding" in output
+    assert ("fer" + "ry") not in output.casefold()
+    kind, payload = fake.calls[0]
+    assert kind == "assess"
+    assert payload["source"] == "SAP ECC"
+    assert payload["attribution"] == {"channel": "cli"}
+    assert payload["website"] == ""
+    assert payload["form_started_at"] == 1_000_000
+
+
+def test_signup_url_has_no_retired_public_name() -> None:
+    url = signup_url("abc-123", lang="ja")
+
+    assert url.startswith("https://app.sanka.com/ja/signup?")
+    assert "migrate-onboarding" in url
+    assert ("fer" + "ry") not in url.casefold()
