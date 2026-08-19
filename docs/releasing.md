@@ -38,13 +38,20 @@ dependencies, entry points, and the complete artifact set, then runs
 
 1. Verify the completed repository rename to `sankaHQ/sanka`, GitHub's redirect,
    and the matching workspace repository manifest entry.
-2. Configure pending PyPI trusted publishers for every prepared package. The
-   owner must be `sankaHQ`, repository `sanka`, workflow
-   `publish.yml`, and environment `pypi`.
-3. Configure the same package set on TestPyPI with environment `testpypi`.
-4. Create GitHub environments `testpypi` and `pypi` and limit deployment to
-   tags. Keep repository variable `SANKA_MIGRATE_PUBLISH_ENABLED` absent or
-   set to `false`; publish jobs cannot run without the exact value `true`.
+2. Configure one pending PyPI trusted publisher for `sanka-migrate`. The owner
+   must be `sankaHQ`, repository `sanka`, workflow `publish.yml`, and environment
+   `pypi`. Configure the matching TestPyPI publisher with environment `testpypi`.
+3. A pending OIDC identity cannot be registered against multiple project names,
+   and each package index permits at most three pending publishers at once. Use
+   temporary publishers whose environment is `pypi-<package-name>` on PyPI and
+   `testpypi-<package-name>` on TestPyPI. Keep the repository and workflow values
+   identical to step 2, but register only the next available packages in the
+   dependency-safe bootstrap queue. A successful first upload converts a pending
+   publisher to an active publisher and frees a pending slot for the next package.
+4. Create all referenced GitHub environments and limit deployment to `v*` tags.
+   Keep repository variables `SANKA_MIGRATE_PUBLISH_ENABLED` and
+   `SANKA_MIGRATE_BOOTSTRAP_ENABLED` absent or set to `false`; neither normal nor
+   bootstrap publish jobs can run without its corresponding exact value `true`.
 5. Protect `main`, require the `check` job, enable dependency alerts, secret
    scanning/push protection, code scanning, private vulnerability reporting,
    and Discussions before changing visibility.
@@ -61,6 +68,37 @@ the separately approved public-repository flip, require an authorized human
 reviewer on both environments, prevent self-review, verify those rules with a
 non-publishing test dispatch, and only then set
 `SANKA_MIGRATE_PUBLISH_ENABLED=true`.
+
+## First-release bootstrap
+
+The steady-state jobs publish all ten projects through one common trusted
+publisher identity. PyPI supports that only after every project exists. The
+bootstrap jobs therefore publish exactly one wheel/sdist pair at a time through
+the temporary per-package environments from step 3.
+
+Bootstrap in dependency-safe order on TestPyPI first:
+
+1. `sanka-migrate-connector-sdk`
+2. the seven `sanka-migrate-connector-*` provider packages
+3. `sanka-migrate-mcp`
+4. `sanka-migrate`
+
+For each package, dispatch the exact approved version tag with target
+`bootstrap-testpypi` and confirmation
+`bootstrap-testpypi-<package-name>`. Enable
+`SANKA_MIGRATE_BOOTSTRAP_ENABLED=true` only for the approved bootstrap window,
+then remove it immediately. Register another pending publisher only after the
+previous package is visible and its publisher has converted to active. The
+already registered `sanka-migrate` publisher may occupy one of the three pending
+slots until the runtime is published last. Install and test the complete
+TestPyPI set before repeating the same rolling one-package sequence on PyPI with
+target `bootstrap-pypi`.
+
+After all projects exist, add `publish.yml` plus the common `testpypi` or `pypi`
+environment as an active trusted publisher on each of the other nine projects.
+Verify the common identity on every project, then remove the temporary
+per-package publishers and GitHub environments behind a separate approval gate.
+Future releases use only the steady-state `testpypi` and `pypi` targets.
 
 ## Publication gate
 

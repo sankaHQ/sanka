@@ -39,4 +39,5 @@ licenses:
 build-release:
 	$(UV) build --all-packages --out-dir dist --clear --no-create-gitignore
 	$(UV) run python scripts/check_release_artifacts.py dist
+	$(UV) run python -m scripts.stage_release_artifacts dist release
 	$(UV) publish --dry-run --trusted-publishing never dist/*

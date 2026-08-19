@@ -10,8 +10,26 @@ on:
         options:
           - testpypi
           - pypi
+          - bootstrap-testpypi
+          - bootstrap-pypi
+      package:
+        description: One package for a bootstrap target; ignored for normal targets
+        required: true
+        default: sanka-migrate-connector-sdk
+        type: choice
+        options:
+          - sanka-migrate-connector-sdk
+          - sanka-migrate-connector-clickhouse
+          - sanka-migrate-connector-csv
+          - sanka-migrate-connector-hubspot
+          - sanka-migrate-connector-markdown
+          - sanka-migrate-connector-postgres
+          - sanka-migrate-connector-salesforce
+          - sanka-migrate-connector-sqlite
+          - sanka-migrate-mcp
+          - sanka-migrate
       confirmation:
-        description: Enter publish-testpypi or publish-pypi exactly
+        description: Enter the exact target, or target-package for a bootstrap target
         required: true
         type: string
 
@@ -40,7 +58,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-release-${{ github.ref_name }}
-          path: dist/
+          path: release/
           if-no-files-found: error
           retention-days: 14
 
@@ -59,10 +77,10 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: python-release-${{ github.ref_name }}
-          path: dist/
+          path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/
+          packages-dir: release/all/
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
 
@@ -81,8 +99,51 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: python-release-${{ github.ref_name }}
-          path: dist/
+          path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/
+          packages-dir: release/all/
+          print-hash: true
+
+  bootstrap-testpypi:
+    name: Bootstrap ${{ inputs.package }} on TestPyPI
+    if: >-
+      vars.SANKA_MIGRATE_BOOTSTRAP_ENABLED == 'true' &&
+      inputs.target == 'bootstrap-testpypi' &&
+      inputs.confirmation == format('bootstrap-testpypi-{0}', inputs.package)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.package == 'sanka-migrate' && 'testpypi' || format('testpypi-{0}', inputs.package) }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-release-${{ github.ref_name }}
+          path: release/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/packages/${{ inputs.package }}/
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+
+  bootstrap-pypi:
+    name: Bootstrap ${{ inputs.package }} on PyPI
+    if: >-
+      vars.SANKA_MIGRATE_BOOTSTRAP_ENABLED == 'true' &&
+      inputs.target == 'bootstrap-pypi' &&
+      inputs.confirmation == format('bootstrap-pypi-{0}', inputs.package)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.package == 'sanka-migrate' && 'pypi' || format('pypi-{0}', inputs.package) }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-release-${{ github.ref_name }}
+          path: release/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/packages/${{ inputs.package }}/
           print-hash: true
