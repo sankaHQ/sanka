@@ -1,6 +1,6 @@
 [project]
 name = "sanka-migrate-connector-salesforce"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Sanka Migrate connector: read Salesforce organizations as a migration source"
 readme = "README.md"
 requires-python = ">=3.12"

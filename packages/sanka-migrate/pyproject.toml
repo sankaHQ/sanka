@@ -1,6 +1,6 @@
 [project]
 name = "sanka-migrate"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Sanka Migrate Runtime — plan, execute, and verify finite migrations between databases, warehouses, files, and business systems"
 readme = "README.md"
 requires-python = ">=3.12"
