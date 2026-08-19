@@ -13,7 +13,9 @@ continuous ETL.
 > end to end — the database connectors are exercised in CI against live
 > databases, and the Salesforce/HubSpot connectors are ports of the adapters
 > running production migrations at Sanka. APIs may still move and nothing is
-> published to PyPI yet; the hosted API is in progress.
+> published to PyPI yet; this repository includes pre-release CLI and
+> standalone MCP clients for the hosted research API. The canonical public API
+> base is still a release-readiness gate.
 
 ## Why Sanka Migrate?
 
@@ -199,8 +201,24 @@ default, not a requirement.
 
 Sanka Migrate is built to be driven by agents safely: plans are structured, hashable
 documents an agent can present for approval, and `apply` executes only the
-approved hash. A typed client SDK, REST API, and an MCP server are planned as
-part of the hosted Sanka Migrate API.
+approved hash. The standalone Apache-2.0 `sanka-migrate-mcp` package exposes
+three credential-free, read-only research tools plus one explicit assessment
+write over the public Sanka Migrate API. It is deliberately separate from the
+AGPL runtime and can be configured after publication with:
+
+```json
+{
+  "mcpServers": {
+    "sanka-migrate": {
+      "command": "uvx",
+      "args": ["sanka-migrate-mcp"]
+    }
+  }
+}
+```
+
+The migration execution toolset remains part of the separately governed hosted
+API roadmap; this MCP server does not plan or execute migrations.
 
 ## Open source vs hosted Sanka Migrate
 
@@ -234,6 +252,7 @@ boundary:
 |---|---|
 | `packages/sanka-migrate/` — `sanka-migrate`, the Migration Runtime (engine, planner, CLI) | AGPL-3.0-only |
 | `packages/sanka-migrate-connector-sdk/` — `sanka-migrate-connector-sdk`, connector interfaces & types | Apache-2.0 |
+| `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
 | `connectors/*` — first-party connectors | Apache-2.0 |
 
 The runtime is also available under a
@@ -242,8 +261,9 @@ embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
-`from sanka import Sanka`; connector authors use `sanka.connector`, and the
-only executable installed by this project is `sanka-migrate`.
+`from sanka import Sanka`; connector authors use `sanka.connector`. The runtime
+installs `sanka-migrate`, while the separate MCP distribution installs
+`sanka-migrate-mcp`.
 
 ## Development
 

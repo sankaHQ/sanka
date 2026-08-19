@@ -10,10 +10,12 @@ ALLOWED_EXPRESSIONS = {
     "AGPL-3.0-only",
     "Apache-2.0",
     "Apache-2.0 OR BSD-2-Clause",
+    "Apache-2.0 OR BSD-3-Clause",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "LGPL-3.0-only",
     "MIT",
+    "MIT-0",
     "MPL-2.0",
     "PSF-2.0",
 }
@@ -28,6 +30,15 @@ CLASSIFIER_LICENSES = {
     "License :: OSI Approved :: Python Software Foundation License": "PSF-2.0",
 }
 
+# Some published wheels still carry a valid SPDX expression only in the
+# legacy Core Metadata License field. Keep this narrow and exact rather than
+# accepting arbitrary free text.
+LEGACY_METADATA_LICENSES = {
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "MIT",
+}
+
 LOCAL_DISTRIBUTIONS = {
     "sanka-migrate",
     "sanka-migrate-connector-clickhouse",
@@ -38,6 +49,7 @@ LOCAL_DISTRIBUTIONS = {
     "sanka-migrate-connector-salesforce",
     "sanka-migrate-connector-sdk",
     "sanka-migrate-connector-sqlite",
+    "sanka-migrate-mcp",
 }
 
 
@@ -45,6 +57,9 @@ def _license_expression(distribution: Distribution) -> str | None:
     expression = distribution.metadata.get("License-Expression")
     if expression:
         return expression.strip()
+    legacy_expression = distribution.metadata.get("License")
+    if legacy_expression and legacy_expression.strip() in LEGACY_METADATA_LICENSES:
+        return legacy_expression.strip()
     classifiers = distribution.metadata.get_all("Classifier", [])
     matches = {CLASSIFIER_LICENSES[value] for value in classifiers if value in CLASSIFIER_LICENSES}
     if len(matches) == 1:

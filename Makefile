@@ -14,10 +14,12 @@ format:
 
 typecheck:
 	$(UV) run mypy packages/sanka-migrate-connector-sdk/src packages/sanka-migrate/src \
+		packages/sanka-migrate-mcp/src \
 		connectors/clickhouse/src connectors/csv/src connectors/hubspot/src \
 		connectors/markdown/src connectors/postgres/src connectors/salesforce/src \
 		connectors/sqlite/src \
-		packages/sanka-migrate-connector-sdk/tests packages/sanka-migrate/tests scripts
+		packages/sanka-migrate-connector-sdk/tests packages/sanka-migrate/tests \
+		packages/sanka-migrate-mcp/tests scripts
 
 test:
 	$(UV) run pytest

@@ -7,6 +7,7 @@ environment approval. The repository rename/public flip is a separate gate.
 ## Prepared package set
 
 - `sanka-migrate`
+- `sanka-migrate-mcp`
 - `sanka-migrate-connector-sdk`
 - `sanka-migrate-connector-clickhouse`
 - `sanka-migrate-connector-csv`
@@ -16,8 +17,9 @@ environment approval. The repository rename/public flip is a separate gate.
 - `sanka-migrate-connector-salesforce`
 - `sanka-migrate-connector-sqlite`
 
-The future `sanka-migrate-mcp` package is not part of this set until R-2b is
-implemented and passes the same artifact checks.
+`sanka-migrate-mcp` is the standalone Apache-2.0 research and assessment MCP
+server. It is built and checked with the same pre-release artifact set, while
+remaining outside the AGPL runtime namespace.
 
 ## Local, write-free preparation
 
@@ -48,6 +50,10 @@ dependencies, entry points, and the complete artifact set, then runs
    and Discussions before changing visibility.
 6. Confirm counsel-approved CLA/commercial-license text and activate the CLA
    signing gate before accepting external pull requests.
+7. Verify `https://api.sanka.com/v2/migrate/research/datasets` and the
+   assessment contract on the canonical public host. Do not point public
+   packages back at a retired product hostname or internal route while that
+   cutover is pending.
 
 The `sankaHQ` organization currently uses GitHub Team. GitHub does not offer
 required environment reviewers for private repositories on that plan. After

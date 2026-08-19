@@ -25,6 +25,7 @@ IGNORED_PARTS = {
 EXPECTED_PROJECTS = {
     Path("packages/sanka-migrate-connector-sdk/pyproject.toml"): "sanka-migrate-connector-sdk",
     Path("packages/sanka-migrate/pyproject.toml"): "sanka-migrate",
+    Path("packages/sanka-migrate-mcp/pyproject.toml"): "sanka-migrate-mcp",
     Path("connectors/clickhouse/pyproject.toml"): "sanka-migrate-connector-clickhouse",
     Path("connectors/csv/pyproject.toml"): "sanka-migrate-connector-csv",
     Path("connectors/hubspot/pyproject.toml"): "sanka-migrate-connector-hubspot",
@@ -116,6 +117,28 @@ def main() -> int:
             f"{sorted(expected_runtime_packages)}"
         )
 
+    mcp_package = _load(ROOT / "packages/sanka-migrate-mcp/pyproject.toml")
+    mcp_project = mcp_package["project"]
+    expected_mcp_scripts = {"sanka-migrate-mcp": "sanka_migrate_mcp.server:main"}
+    if mcp_project.get("scripts", {}) != expected_mcp_scripts:
+        errors.append(f"MCP scripts must be exactly: {expected_mcp_scripts}")
+    mcp_dependencies = [str(value).lower() for value in mcp_project.get("dependencies", [])]
+    for required in ("httpx", "mcp", "pydantic", "pydantic-settings"):
+        if not any(
+            value == required or value.startswith(required + ">") for value in mcp_dependencies
+        ):
+            errors.append(f"MCP package must depend on {required!r}")
+    mcp_packages = (
+        mcp_package.get("tool", {})
+        .get("hatch", {})
+        .get("build", {})
+        .get("targets", {})
+        .get("wheel", {})
+        .get("packages", [])
+    )
+    if set(mcp_packages) != {"src/sanka_migrate_mcp"}:
+        errors.append("MCP wheel must ship only the standalone sanka_migrate_mcp package")
+
     for relative_path in EXPECTED_PROJECTS:
         if not str(relative_path).startswith("connectors/"):
             continue
@@ -128,6 +151,7 @@ def main() -> int:
         ROOT / "packages/sanka-migrate/src/sanka/runtime",
         ROOT / "packages/sanka-migrate/src/sanka/cli",
         ROOT / "packages/sanka-migrate-connector-sdk/src/sanka/connector",
+        ROOT / "packages/sanka-migrate-mcp/src/sanka_migrate_mcp",
     )
     for path in package_paths:
         if not path.is_dir():
