@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import email.policy
+import re
 import sys
 import tarfile
 import zipfile
@@ -21,12 +22,17 @@ EXPECTED_LICENSES = {
     "sanka-migrate-connector-postgres": "Apache-2.0",
     "sanka-migrate-connector-salesforce": "Apache-2.0",
     "sanka-migrate-connector-sqlite": "Apache-2.0",
+    "sanka-migrate-mcp": "Apache-2.0",
 }
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 
 
 def _wheel_prefix(name: str) -> str:
     return name.replace("-", "_")
+
+
+def _requirement_name(value: str) -> str:
+    return re.split(r"[<>=!~;\s\[]", value, maxsplit=1)[0].lower().replace("_", "-")
 
 
 def _metadata_from_wheel(path: Path) -> tuple[EmailMessage, str, set[str]]:
@@ -96,6 +102,7 @@ def main() -> int:
         if f"Repository, {REPOSITORY_URL}" not in project_urls:
             errors.append(f"{project_name}: missing canonical Repository project URL")
         requirements = metadata.get_all("Requires-Dist", []) or []
+        requirement_names = {_requirement_name(str(requirement)) for requirement in requirements}
         if not _sdist_has_license(sdists[0]):
             errors.append(f"{sdists[0].name}: sdist does not contain a LICENSE file")
 
@@ -117,6 +124,24 @@ def main() -> int:
                 errors.append(
                     f"sanka-migrate: wheel is missing public runtime imports: {missing_imports}"
                 )
+        elif project_name == "sanka-migrate-mcp":
+            if "sanka-migrate-mcp = sanka_migrate_mcp.server:main" not in entry_points:
+                errors.append("sanka-migrate-mcp: stdio entry point is missing")
+            for dependency in ("httpx", "mcp", "pydantic", "pydantic-settings"):
+                if dependency not in requirement_names:
+                    errors.append(f"sanka-migrate-mcp: {dependency} dependency is missing")
+            required_imports = {
+                "sanka_migrate_mcp/__init__.py",
+                "sanka_migrate_mcp/client.py",
+                "sanka_migrate_mcp/render.py",
+                "sanka_migrate_mcp/server.py",
+                "sanka_migrate_mcp/py.typed",
+            }
+            missing_imports = sorted(required_imports - wheel_members)
+            if missing_imports:
+                errors.append(f"sanka-migrate-mcp: wheel is missing imports: {missing_imports}")
+            if any(name.startswith("sanka/") for name in wheel_members):
+                errors.append("sanka-migrate-mcp: wheel must not ship the runtime namespace")
         elif project_name != "sanka-migrate-connector-sdk":
             if "[sanka.connectors]" not in entry_points:
                 errors.append(f"{project_name}: canonical sanka.connectors entry-point group moved")

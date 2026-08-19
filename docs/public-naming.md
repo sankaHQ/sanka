@@ -16,7 +16,7 @@ and third-party references use the full name.
 | Connector SDK distribution | `sanka-migrate-connector-sdk` |
 | First-party connector distributions | `sanka-migrate-connector-<provider>` |
 | CLI command | `sanka-migrate` |
-| Future standalone research MCP distribution | `sanka-migrate-mcp` |
+| Standalone research MCP distribution and command | `sanka-migrate-mcp` |
 | Marketing and docs route | `https://sanka.com/migrate/` |
 
 The bare name `sanka` is used for the GitHub repository and Python import
@@ -67,6 +67,8 @@ The public source tree uses one naming system from its first release:
   `.sanka/migrate/`;
 - environment variables and machine-readable error codes use the
   `SANKA_MIGRATE_` prefix.
+- credential-free research MCP imports live under the separate
+  `sanka_migrate_mcp` package and use `sanka_migrate_*` tool names.
 
 Persisted identifiers in Sanka's separately deployed web application are not
 part of this package contract. They require their own coordinated database and

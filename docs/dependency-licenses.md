@@ -1,6 +1,6 @@
 # Dependency license review
 
-Reviewed against the locked workspace on 2026-08-18. CI reruns
+Reviewed against the locked workspace on 2026-08-19. CI reruns
 `scripts/check_dependency_licenses.py` after `uv sync --all-packages` and fails
 on unknown license metadata, an unapproved expression, or an unexpected GPL /
 AGPL dependency outside this repository's own AGPL runtime.
@@ -12,6 +12,11 @@ AGPL dependency outside this repository's own AGPL runtime.
 | `sanka-migrate-connector-sdk` | Apache-2.0 | runtime and every connector | Sanka-owned permissive interface layer |
 | PyYAML | MIT | runtime, Markdown connector | permissive |
 | httpx, httpcore, idna | BSD-3-Clause | HubSpot and Salesforce connectors | permissive |
+| mcp, pydantic, pydantic-core, pydantic-settings | MIT | standalone MCP server | permissive; Pydantic Settings is temporarily constrained below 2.15 to avoid its unresolved FastMCP lifespan warning |
+| cryptography | Apache-2.0 OR BSD-3-Clause | MCP authentication framework transitive dependency | permissive; the stdio server does not configure authentication |
+| cffi, pycparser | MIT-0, BSD-3-Clause | cryptography transitive dependencies | permissive |
+| attrs, jsonschema, jsonschema-specifications, referencing, rpds-py | MIT | MCP schema validation transitive dependencies | permissive |
+| Starlette, Uvicorn, Click, python-dotenv, python-multipart, httpx-sse, sse-starlette | BSD-3-Clause, MIT, Apache-2.0 | MCP transport transitive dependencies | permissive; the packaged entry point uses stdio |
 | anyio, h11, urllib3 | MIT | HTTP and ClickHouse transitive dependencies | permissive |
 | certifi | MPL-2.0 | HTTP and ClickHouse transitive dependency | file-level copyleft; consumed unmodified as a separate package |
 | clickhouse-connect | Apache-2.0 | ClickHouse connector | permissive |
