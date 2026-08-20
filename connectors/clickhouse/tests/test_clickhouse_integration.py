@@ -18,7 +18,6 @@ from collections.abc import Callable, Iterator
 import clickhouse_connect
 import pytest
 from clickhouse_connect.driver.client import Client
-from sanka_connector_clickhouse import ClickHouseDestination, _parse_connection
 
 from sanka.connector import (
     AuthenticationError,
@@ -26,6 +25,7 @@ from sanka.connector import (
     Credentials,
     WriteOptions,
 )
+from sanka_connector_clickhouse import ClickHouseDestination, _parse_connection
 
 CLICKHOUSE_URL = os.environ.get("SANKA_MIGRATE_TEST_CLICKHOUSE_URL", "")
 

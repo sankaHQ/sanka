@@ -16,12 +16,12 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg import sql
-from sanka_connector_postgres import CONNECTOR, PostgresDestination
 
 from sanka.runtime.engine import MigrationEngine
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
+from sanka_connector_postgres import CONNECTOR, PostgresDestination
 
 _DSN = os.environ.get("SANKA_MIGRATE_TEST_POSTGRES_DSN")
 

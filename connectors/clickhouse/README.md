@@ -1,4 +1,4 @@
-# sanka-migrate-connector-clickhouse
+# ClickHouse connector (bundled)
 
 Writes Sanka Migrate records into a ClickHouse database as a migration
 **destination**: one table per target object, created on first write with
@@ -9,4 +9,4 @@ re-applied migrations insert fresh versions that deduplicate at merge time;
 inventory therefore counts with `SELECT count() … FINAL` — the merge-accurate
 number — for verification. Connections accept `http://`, `https://`, or
 `clickhouse://` URLs (the last treated as HTTP). Apache-2.0; depends only on
-`sanka-migrate-connector-sdk` and `clickhouse-connect`.
+the bundled `sanka.connector` interface and `clickhouse-connect`.

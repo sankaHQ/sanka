@@ -19,13 +19,13 @@ commercial terms, without the conditions of the AGPL.
 
 ## 1. Definitions
 
-1.1 "**Runtime**" means the Sanka Migrate Runtime software: the
-`sanka-migrate` package and any other components of the `sankaHQ/sanka`
+1.1 "**Runtime**" means the AGPL-3.0-only runtime portions of the
+`sanka-migrate` distribution and any other components of the `sankaHQ/sanka`
 repository that Sanka distributes under AGPL-3.0-only, in source or object
 form, including updates Sanka makes generally available during the Term.
-(Components Sanka distributes under Apache-2.0 — including the Sanka Migrate
-Connector SDK and first-party connectors — are licensed under their own
-terms and are not restricted by this Agreement.)
+(Components Sanka distributes under Apache-2.0 — including the bundled Sanka
+Migrate connector interface and first-party connectors — are licensed under
+their own terms and are not restricted by this Agreement.)
 
 1.2 "**Licensee Products**" means Licensee's own software products and
 internal systems that incorporate or interoperate with the Runtime.

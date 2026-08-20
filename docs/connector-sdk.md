@@ -1,13 +1,15 @@
-# sanka-migrate-connector-sdk
+# Sanka Migrate connector interface
 
-The Apache-2.0 interface layer for
+The Apache-2.0 interface layer bundled inside the
 [Sanka Migrate](https://github.com/sankaHQ/sanka)
 migration connectors: the connector protocols, capability declarations, record
 and schema types, credential-provider protocol, and structured error taxonomy.
 
-Connectors depend on **this package only** — never on the AGPL-licensed
-runtime (`sanka-migrate`) — so a connector is never a derivative work of the
-runtime. CI enforces that boundary.
+Connector source imports **this interface only** — never the AGPL-licensed
+runtime modules — so the source-level license boundary remains explicit even
+though users receive one `sanka-migrate` distribution. CI enforces that
+boundary. A separately published connector SDK may be introduced later for
+third-party developers; it is not part of the initial package set.
 
 **Status: pre-release, SPI v1 in place** — ported from Sanka's production
 migration adapters: base `SourceConnector` / `DestinationConnector` protocols,

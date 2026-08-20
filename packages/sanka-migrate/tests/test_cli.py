@@ -20,9 +20,9 @@ from sanka.cli._research import SankaMigrateApiClient, SankaMigrateApiError, sig
 from sanka.runtime.engine import MigrationEngine
 
 
-def test_namespace_merges_across_packages() -> None:
-    # sanka.connector (Apache-2.0 dist) and sanka.runtime (AGPL dist) are
-    # separately installed package portions; both must import together.
+def test_bundled_namespace_exposes_interface_and_runtime() -> None:
+    # The one sanka-migrate distribution keeps the Apache connector API and
+    # AGPL runtime importable through the same public namespace.
     assert sanka.connector.__version__
     assert sanka.runtime.__version__
 
@@ -45,7 +45,30 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
     # `validate` joined the subcommand set in F-6; argparse renders the choices
     # line from the full set, so this is the one pre-existing assertion the
     # additive subcommand forces to grow.
-    assert "{plan,validate,apply,verify,status,migrate,research,assess}" in output
+    assert "{plan,validate,apply,verify,status,migrate,connect,research,assess}" in output
+
+
+def test_connect_reports_a_bundled_provider(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["connect", "hubspot"]) == 0
+
+    output = capsys.readouterr().out
+    assert "hubspot: ready (source, destination)" in output
+    assert "no connector plugin is required" in output
+
+
+def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["connect", "postgresql", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {
+        "provider": "postgres",
+        "roles": ["source", "destination"],
+        "bundled": True,
+    }
+
+
+def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["connect", "not-a-provider"]) == 1
+    assert "no bundled provider" in capsys.readouterr().err
 
 
 # -- sanka-migrate validate ---------------------------------------------------

@@ -10,14 +10,8 @@ package = false
 
 [tool.uv.workspace]
 members = [
-  "packages/*",
-  "connectors/clickhouse",
-  "connectors/csv",
-  "connectors/hubspot",
-  "connectors/markdown",
-  "connectors/postgres",
-  "connectors/salesforce",
-  "connectors/sqlite",
+  "packages/sanka-migrate",
+  "packages/sanka-migrate-mcp",
 ]
 
 [dependency-groups]
@@ -44,7 +38,17 @@ exclude = ["*.md"]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sanka", "sanka_migrate_mcp"]
+known-first-party = [
+  "sanka",
+  "sanka_connector_clickhouse",
+  "sanka_connector_csv",
+  "sanka_connector_hubspot",
+  "sanka_connector_markdown",
+  "sanka_connector_postgres",
+  "sanka_connector_salesforce",
+  "sanka_connector_sqlite",
+  "sanka_migrate_mcp",
+]
 
 [tool.mypy]
 strict = true
@@ -52,23 +56,14 @@ python_version = "3.12"
 namespace_packages = true
 explicit_package_bases = true
 mypy_path = [
-  "packages/sanka-migrate-connector-sdk/src",
   "packages/sanka-migrate/src",
   "packages/sanka-migrate-mcp/src",
-  "connectors/csv/src",
-  "connectors/hubspot/src",
-  "connectors/markdown/src",
-  "connectors/postgres/src",
-  "connectors/salesforce/src",
-  "connectors/sqlite/src",
-  "connectors/clickhouse/src",
 ]
 
 [tool.pytest.ini_options]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = [
-  "packages/sanka-migrate-connector-sdk/tests",
   "packages/sanka-migrate/tests",
   "packages/sanka-migrate-mcp/tests",
   "connectors/csv/tests",

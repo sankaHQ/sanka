@@ -3,13 +3,14 @@
 
 Rules (see docs/ARCHITECTURE.md):
 
-- ``packages/sanka-migrate-connector-sdk`` (Apache-2.0) must not import any ``sanka.*``
-  module outside ``sanka.connector`` — Apache code must never depend on the
-  AGPL runtime.
-- ``connectors/*`` (Apache-2.0) may import ``sanka.connector`` only.
+- bundled ``sanka.connector`` and ``sanka_connector_*`` modules (Apache-2.0)
+  may import ``sanka.connector`` only — Apache code must never depend on the
+  AGPL runtime even though all modules ship in one wheel.
+- ``connectors/*`` tests and examples remain in the Apache zone and follow the
+  same rule.
 - ``packages/sanka-migrate-mcp`` (Apache-2.0) must not import ``sanka`` at all;
   it is a standalone REST shim outside the runtime namespace.
-- ``packages/sanka-migrate`` (AGPL-3.0-only) may import anything.
+- the remaining ``packages/sanka-migrate`` runtime modules may import anything.
 
 Usage: ``python scripts/check_import_boundaries.py [repo_root]``
 """
@@ -22,7 +23,15 @@ from pathlib import Path
 
 CONNECTOR_PREFIX = "sanka.connector"
 RESTRICTED_ZONES: tuple[tuple[str, str | None], ...] = (
-    ("packages/sanka-migrate-connector-sdk", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka/connector", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_clickhouse", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_csv", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_hubspot", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_markdown", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_postgres", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_salesforce", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_sqlite", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/tests/connector_sdk", CONNECTOR_PREFIX),
     ("connectors", CONNECTOR_PREFIX),
     ("packages/sanka-migrate-mcp", None),
 )

@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""How a connector package plugs into a Sanka Migrate runtime.
+"""How a built-in provider plugs into the Sanka Migrate runtime.
 
-A connector distribution exposes one :class:`ConnectorRegistration` object
-through the ``sanka.connectors`` entry-point group::
+The ``sanka-migrate`` distribution exposes each first-party
+:class:`ConnectorRegistration` through the ``sanka.connectors`` entry-point
+group::
 
     [project.entry-points."sanka.connectors"]
     markdown = "sanka_connector_markdown:CONNECTOR"
 
-Runtimes discover registrations via ``importlib.metadata`` — connectors never
-import the runtime, so registering stays within the Apache-2.0 boundary.
+The runtime discovers registrations via ``importlib.metadata``. Connector
+source never imports the runtime, so bundling does not cross the Apache-2.0
+source boundary.
 Connector instances are stateless: every SPI call receives credentials, so a
 single registration object serves all connections.
 """

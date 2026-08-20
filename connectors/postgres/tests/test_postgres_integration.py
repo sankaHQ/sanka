@@ -20,7 +20,6 @@ import psycopg
 import pytest
 from psycopg import sql
 from psycopg.types.json import Json
-from sanka_connector_postgres import PostgresDestination, PostgresSource
 
 from sanka.connector import (
     Credentials,
@@ -29,6 +28,7 @@ from sanka.connector import (
     UnsupportedFeatureError,
     WriteOptions,
 )
+from sanka_connector_postgres import PostgresDestination, PostgresSource
 
 _DSN = os.environ.get("SANKA_MIGRATE_TEST_POSTGRES_DSN")
 

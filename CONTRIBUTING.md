@@ -5,7 +5,7 @@ Thanks for your interest! Two things to know before opening a pull request.
 ## 1. CLA (required)
 
 Sanka Migrate is dual-licensed (AGPL-3.0-only runtime + commercial licenses, with an
-Apache-2.0 connector SDK). That model requires every contribution to be covered
+Apache-2.0 connector interface and first-party connectors). That model requires every contribution to be covered
 by a signed Contributor License Agreement:
 [individual CLA](docs/legal/individual-cla.md) ·
 [corporate CLA](docs/legal/corporate-cla.md).
@@ -21,9 +21,10 @@ header in every source file:
 
 | Zone | License | Import rule |
 |---|---|---|
-| `packages/sanka-migrate-connector-sdk/` | Apache-2.0 | must not import any `sanka.*` module outside `sanka.connector` |
-| `connectors/` | Apache-2.0 | may import `sanka.connector` only |
-| `packages/sanka-migrate/` | AGPL-3.0-only | may import anything |
+| `packages/sanka-migrate/src/sanka/connector/` | Apache-2.0 | may import `sanka.connector` only |
+| `packages/sanka-migrate/src/sanka_connector_*/` | Apache-2.0 | may import `sanka.connector` only |
+| `connectors/` tests and docs | Apache-2.0 | may import `sanka.connector` only |
+| remaining `packages/sanka-migrate/` runtime source | AGPL-3.0-only | may import anything |
 
 Apache code must never depend on the AGPL runtime. CI enforces both rules
 (`scripts/check_import_boundaries.py`, `scripts/check_license_headers.py`).

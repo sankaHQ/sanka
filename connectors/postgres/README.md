@@ -1,4 +1,4 @@
-# sanka-migrate-connector-postgres
+# PostgreSQL connector (bundled)
 
 PostgreSQL connector for Sanka Migrate, registering both roles under the `postgres`
 type. The DSN arrives in `settings["connection"]` (`postgres://…`,
@@ -41,5 +41,5 @@ written to jsonb are JSON-encoded too), non-string values headed for text
 columns are stringified client-side, and strings are sent untyped so the
 server casts them into any column.
 
-Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `psycopg[binary]`.
+Apache-2.0; depends only on the bundled `sanka.connector` interface and `psycopg[binary]`.
 Integration tests need `SANKA_MIGRATE_TEST_POSTGRES_DSN` and skip cleanly without it.

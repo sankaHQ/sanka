@@ -7,6 +7,7 @@ import sys
 from importlib.metadata import Distribution, distributions
 
 ALLOWED_EXPRESSIONS = {
+    "AGPL-3.0-only AND Apache-2.0",
     "AGPL-3.0-only",
     "Apache-2.0",
     "Apache-2.0 OR BSD-2-Clause",
@@ -41,14 +42,6 @@ LEGACY_METADATA_LICENSES = {
 
 LOCAL_DISTRIBUTIONS = {
     "sanka-migrate",
-    "sanka-migrate-connector-clickhouse",
-    "sanka-migrate-connector-csv",
-    "sanka-migrate-connector-hubspot",
-    "sanka-migrate-connector-markdown",
-    "sanka-migrate-connector-postgres",
-    "sanka-migrate-connector-salesforce",
-    "sanka-migrate-connector-sdk",
-    "sanka-migrate-connector-sqlite",
     "sanka-migrate-mcp",
 }
 

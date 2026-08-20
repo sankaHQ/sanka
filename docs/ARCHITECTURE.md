@@ -1,43 +1,45 @@
 # Sanka Migrate architecture
 
-Sanka Migrate is an open-core monorepo: an Apache-2.0 connector SDK, an AGPL-3.0-only
-migration runtime, and Apache-2.0 first-party connectors. This document pins
-the decisions the scaffold encodes.
+Sanka Migrate is an open-core monorepo with one user-facing Python
+distribution: an AGPL-3.0-only migration runtime plus Apache-2.0 connector
+interfaces and first-party connectors. This document pins the decisions the
+scaffold encodes.
 
-## Packages and licenses
+## Components and licenses
 
-| Package | Import root | License | Contents |
+| Component | Import root | License | Contents |
 |---|---|---|---|
-| `sanka-migrate-connector-sdk` | `sanka.connector` | Apache-2.0 | Connector protocols (source/destination + optional capability protocols), record/schema/graph types, credential-provider protocol, structured error taxonomy |
-| `sanka-migrate` | `sanka` (public facade); `sanka.runtime`, `sanka.cli` | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner (auto-mapping + target-native rules), execution engine (batching, throttling, retries, checkpoints, resume, identity ledger), state store (SQLite reference implementation), verification, CLI |
-| `connectors/*` | one package each | Apache-2.0 | First-party connectors; depend on the SDK only |
+| Runtime | `sanka` (public facade); `sanka.runtime`, `sanka.cli` | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner, execution engine, state store, verification, CLI |
+| Connector interface | `sanka.connector` | Apache-2.0 | Source/destination protocols, records, schemas, credentials, capabilities, and error taxonomy |
+| First-party connectors | `sanka_connector_*` | Apache-2.0 | ClickHouse, CSV, HubSpot, Markdown, PostgreSQL, Salesforce, and SQLite providers |
+| Standalone MCP | `sanka_migrate_mcp` | Apache-2.0 | Credential-free research and assessment tools |
 
 License-dependency direction is one-way: Apache code never imports AGPL code.
-The runtime depends on the SDK; the SDK and connectors never depend on the
-runtime. `scripts/check_import_boundaries.py` enforces this in CI, and
+The runtime may depend on the connector interface; the interface and
+connectors never depend on the runtime. `scripts/check_import_boundaries.py`
+enforces this at the source-file level in CI, and
 `scripts/check_license_headers.py` keeps every file's SPDX header consistent
 with its zone.
 
-## Shared package layout
+## Single-distribution layout
 
-The Apache SDK and AGPL runtime contribute non-overlapping modules under the
-`sanka` package. The SDK ships `sanka.connector` without a root
-`sanka/__init__.py`, so connector authors can install and import the SDK by
-itself. The runtime owns the root `sanka/__init__.py`, which provides the
-`Sanka` facade and extends the package search path before loading runtime
-modules. That explicit path extension keeps `sanka.connector` visible when
-editable installs place the two distributions in different directories.
+The `sanka-migrate` wheel contains the `sanka` facade, runtime, connector
+interface, and every first-party `sanka_connector_*` module. Its metadata
+declares the combined `AGPL-3.0-only AND Apache-2.0` expression and ships both
+license texts plus NOTICE; each source file's SPDX header identifies the
+license governing that component.
 
-The facade is intentionally small: `Sanka` creates resumable migration handles
-and re-exports the public plan, report, status, endpoint, and error types. All
-behavior delegates to `sanka.runtime`, so there is one engine and one set of
-serialized contracts. The Apache SDK is not copied into the AGPL wheel.
+The facade is intentionally small: `Sanka.connect` selects a bundled provider,
+`Sanka.migrate` creates resumable migration handles, and the package re-exports
+the public connection, plan, report, status, endpoint, and error types. All
+lifecycle behavior delegates to `sanka.runtime`, so there is one engine and
+one set of serialized contracts.
 
-Distribution names follow the public project brand: the runtime publishes as
-**`sanka-migrate`** and the SDK as **`sanka-migrate-connector-sdk`**. The
-primary CLI is `sanka-migrate`. The `sanka` import namespace, connector entry
-point, environment variables, and state paths follow the contract in
-`docs/public-naming.md`.
+Distribution names follow the public project brand: the runtime and built-in
+providers publish together as **`sanka-migrate`**; the standalone MCP publishes
+as **`sanka-migrate-mcp`**. The primary CLI is `sanka-migrate`. The `sanka`
+import namespace, connector entry point, environment variables, and state
+paths follow the contract in `docs/public-naming.md`.
 
 ## Design tenets
 
