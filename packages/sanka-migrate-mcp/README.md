@@ -3,9 +3,9 @@
 Credential-free MCP tools for Sanka Migrate's public software lifecycle,
 cost, and comparison research, plus the free migration assessment handoff.
 
-> **Pre-release:** this package has not been published to PyPI yet. The
-> configuration below becomes available only after the separately approved
-> release.
+> **Alpha:** version `0.1.0a2` is published on
+> [PyPI](https://pypi.org/project/sanka-migrate-mcp/). MCP tool contracts may
+> still change before `1.0`.
 
 ## Configure
 

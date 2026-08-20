@@ -9,13 +9,25 @@ executes it with checkpoints and retries, and verifies the result. Then it's
 **done** — Sanka Migrate is for finite migrations (move from A to B and finish), not
 continuous ETL.
 
-> **Status: pre-release.** The runtime, CLI, and every connector below work
-> end to end — the database connectors are exercised in CI against live
-> databases, and the Salesforce/HubSpot connectors are ports of the adapters
-> running production migrations at Sanka. APIs may still move and nothing is
-> published to PyPI yet; this repository includes pre-release CLI and
-> standalone MCP clients for the hosted research API. The canonical public API
-> base is still a release-readiness gate.
+## Current release status
+
+| Surface | Current status and authority |
+|---|---|
+| Runtime and CLI | Alpha `0.1.0a2`, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
+| Standalone MCP server | Alpha `0.1.0a2`, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
+| Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
+| Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
+| Source repository | Private until the separately approved open-source visibility launch |
+
+The package versions declared in each package's `pyproject.toml`, the matching
+Git tag, and the files published on PyPI are authoritative for a release. The
+client `DEFAULT_API_BASE` constants and the live dataset-catalog response are
+authoritative for the hosted API. This table is the human-readable summary.
+
+The runtime, CLI, and every bundled connector below work end to end. Database
+connectors are exercised in CI against live databases, and the Salesforce and
+HubSpot connectors are ports of adapters used for production migrations at
+Sanka.
 
 ## Why Sanka Migrate?
 
@@ -44,20 +56,18 @@ migrations actually need:
 
 ## Quick start
 
-Not on PyPI yet — run from a checkout (Python ≥ 3.12 +
-[uv](https://docs.astral.sh/uv/)):
+Install the current alpha from PyPI (Python ≥ 3.12):
 
 ```bash
-git clone https://github.com/sankaHQ/sanka.git && cd sanka
-uv sync --all-packages
+python -m pip install --pre sanka-migrate
 ```
 
 Migrate a Markdown folder into SQLite:
 
 ```bash
-uv run sanka-migrate connect markdown
-uv run sanka-migrate connect sqlite
-uv run sanka-migrate migrate ./content sqlite://content.db
+sanka-migrate connect markdown
+sanka-migrate connect sqlite
+sanka-migrate migrate ./content sqlite://content.db
 ```
 
 ```text

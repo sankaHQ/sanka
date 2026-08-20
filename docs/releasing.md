@@ -4,6 +4,20 @@ No package is published by a push or merge. Publishing is a manual GitHub
 Actions workflow, restricted to an exact version tag and protected by a GitHub
 environment approval. The repository rename/public flip is a separate gate.
 
+## Current release state
+
+- Production PyPI: `sanka-migrate==0.1.0a2` and
+  `sanka-migrate-mcp==0.1.0a2`.
+- Source release: tag `v0.1.0a2`; each package's `pyproject.toml` is the source
+  version authority, and PyPI is the publication authority.
+- Hosted API: `https://api.sanka.com/v2/migrate`; the live
+  `/research/datasets` response is the availability authority.
+- Repository visibility: private until the separately approved open-source
+  launch.
+
+The root `README.md` summarizes this state for readers. This document owns the
+release procedure; it does not override PyPI or live-service status.
+
 ## Prepared package set
 
 - `sanka-migrate`
