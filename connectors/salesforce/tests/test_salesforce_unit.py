@@ -9,7 +9,6 @@ from urllib.parse import parse_qsl
 
 import httpx
 import pytest
-from sanka_connector_salesforce import CONNECTOR, HttpSalesforceGateway, SalesforceSource
 
 from sanka.connector import (
     AuthenticationError,
@@ -29,6 +28,7 @@ from sanka.connector import (
     UnsupportedFeatureError,
     ValidationFailedError,
 )
+from sanka_connector_salesforce import CONNECTOR, HttpSalesforceGateway, SalesforceSource
 
 INSTANCE = "https://acme.my.salesforce.com"
 DATA_PREFIX = "/services/data/v60.0"

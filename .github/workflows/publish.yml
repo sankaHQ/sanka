@@ -15,19 +15,11 @@ on:
       package:
         description: One package for a bootstrap target; ignored for normal targets
         required: true
-        default: sanka-migrate-connector-sdk
+        default: sanka-migrate
         type: choice
         options:
-          - sanka-migrate-connector-sdk
-          - sanka-migrate-connector-clickhouse
-          - sanka-migrate-connector-csv
-          - sanka-migrate-connector-hubspot
-          - sanka-migrate-connector-markdown
-          - sanka-migrate-connector-postgres
-          - sanka-migrate-connector-salesforce
-          - sanka-migrate-connector-sqlite
-          - sanka-migrate-mcp
           - sanka-migrate
+          - sanka-migrate-mcp
       confirmation:
         description: Enter the exact target, or target-package for a bootstrap target
         required: true

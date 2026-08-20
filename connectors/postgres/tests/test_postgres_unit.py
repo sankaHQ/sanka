@@ -11,22 +11,6 @@ from decimal import Decimal
 
 import psycopg
 import pytest
-from sanka_connector_postgres import CONNECTOR, PostgresDestination, PostgresSource
-from sanka_connector_postgres._base import (
-    SKIPPED_BINARY,
-    cursor_param,
-    cursor_text,
-    field_family,
-    identifier,
-    json_safe,
-    mapped_error,
-)
-from sanka_connector_postgres._destination import (
-    _column_type,
-    _index_name,
-    _required_type,
-    _write_param,
-)
 
 from sanka.connector import (
     AuthenticationError,
@@ -42,6 +26,22 @@ from sanka.connector import (
     SupportsSnapshotBounds,
     TransientProviderError,
     UnsupportedFeatureError,
+)
+from sanka_connector_postgres import CONNECTOR, PostgresDestination, PostgresSource
+from sanka_connector_postgres._base import (
+    SKIPPED_BINARY,
+    cursor_param,
+    cursor_text,
+    field_family,
+    identifier,
+    json_safe,
+    mapped_error,
+)
+from sanka_connector_postgres._destination import (
+    _column_type,
+    _index_name,
+    _required_type,
+    _write_param,
 )
 
 

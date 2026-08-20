@@ -4,9 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sanka_connector_csv import CONNECTOR, CsvSource
 
 from sanka.connector import ConfigurationError, Credentials, DataError, SupportsRecordCounts
+from sanka_connector_csv import CONNECTOR, CsvSource
 
 
 def _credentials(path: Path) -> Credentials:

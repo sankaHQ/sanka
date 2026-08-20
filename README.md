@@ -55,6 +55,8 @@ uv sync --all-packages
 Migrate a Markdown folder into SQLite:
 
 ```bash
+uv run sanka-migrate connect markdown
+uv run sanka-migrate connect sqlite
 uv run sanka-migrate migrate ./content sqlite://content.db
 ```
 
@@ -122,22 +124,23 @@ computed over the unresolved spec.
 | `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
 | `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
 
-Connectors implement the **Apache-2.0**
-[`sanka-migrate-connector-sdk`](packages/sanka-migrate-connector-sdk/)
-and never import the runtime — so building (or distributing) a connector
-never makes it a derivative of the AGPL engine. Optional behaviors are typed
+All seven first-party connectors and the Apache-2.0 connector interface ship
+inside `sanka-migrate`; users never install a provider plugin. The source files
+retain their Apache-2.0 headers and never import the AGPL runtime, so the
+license boundary stays machine-enforced inside the single distribution.
+Optional behaviors are typed
 capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
 `SupportsSchemaProvisioning`, …) that the engine discovers with
-`isinstance`. New connectors register through the `sanka.connectors` entry
-point; see [connectors/](connectors/) for the pattern.
+`isinstance`. Bundled connectors register through the `sanka.connectors`
+entry-point group; see [connectors/](connectors/) for provider documentation
+and tests.
 
 ## Use it as a library
 
-Install `sanka-migrate` plus the connectors your migration uses, then start
-from the Sanka facade:
+Install one package, then select providers through the Sanka facade:
 
 ```bash
-pip install sanka-migrate sanka-migrate-connector-markdown sanka-migrate-connector-sqlite
+pip install sanka-migrate
 ```
 
 ```python
@@ -147,9 +150,11 @@ from sanka import Sanka
 
 async def main() -> None:
     with Sanka() as sanka:
+        source = sanka.connect("markdown", "./content")
+        target = sanka.connect("sqlite", "content.db")
         migration = sanka.migrate(
-            source="./content",
-            target="sqlite://content.db",
+            source=source,
+            target=target,
         )
 
         plan = await migration.plan()  # destination-write-free, reviewable
@@ -165,8 +170,10 @@ asyncio.run(main())
 
 `Sanka.migrate(...)` creates or resumes a lifecycle handle; it does not write
 to the destination. The default local run state is
-`.sanka/migrate/state.db`. Pass `EndpointSpec` from `sanka` when a path or URL
-does not carry enough connector information.
+`.sanka/migrate/state.db`. `Sanka.connect(...)` is write-free: it selects a
+built-in provider and returns a reusable endpoint descriptor. Pass
+`EndpointSpec` from `sanka` directly when a path or URL does not carry enough
+connector information.
 
 The facade delegates to the same engine used by the CLI. Advanced embedders
 can continue to construct that engine directly when supplying a custom state
@@ -229,9 +236,9 @@ grant):
 | | Sanka Migrate Open Source | [Hosted Sanka Migrate](https://sanka.com/migrate/) |
 |---|:---:|:---:|
 | Migration runtime, CLI, local state | ✅ | ✅ |
-| Connector SDK + dev-wedge connectors | ✅ | ✅ |
+| Bundled first-party connectors | ✅ | ✅ |
 | Plan / apply / verify lifecycle | ✅ | ✅ |
-| Managed OAuth connections (`sanka-migrate connect`) | — | ✅ |
+| Managed OAuth and hosted connection lifecycle | — | ✅ |
 | Hosted execution & large migrations | — | ✅ |
 | AI-assisted planning & remediation | — | ✅ |
 | Observability, reports, history | — | ✅ |
@@ -244,16 +251,17 @@ migrations.
 
 ## Licensing
 
-Per-package licensing; the `SPDX-License-Identifier` header in each file is
+Per-component licensing; the `SPDX-License-Identifier` header in each file is
 authoritative and CI enforces both the headers and the Apache→AGPL import
 boundary:
 
 | Path | License |
 |---|---|
-| `packages/sanka-migrate/` — `sanka-migrate`, the Migration Runtime (engine, planner, CLI) | AGPL-3.0-only |
-| `packages/sanka-migrate-connector-sdk/` — `sanka-migrate-connector-sdk`, connector interfaces & types | Apache-2.0 |
+| `packages/sanka-migrate/src/sanka/runtime` and `sanka/cli` — runtime, planner, and CLI | AGPL-3.0-only |
+| `packages/sanka-migrate/src/sanka/connector` — connector interfaces and types | Apache-2.0 |
+| `packages/sanka-migrate/src/sanka_connector_*` — bundled first-party connectors | Apache-2.0 |
 | `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
-| `connectors/*` — first-party connectors | Apache-2.0 |
+| `connectors/*` — provider documentation and tests | Apache-2.0 |
 
 The runtime is also available under a
 [commercial license](docs/legal/commercial-license.md) from Sanka, Inc. for
@@ -261,8 +269,9 @@ embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
-`from sanka import Sanka`; connector authors use `sanka.connector`. The runtime
-installs `sanka-migrate`, while the separate MCP distribution installs
+`from sanka import Sanka`; internal connector development uses
+`sanka.connector`. The runtime and built-in providers install together as
+`sanka-migrate`, while the separate MCP distribution installs
 `sanka-migrate-mcp`.
 
 ## Development

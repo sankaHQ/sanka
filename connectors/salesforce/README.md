@@ -1,4 +1,4 @@
-# sanka-migrate-connector-salesforce
+# Salesforce connector (bundled)
 
 Salesforce connector for Sanka Migrate, registering a **source role only** under the
 `salesforce` type — a faithful port of the production adapter behind Sanka's
@@ -48,7 +48,7 @@ interpolated into SOQL; invalid input raises `ValidationFailedError`.
 `TransientProviderError`, other HTTP failures → `ConnectorError`, non-JSON
 bodies → `DataError`.
 
-Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `httpx`. Integration
+Apache-2.0; depends only on the bundled `sanka.connector` interface and `httpx`. Integration
 tests need `SANKA_MIGRATE_TEST_SALESFORCE_INSTANCE_URL` and
 `SANKA_MIGRATE_TEST_SALESFORCE_ACCESS_TOKEN`, run strictly read-only queries, and
 skip cleanly without them.

@@ -1,15 +1,19 @@
-Sanka Migrate monorepo — per-package licensing
-==============================================
+Sanka Migrate monorepo — per-component licensing
+================================================
 
 This repository contains packages under different licenses. The
 SPDX-License-Identifier header in each source file is authoritative.
 
-  packages/sanka-migrate-connector-sdk/   Apache-2.0       (LICENSE file in that directory)
-  packages/sanka-migrate/         AGPL-3.0-only    (LICENSE file in that directory)
-  connectors/                     Apache-2.0
-  scripts/, tests/, docs/         Apache-2.0
+  packages/sanka-migrate/src/sanka/runtime/       AGPL-3.0-only
+  packages/sanka-migrate/src/sanka/cli/           AGPL-3.0-only
+  packages/sanka-migrate/src/sanka/_client.py     AGPL-3.0-only
+  packages/sanka-migrate/src/sanka/connector/     Apache-2.0
+  packages/sanka-migrate/src/sanka_connector_*/   Apache-2.0
+  packages/sanka-migrate-mcp/                      Apache-2.0
+  connectors/, scripts/, tests/, docs/             Apache-2.0
 
-The full license texts are in each package directory's LICENSE file.
+The `sanka-migrate` wheel includes both full license texts and a NOTICE file.
+Source-file SPDX headers identify which license governs each component.
 
 The Sanka Migrate Runtime (packages/sanka-migrate) is also available under a
 commercial license from Sanka, Inc. for use without AGPL-3.0 obligations —

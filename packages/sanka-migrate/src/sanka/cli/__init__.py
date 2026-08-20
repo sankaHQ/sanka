@@ -12,8 +12,9 @@ Spec-driven flow (migration-as-code)::
 through the reviewed plan and reports rejects without ever resolving the
 destination connector, exiting non-zero when invalid records exist.
 
-Shorthand::
+Shorthand and provider selection::
 
+    sanka-migrate connect hubspot
     sanka-migrate migrate ./content sqlite://content.db
 
 Run state lives in a local SQLite file (default ``.sanka/migrate/state.db``), so
@@ -122,6 +123,14 @@ def _build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("-y", "--yes", action="store_true", help="apply without confirmation")
     migrate.set_defaults(handler=_cmd_migrate)
 
+    connect = commands.add_parser(
+        "connect",
+        help="select a built-in provider and show its supported migration roles",
+    )
+    connect.add_argument("provider", help="provider slug, e.g. hubspot or postgres")
+    connect.add_argument("--json", action="store_true", help="print provider details as JSON")
+    connect.set_defaults(handler=_cmd_connect)
+
     research = commands.add_parser(
         "research",
         help="query cited Sanka Migrate lifecycle, cost, and comparison research",
@@ -179,6 +188,21 @@ def _engine(state_path: str) -> MigrationEngine:
     return MigrationEngine(
         store=SqliteStateStore(state_path), registry=ConnectorRegistry.discover()
     )
+
+
+async def _cmd_connect(args: argparse.Namespace) -> int:
+    registry = ConnectorRegistry.discover()
+    provider = str(args.provider).strip().lower()
+    if provider == "postgresql":
+        provider = "postgres"
+    roles = list(registry.roles(provider))
+    payload = {"provider": provider, "roles": roles, "bundled": True}
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"{provider}: ready ({', '.join(roles)})")
+        print("installed with sanka-migrate; no connector plugin is required")
+    return 0
 
 
 def _load_spec(path: str) -> MigrationSpec:

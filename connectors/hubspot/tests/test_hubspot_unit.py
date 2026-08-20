@@ -13,21 +13,6 @@ from collections.abc import Callable
 
 import httpx
 import pytest
-from sanka_connector_hubspot import CONNECTOR, HubSpotDestination, HubSpotSource
-from sanka_connector_hubspot._base import (
-    HubSpotGateway,
-    HubSpotRequestError,
-    custom_object_match_token,
-    hubspot_property_type,
-    mapped_error,
-)
-from sanka_connector_hubspot._destination import (
-    _custom_object_schema_is_compatible,
-    _custom_object_schema_payload,
-    _pipeline_is_compatible,
-    _pipeline_payload,
-    _stage_probability,
-)
 
 from sanka.connector import (
     AuthenticationError,
@@ -54,6 +39,21 @@ from sanka.connector import (
     UnsupportedFeatureError,
     ValidationFailedError,
     WriteOptions,
+)
+from sanka_connector_hubspot import CONNECTOR, HubSpotDestination, HubSpotSource
+from sanka_connector_hubspot._base import (
+    HubSpotGateway,
+    HubSpotRequestError,
+    custom_object_match_token,
+    hubspot_property_type,
+    mapped_error,
+)
+from sanka_connector_hubspot._destination import (
+    _custom_object_schema_is_compatible,
+    _custom_object_schema_payload,
+    _pipeline_is_compatible,
+    _pipeline_payload,
+    _stage_probability,
 )
 
 # --------------------------------------------------------------------------

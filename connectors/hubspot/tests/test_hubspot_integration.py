@@ -22,10 +22,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
 import pytest
-from sanka_connector_hubspot import HubSpotDestination, HubSpotSource
-from sanka_connector_hubspot._base import HUBSPOT_CRM_OBJECTS_URL, HubSpotGateway
 
 from sanka.connector import Credentials, WriteOptions
+from sanka_connector_hubspot import HubSpotDestination, HubSpotSource
+from sanka_connector_hubspot._base import HUBSPOT_CRM_OBJECTS_URL, HubSpotGateway
 
 ACCESS_TOKEN = os.environ.get("SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN", "")
 
