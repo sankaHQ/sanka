@@ -21,6 +21,19 @@ enforces this at the source-file level in CI, and
 `scripts/check_license_headers.py` keeps every file's SPDX header consistent
 with its zone.
 
+## Hosted-product boundary
+
+This repository contains only the open-source runtime and the permissive
+components listed above. Proprietary cloud-only features, hosted control-plane
+implementations, customer data, credentials, and production deployment
+configuration remain in separately governed systems. They are not vendored,
+generated, or copied into release artifacts from this repository.
+
+Hosted Sanka Migrate may integrate with the open-source packages through their
+published interfaces. The open-source packages do not import proprietary
+modules, silently fall back to private services, or require hosted-product code
+to provide their documented local behavior.
+
 ## Single-distribution layout
 
 The `sanka-migrate` wheel contains the `sanka` facade, runtime, connector

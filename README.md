@@ -229,9 +229,8 @@ API roadmap; this MCP server does not plan or execute migrations.
 
 ## Open source vs hosted Sanka Migrate
 
-Sanka Migrate follows an open-core model (the same shape as Firecrawl's AGPL core +
-permissive SDKs — we use Apache-2.0 for the SDK so it carries a patent
-grant):
+Sanka Migrate follows an open-core model (AGPL core + permissive SDKs — we use
+Apache-2.0 for the SDK so it carries a patent grant):
 
 | | Sanka Migrate Open Source | [Hosted Sanka Migrate](https://sanka.com/migrate/) |
 |---|:---:|:---:|
@@ -263,9 +262,11 @@ boundary:
 | `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
 | `connectors/*` — provider documentation and tests | Apache-2.0 |
 
-The runtime is also available under a
-[commercial license](docs/legal/commercial-license.md) from Sanka, Inc. for
-embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
+Runtime code that Sanka owns or otherwise has permission to relicense is also
+available under a [commercial license](docs/legal/commercial-license.md) from
+Sanka, Inc. for embedding without AGPL obligations. Third-party contributions
+remain under the license applicable to their files unless their rights holder
+separately grants additional rights. See [LICENSE](LICENSE) for the full map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
@@ -288,9 +289,8 @@ provisions both); they skip cleanly otherwise. Architecture notes:
 
 ## Contributing
 
-External contributions require a signed CLA
-([individual](docs/legal/individual-cla.md) ·
-[corporate](docs/legal/corporate-cla.md)) — dual licensing depends on it.
-**The CLA texts are drafts under counsel review and the signing flow is not
-live yet**, so external pull requests cannot be merged for now; issues and
-discussions are very welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+No CLA is required. Contributions use the license already applicable to the
+modified files: AGPL-3.0-only for the runtime and Apache-2.0 for the connector
+interface, bundled connectors, MCP package, tests, scripts, and documentation.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact path map and contribution
+workflow.

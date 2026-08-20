@@ -3,9 +3,8 @@
 > **DRAFT v0.1 (2026-08-15) — template for review by Sanka, Inc. counsel.
 > This document is not an offer and is not in effect. Bracketed items are
 > placeholders counsel must resolve.** Model: short-form dual-license
-> agreement over an AGPL-3.0-only core (the structure Firecrawl and similar
-> AGPL open-core projects use commercially), with variable business terms
-> pushed to an Order Form.
+> agreement over an AGPL-3.0-only core, with variable business terms pushed to
+> an Order Form.
 
 This Sanka Migrate Commercial License Agreement (the "**Agreement**") is entered into
 between **Sanka, Inc.** ("**Sanka**") and the customer identified on the
@@ -14,15 +13,22 @@ stated there (the "**Effective Date**").
 
 **Background.** Sanka publishes the Sanka Migrate Runtime under the GNU
 Affero General Public License v3.0 only (AGPL-3.0-only). This Agreement
-grants Licensee the right to use the same software under alternative
-commercial terms, without the conditions of the AGPL.
+grants Licensee the right to use the portions that Sanka owns or otherwise has
+permission to relicense under alternative commercial terms, without the
+conditions of the AGPL. It does not relicense third-party contributions that
+Sanka received only under AGPL-3.0-only or another license that does not permit
+commercial relicensing.
 
 ## 1. Definitions
 
 1.1 "**Runtime**" means the AGPL-3.0-only runtime portions of the
 `sanka-migrate` distribution and any other components of the `sankaHQ/sanka`
-repository that Sanka distributes under AGPL-3.0-only, in source or object
-form, including updates Sanka makes generally available during the Term.
+repository, in source or object form, for which Sanka owns the copyright or
+has received sufficient rights from the applicable rights holder to license
+under this Agreement, including eligible updates Sanka makes generally
+available during the Term. Runtime excludes third-party contributions that
+Sanka is authorized to use only under AGPL-3.0-only or another license that
+does not permit the grant in Section 2.
 (Components Sanka distributes under Apache-2.0 — including the bundled Sanka
 Migrate connector interface and first-party connectors — are licensed under
 their own terms and are not restricted by this Agreement.)
@@ -85,7 +91,8 @@ open-source Runtime during the Term are licensed under Section 2.
 
 ## 7. Ownership; Feedback
 
-Sanka retains all right, title, and interest in and to the Runtime. If
+Sanka retains all right, title, and interest that it owns in the Runtime.
+Third-party rights holders retain their rights in their contributions. If
 Licensee provides feedback or suggestions, Sanka may use them without
 restriction or obligation.
 

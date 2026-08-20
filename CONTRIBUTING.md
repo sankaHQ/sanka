@@ -1,18 +1,23 @@
 # Contributing to Sanka Migrate
 
-Thanks for your interest! Two things to know before opening a pull request.
+Thanks for your interest! Please keep changes focused, include tests where
+behavior changes, and follow the repository's license boundaries.
 
-## 1. CLA (required)
+## 1. Licensing contributions
 
-Sanka Migrate is dual-licensed (AGPL-3.0-only runtime + commercial licenses, with an
-Apache-2.0 connector interface and first-party connectors). That model requires every contribution to be covered
-by a signed Contributor License Agreement:
-[individual CLA](docs/legal/individual-cla.md) ·
-[corporate CLA](docs/legal/corporate-cla.md).
+No Contributor License Agreement is required. A contribution is licensed under
+the license already applicable to the files it modifies:
 
-**The CLA texts are drafts under counsel review and the signing flow is not
-live yet.** Until both are done, we cannot merge external pull requests —
-issues and discussions are very welcome in the meantime.
+- runtime and CLI contributions are AGPL-3.0-only;
+- connector-interface, bundled-connector, MCP, test, script, and documentation
+  contributions are Apache-2.0.
+
+By submitting a contribution, you confirm that you have the right to submit it
+under that license. Accepting a contribution does not give Sanka a separate
+right to relicense an AGPL contribution under proprietary or commercial terms.
+If Sanka considers a contributor agreement for substantial future runtime
+contributions, it will apply only after explicit adoption and acceptance; it
+will not change the terms of contributions already submitted.
 
 ## 2. License zones and import boundaries
 
@@ -24,10 +29,20 @@ header in every source file:
 | `packages/sanka-migrate/src/sanka/connector/` | Apache-2.0 | may import `sanka.connector` only |
 | `packages/sanka-migrate/src/sanka_connector_*/` | Apache-2.0 | may import `sanka.connector` only |
 | `connectors/` tests and docs | Apache-2.0 | may import `sanka.connector` only |
+| `packages/sanka-migrate-mcp/`, `scripts/`, `tests/`, and `docs/` | Apache-2.0 | must not import proprietary hosted-product code |
 | remaining `packages/sanka-migrate/` runtime source | AGPL-3.0-only | may import anything |
 
 Apache code must never depend on the AGPL runtime. CI enforces both rules
 (`scripts/check_import_boundaries.py`, `scripts/check_license_headers.py`).
+
+## 3. Open-source and hosted-product boundary
+
+This repository contains the open-source runtime and permissive components
+listed above. Proprietary cloud-only features, customer data, credentials,
+deployment configuration, and hosted control-plane implementations belong in
+separately governed systems and must not be copied into this repository.
+Open-source modules must not import or require proprietary hosted-product code
+to provide their documented local behavior.
 
 ## Development setup
 

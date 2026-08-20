@@ -83,5 +83,6 @@ API migration if they are ever changed.
 
 This naming contract prepares artifacts only. It does not publish a package,
 change repository visibility, configure a PyPI trusted publisher, or adopt the
-draft CLA/commercial-license text. Those are separate approval gates. The draft
-legal documents must be reviewed by counsel before adoption.
+draft commercial-license text. Those are separate approval gates. The current
+contribution terms use the license applicable to each modified file and do not
+require a CLA.

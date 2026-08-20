@@ -1,8 +1,9 @@
 # Sanka Migrate Corporate Contributor License Agreement
 
-> **DRAFT v0.1 (2026-08-15) — for review by Sanka, Inc. counsel. Not yet in
-> effect.** Adapted from the Apache Software Foundation Corporate CLA v2.2,
-> with Sanka, Inc. as grantee and an explicit relicensing clause in Section 2.
+> **INACTIVE PLANNING DRAFT — not part of the current contribution terms.**
+> No CLA is required, no signature process is active, and this document is not
+> in effect. If Sanka adopts a contributor agreement in the future, it will
+> apply prospectively only after explicit acceptance.
 
 This version of the Agreement allows an entity (the "Corporation") to submit
 Contributions to **Sanka, Inc.** ("Sanka") for the Sanka Migrate project, to
@@ -100,6 +101,9 @@ the Corporation, or to the Corporation's point of contact with Sanka.
 ---
 
 ## Signature
+
+No signature process is active. This section is retained only as part of the
+inactive planning draft.
 
 | Field | |
 |---|---|

@@ -48,8 +48,10 @@ artifacts. It does not upload anything.
 5. Protect `main`, require the `check` job, enable dependency alerts, secret
    scanning/push protection, code scanning, private vulnerability reporting,
    and Discussions before changing visibility.
-6. Confirm counsel-approved CLA/commercial-license text and activate the CLA
-   signing gate before accepting external pull requests.
+6. Confirm `README.md`, `CONTRIBUTING.md`, and `LICENSE` retain the
+   inbound-equals-outbound contribution policy. No CLA check is required. Any
+   commercial offer must cover only code Sanka owns or otherwise has permission
+   to relicense.
 7. Verify `https://api.sanka.com/v2/migrate/research/datasets` and the
    assessment contract on the canonical public host. Do not point public
    packages back at a retired product hostname or internal route while that

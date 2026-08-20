@@ -1,8 +1,9 @@
 # Sanka Migrate Individual Contributor License Agreement
 
-> **DRAFT v0.1 (2026-08-15) — for review by Sanka, Inc. counsel. Not yet in
-> effect.** Adapted from the Apache Software Foundation Individual CLA v2.2,
-> with Sanka, Inc. as grantee and an explicit relicensing clause in Section 2.
+> **INACTIVE PLANNING DRAFT — not part of the current contribution terms.**
+> No CLA is required, no signature process is active, and this document is not
+> in effect. If Sanka adopts a contributor agreement in the future, it will
+> apply prospectively only after explicit acceptance.
 
 Thank you for your interest in contributing to Sanka Migrate, a project of
 **Sanka, Inc.** ("Sanka"). In order to clarify the intellectual property
@@ -114,6 +115,5 @@ aware that would make these representations inaccurate in any respect.
 
 ---
 
-*Signature is collected electronically per pull request author via the CLA
-automation configured on the Sanka Migrate repositories (name, email, GitHub
-username, and date are recorded with the signature).*
+*No signature process is active. This document is retained only for possible
+future evaluation and is not part of the current contribution terms.*
