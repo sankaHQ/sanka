@@ -15,9 +15,9 @@ from __future__ import annotations
 import os
 
 import pytest
-from sanka_connector_salesforce import SalesforceSource
 
 from sanka.connector import Credentials
+from sanka_connector_salesforce import SalesforceSource
 
 INSTANCE_URL = os.environ.get("SANKA_MIGRATE_TEST_SALESFORCE_INSTANCE_URL", "")
 ACCESS_TOKEN = os.environ.get("SANKA_MIGRATE_TEST_SALESFORCE_ACCESS_TOKEN", "")

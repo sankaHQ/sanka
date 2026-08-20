@@ -4,9 +4,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from sanka_connector_sqlite import CONNECTOR, SqliteDestination
-
 from sanka.connector import Credentials, WriteOptions
+from sanka_connector_sqlite import CONNECTOR, SqliteDestination
 
 
 def _credentials(path: Path) -> Credentials:

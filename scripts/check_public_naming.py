@@ -23,16 +23,18 @@ IGNORED_PARTS = {
 }
 
 EXPECTED_PROJECTS = {
-    Path("packages/sanka-migrate-connector-sdk/pyproject.toml"): "sanka-migrate-connector-sdk",
     Path("packages/sanka-migrate/pyproject.toml"): "sanka-migrate",
     Path("packages/sanka-migrate-mcp/pyproject.toml"): "sanka-migrate-mcp",
-    Path("connectors/clickhouse/pyproject.toml"): "sanka-migrate-connector-clickhouse",
-    Path("connectors/csv/pyproject.toml"): "sanka-migrate-connector-csv",
-    Path("connectors/hubspot/pyproject.toml"): "sanka-migrate-connector-hubspot",
-    Path("connectors/markdown/pyproject.toml"): "sanka-migrate-connector-markdown",
-    Path("connectors/postgres/pyproject.toml"): "sanka-migrate-connector-postgres",
-    Path("connectors/salesforce/pyproject.toml"): "sanka-migrate-connector-salesforce",
-    Path("connectors/sqlite/pyproject.toml"): "sanka-migrate-connector-sqlite",
+}
+
+BUNDLED_CONNECTOR_PACKAGES = {
+    "src/sanka_connector_clickhouse",
+    "src/sanka_connector_csv",
+    "src/sanka_connector_hubspot",
+    "src/sanka_connector_markdown",
+    "src/sanka_connector_postgres",
+    "src/sanka_connector_salesforce",
+    "src/sanka_connector_sqlite",
 }
 
 
@@ -100,8 +102,6 @@ def main() -> int:
     expected_scripts = {"sanka-migrate": "sanka.cli:main"}
     if scripts != expected_scripts:
         errors.append(f"runtime scripts must be exactly: {expected_scripts}")
-    if "sanka-migrate-connector-sdk" not in runtime["project"].get("dependencies", []):
-        errors.append("runtime must depend on the public SDK distribution name")
     runtime_packages = (
         runtime.get("tool", {})
         .get("hatch", {})
@@ -110,7 +110,7 @@ def main() -> int:
         .get("wheel", {})
         .get("packages", [])
     )
-    expected_runtime_packages = {"src/sanka"}
+    expected_runtime_packages = {"src/sanka", *BUNDLED_CONNECTOR_PACKAGES}
     if set(runtime_packages) != expected_runtime_packages:
         errors.append(
             "runtime wheel must ship the public sanka namespace: "
@@ -139,18 +139,20 @@ def main() -> int:
     if set(mcp_packages) != {"src/sanka_migrate_mcp"}:
         errors.append("MCP wheel must ship only the standalone sanka_migrate_mcp package")
 
-    for relative_path in EXPECTED_PROJECTS:
-        if not str(relative_path).startswith("connectors/"):
-            continue
-        document = _load(ROOT / relative_path)
-        entry_points = document["project"].get("entry-points", {})
-        if "sanka.connectors" not in entry_points:
-            errors.append(f"{relative_path}: canonical sanka.connectors entry-point group moved")
+    connector_entry_points = runtime["project"].get("entry-points", {}).get("sanka.connectors", {})
+    expected_connector_names = {
+        package.removeprefix("src/sanka_connector_") for package in BUNDLED_CONNECTOR_PACKAGES
+    }
+    if set(connector_entry_points) != expected_connector_names:
+        errors.append(
+            "runtime must expose every bundled connector through sanka.connectors: "
+            f"{sorted(expected_connector_names)}"
+        )
 
     package_paths = (
         ROOT / "packages/sanka-migrate/src/sanka/runtime",
         ROOT / "packages/sanka-migrate/src/sanka/cli",
-        ROOT / "packages/sanka-migrate-connector-sdk/src/sanka/connector",
+        ROOT / "packages/sanka-migrate/src/sanka/connector",
         ROOT / "packages/sanka-migrate-mcp/src/sanka_migrate_mcp",
     )
     for path in package_paths:

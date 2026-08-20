@@ -33,6 +33,16 @@ class ConnectorRegistry:
     def names(self) -> list[str]:
         return sorted(self._registrations)
 
+    def roles(self, type_name: str) -> tuple[str, ...]:
+        """Return the roles exposed by one installed first-party provider."""
+        registration = self._get(type_name)
+        roles: list[str] = []
+        if registration.source is not None:
+            roles.append("source")
+        if registration.destination is not None:
+            roles.append("destination")
+        return tuple(roles)
+
     def source(self, type_name: str) -> SourceConnector:
         registration = self._get(type_name)
         if registration.source is None:

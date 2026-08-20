@@ -8,18 +8,12 @@ environment approval. The repository rename/public flip is a separate gate.
 
 - `sanka-migrate`
 - `sanka-migrate-mcp`
-- `sanka-migrate-connector-sdk`
-- `sanka-migrate-connector-clickhouse`
-- `sanka-migrate-connector-csv`
-- `sanka-migrate-connector-hubspot`
-- `sanka-migrate-connector-markdown`
-- `sanka-migrate-connector-postgres`
-- `sanka-migrate-connector-salesforce`
-- `sanka-migrate-connector-sqlite`
 
-`sanka-migrate-mcp` is the standalone Apache-2.0 research and assessment MCP
-server. It is built and checked with the same pre-release artifact set, while
-remaining outside the AGPL runtime namespace.
+`sanka-migrate` contains the runtime, connector interface, and all first-party
+providers; users install no connector plugins. `sanka-migrate-mcp` is the
+standalone Apache-2.0 research and assessment MCP server. It is built and
+checked with the same pre-release artifact set while remaining outside the
+runtime namespace.
 
 ## Local, write-free preparation
 
@@ -27,7 +21,7 @@ remaining outside the AGPL runtime namespace.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a1 tag
+uv run python scripts/check_release_tag.py v0.1.0a2 tag
 ```
 
 `make build-release` creates wheels and sdists, checks licenses, project URLs,
@@ -43,13 +37,10 @@ artifacts. It does not upload anything.
 2. Configure one pending PyPI trusted publisher for `sanka-migrate`. The owner
    must be `sankaHQ`, repository `sanka`, workflow `publish.yml`, and environment
    `pypi`. Configure the matching TestPyPI publisher with environment `testpypi`.
-3. A pending OIDC identity cannot be registered against multiple project names,
-   and each package index permits at most three pending publishers at once. Use
-   temporary publishers whose environment is `pypi-<package-name>` on PyPI and
-   `testpypi-<package-name>` on TestPyPI. Keep the repository and workflow values
-   identical to step 2, but register only the next available packages in the
-   dependency-safe bootstrap queue. A successful first upload converts a pending
-   publisher to an active publisher and frees a pending slot for the next package.
+3. Configure the `sanka-migrate-mcp` pending publisher with the same owner,
+   repository, and workflow. Use `pypi-sanka-migrate-mcp` on PyPI and
+   `testpypi-sanka-migrate-mcp` on TestPyPI until each first upload converts the
+   pending identity into an active project publisher.
 4. Create all referenced GitHub environments and limit deployment to `v*` tags.
    Keep repository variables `SANKA_MIGRATE_PUBLISH_ENABLED` and
    `SANKA_MIGRATE_BOOTSTRAP_ENABLED` absent or set to `false`; neither normal nor
@@ -73,34 +64,30 @@ non-publishing test dispatch, and only then set
 
 ## First-release bootstrap
 
-The steady-state jobs publish all ten projects through one common trusted
-publisher identity. PyPI supports that only after every project exists. The
-bootstrap jobs therefore publish exactly one wheel/sdist pair at a time through
-the temporary per-package environments from step 3.
+The abandoned `v0.1.0a1` candidate represented the package-per-connector model
+and must never be reused or published to production PyPI. Its one successful
+TestPyPI connector-SDK bootstrap is historical test data outside the supported
+package set. The replacement candidate starts at `v0.1.0a2`.
 
-Bootstrap in dependency-safe order on TestPyPI first:
+Bootstrap the two supported projects one at a time on TestPyPI first:
 
-1. `sanka-migrate-connector-sdk`
-2. the seven `sanka-migrate-connector-*` provider packages
-3. `sanka-migrate-mcp`
-4. `sanka-migrate`
+1. `sanka-migrate`
+2. `sanka-migrate-mcp`
 
 For each package, dispatch the exact approved version tag with target
 `bootstrap-testpypi` and confirmation
 `bootstrap-testpypi-<package-name>`. Enable
 `SANKA_MIGRATE_BOOTSTRAP_ENABLED=true` only for the approved bootstrap window,
-then remove it immediately. Register another pending publisher only after the
-previous package is visible and its publisher has converted to active. The
-already registered `sanka-migrate` publisher may occupy one of the three pending
-slots until the runtime is published last. Install and test the complete
-TestPyPI set before repeating the same rolling one-package sequence on PyPI with
-target `bootstrap-pypi`.
+then remove it immediately. Confirm each project is visible, verify its uploaded
+hashes against `release/SHA256SUMS`, and clean-install both projects before any
+production-PyPI request. Repeat with target `bootstrap-pypi` only after a
+separate approval of the exact tag and hashes.
 
-After all projects exist, add `publish.yml` plus the common `testpypi` or `pypi`
-environment as an active trusted publisher on each of the other nine projects.
-Verify the common identity on every project, then remove the temporary
-per-package publishers and GitHub environments behind a separate approval gate.
-Future releases use only the steady-state `testpypi` and `pypi` targets.
+After both projects exist, add `publish.yml` plus the common `testpypi` or
+`pypi` environment to the MCP project, verify the common identity on both
+projects, then remove the temporary MCP publishers and environments behind a
+separate approval gate. Future releases use only the steady-state `testpypi`
+and `pypi` targets.
 
 ## Publication gate
 

@@ -1,4 +1,4 @@
-# sanka-migrate-connector-hubspot
+# HubSpot connector (bundled)
 
 HubSpot connector for Sanka Migrate, registering both roles under the `hubspot` type.
 This is a port of the HubSpot migration adapter that runs Sanka's production
@@ -89,7 +89,7 @@ otherwise preserved):
 - Write policies arrive bundled in `WriteOptions` instead of separate
   keyword arguments.
 
-Apache-2.0; depends only on `sanka-migrate-connector-sdk` and `httpx`. Integration
+Apache-2.0; depends only on the bundled `sanka.connector` interface and `httpx`. Integration
 tests need `SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN` (a private-app token for a
 disposable portal — they create and archive clearly marked test contacts)
 and skip cleanly without it.

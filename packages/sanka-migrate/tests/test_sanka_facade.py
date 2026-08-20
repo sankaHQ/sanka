@@ -8,7 +8,7 @@ import pytest
 
 import sanka
 import sanka.runtime
-from sanka import EndpointSpec, PlanMismatchError, RunStatus, Sanka
+from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
 
 
 def _write_content(root: Path) -> None:
@@ -26,6 +26,33 @@ def test_public_facade_exports_runtime_types() -> None:
     assert sanka.MigrationPlan.__module__ == "sanka.runtime.planner"
     assert sanka.MigrationSpec.__module__ == "sanka.runtime.spec"
     assert sanka.ExecutionError.__module__ == "sanka.runtime.engine"
+
+
+def test_sanka_connect_selects_a_bundled_provider(tmp_path: Path) -> None:
+    with Sanka(state=tmp_path / "state.db") as client:
+        hubspot = client.connect("hubspot")
+        postgres = client.connect("postgresql", "postgresql://localhost/example")
+
+    assert hubspot == Connection(
+        provider="hubspot",
+        roles=("source", "destination"),
+        connection=None,
+        options={},
+    )
+    assert postgres.provider == "postgres"
+    assert postgres.roles == ("source", "destination")
+    assert postgres.endpoint() == EndpointSpec(
+        type="postgres",
+        connection="postgresql://localhost/example",
+    )
+
+
+def test_sanka_connect_rejects_an_unknown_provider(tmp_path: Path) -> None:
+    with (
+        Sanka(state=tmp_path / "state.db") as client,
+        pytest.raises(sanka.UnknownConnectorError, match="not-a-provider"),
+    ):
+        client.connect("not-a-provider")
 
 
 async def test_sanka_facade_runs_the_hash_bound_lifecycle(tmp_path: Path) -> None:
@@ -67,7 +94,7 @@ def test_sanka_facade_reuses_runs_and_accepts_explicit_endpoints(tmp_path: Path)
 
     with Sanka(state=tmp_path / "state.db") as client:
         source = EndpointSpec(type="markdown", connection=str(content))
-        target = EndpointSpec(type="sqlite", connection=str(tmp_path / "out.db"))
+        target = client.connect("sqlite", tmp_path / "out.db")
 
         first = client.migrate(source, target)
         second = client.migrate(source, target)

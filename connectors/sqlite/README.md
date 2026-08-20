@@ -1,4 +1,4 @@
-# sanka-migrate-connector-sqlite
+# SQLite connector (bundled)
 
 SQLite as either side of a Sanka Migrate run.
 
@@ -14,4 +14,4 @@ As a **destination**, records are written into one table per target object
 identity-based upserts honoring the run's conflict policy and JSON-encoded
 complex values. Inventory reads back table row counts for verification.
 
-Apache-2.0; depends only on `sanka-migrate-connector-sdk` (stdlib `sqlite3`).
+Apache-2.0; depends only on the bundled `sanka.connector` interface (stdlib `sqlite3`).

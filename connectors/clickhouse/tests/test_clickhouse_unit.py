@@ -5,19 +5,6 @@ from __future__ import annotations
 
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
-from sanka_connector_clickhouse import (
-    CONNECTOR,
-    ClickHouseDestination,
-    _add_column_ddl,
-    _create_table_ddl,
-    _encode,
-    _encode_row,
-    _identifier,
-    _infer_columns,
-    _map_error,
-    _parse_connection,
-    _supports_final,
-)
 
 from sanka.connector import (
     AuthenticationError,
@@ -30,6 +17,19 @@ from sanka.connector import (
     SupportsBatchWrites,
     TransientProviderError,
     WriteOptions,
+)
+from sanka_connector_clickhouse import (
+    CONNECTOR,
+    ClickHouseDestination,
+    _add_column_ddl,
+    _create_table_ddl,
+    _encode,
+    _encode_row,
+    _identifier,
+    _infer_columns,
+    _map_error,
+    _parse_connection,
+    _supports_final,
 )
 
 

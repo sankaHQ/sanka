@@ -5,7 +5,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from sanka_connector_sqlite import CONNECTOR, SqliteSource
 
 from sanka.connector import (
     ConfigurationError,
@@ -13,6 +12,7 @@ from sanka.connector import (
     SupportsRecordCounts,
     UnsupportedFeatureError,
 )
+from sanka_connector_sqlite import CONNECTOR, SqliteSource
 
 
 def _credentials(path: Path) -> Credentials:

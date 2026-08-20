@@ -4,9 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sanka_connector_markdown import CONNECTOR, MarkdownSource
 
 from sanka.connector import ConfigurationError, Credentials
+from sanka_connector_markdown import CONNECTOR, MarkdownSource
 
 
 def _credentials(root: Path) -> Credentials:

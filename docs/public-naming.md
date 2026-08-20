@@ -11,10 +11,9 @@ and third-party references use the full name.
 |---|---|
 | Project and product | Sanka Migrate |
 | GitHub repository | `sankaHQ/sanka` |
-| Runtime distribution | `sanka-migrate` |
+| Runtime and built-in connector distribution | `sanka-migrate` |
 | Preferred Python facade | `from sanka import Sanka` |
-| Connector SDK distribution | `sanka-migrate-connector-sdk` |
-| First-party connector distributions | `sanka-migrate-connector-<provider>` |
+| Built-in provider selection | `sanka.connect("<provider>")` |
 | CLI command | `sanka-migrate` |
 | Standalone research MCP distribution and command | `sanka-migrate-mcp` |
 | Marketing and docs route | `https://sanka.com/migrate/` |
@@ -24,8 +23,9 @@ package. It is intentionally not used for the distribution or executable: the
 `sanka` Python distribution is owned by an unrelated publisher, and the
 `sanka` executable is already owned by `sanka-cli`. The retired V1 monolith is
 preserved separately as `sankaHQ/sanka-monolith`. The `sanka-migrate`
-distribution provides the `sanka` import package and its `Sanka` facade—Python
-distribution and import names are independent.
+distribution provides the `sanka` import package, its `Sanka` facade, connector
+interface, and built-in providers—Python distribution and import names are
+independent.
 
 ## Python API contract
 
@@ -39,7 +39,9 @@ from sanka import Sanka
 
 async def main() -> None:
     with Sanka() as sanka:
-        migration = sanka.migrate(source="./content", target="sqlite://content.db")
+        source = sanka.connect("markdown", "./content")
+        target = sanka.connect("sqlite", "content.db")
+        migration = sanka.migrate(source=source, target=target)
         plan = await migration.plan()
         await migration.apply(plan_hash=plan.plan_hash)
         report = await migration.verify()
@@ -50,7 +52,9 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`Sanka.migrate` only creates or resumes the local lifecycle; destination
+`Sanka.connect` selects a provider and creates a write-free connection
+descriptor; it does not open OAuth, validate credentials, or write to the
+provider. `Sanka.migrate` only creates or resumes the local lifecycle; destination
 writes remain isolated behind `apply`, and `apply` requires the reviewed plan
 hash. The hosted client may add optional authentication later, but the open
 source facade does not expose an unused `api_key` parameter.
@@ -60,8 +64,9 @@ source facade does not expose an unused `api_key` parameter.
 The public source tree uses one naming system from its first release:
 
 - Python runtime imports live under `sanka.*`;
-- connector modules use `sanka_connector_<provider>`;
-- connector discovery uses the `sanka.connectors` entry-point group;
+- bundled connector modules use `sanka_connector_<provider>`;
+- built-in connector discovery uses the `sanka.connectors` entry-point group
+  owned by the `sanka-migrate` distribution;
 - the CLI command is `sanka-migrate`;
 - the default spec is `sanka-migrate.yaml` and local state is stored under
   `.sanka/migrate/`;

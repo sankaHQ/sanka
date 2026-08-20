@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -15,7 +16,31 @@ from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import RunStatus, SqliteStateStore
 
-EndpointInput = str | Path | EndpointSpec
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Connection:
+    """A selected built-in provider and its non-secret endpoint configuration.
+
+    Creating a connection is write-free. It verifies that the provider ships
+    with Sanka Migrate and returns a descriptor that can be passed directly to
+    :meth:`Sanka.migrate`. Authentication and reachability are evaluated by the
+    migration lifecycle, never while selecting the provider.
+    """
+
+    provider: str
+    roles: tuple[str, ...]
+    connection: str | None = None
+    options: Mapping[str, Any] = field(default_factory=dict)
+
+    def endpoint(self) -> EndpointSpec:
+        return EndpointSpec(
+            type=self.provider,
+            connection=self.connection,
+            options=dict(self.options),
+        )
+
+
+EndpointInput = str | Path | EndpointSpec | Connection
 
 
 class Migration:
@@ -79,13 +104,40 @@ class Sanka:
         env: Mapping[str, str] | None = None,
     ) -> None:
         self._store = SqliteStateStore(state)
+        self._registry = ConnectorRegistry.discover()
         self._engine = MigrationEngine(
             store=self._store,
-            registry=ConnectorRegistry.discover(),
+            registry=self._registry,
             batch_size=batch_size,
             env=None if env is None else dict(env),
         )
         self._closed = False
+
+    def connect(
+        self,
+        provider: str,
+        connection: str | Path | None = None,
+        *,
+        options: Mapping[str, Any] | None = None,
+    ) -> Connection:
+        """Select a built-in migration provider without installing a plugin.
+
+        ``connection`` is a path, URL, or named connection reference. Secret
+        values must stay in environment variables or a managed credential
+        store; the resulting descriptor may be persisted in a migration spec.
+        """
+        self._ensure_open()
+        normalized = provider.strip().lower()
+        if normalized == "postgresql":
+            normalized = "postgres"
+        roles = self._registry.roles(normalized)
+        connection_value = None if connection is None else str(connection)
+        return Connection(
+            provider=normalized,
+            roles=roles,
+            connection=connection_value,
+            options=dict(options or {}),
+        )
 
     def migrate(
         self,
@@ -136,6 +188,8 @@ class Sanka:
 
 
 def _endpoint(value: EndpointInput, *, role: str) -> EndpointSpec:
+    if isinstance(value, Connection):
+        return value.endpoint()
     if isinstance(value, EndpointSpec):
         return value
 

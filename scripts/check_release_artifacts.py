@@ -13,15 +13,7 @@ from email.parser import BytesParser
 from pathlib import Path
 
 EXPECTED_LICENSES = {
-    "sanka-migrate": "AGPL-3.0-only",
-    "sanka-migrate-connector-sdk": "Apache-2.0",
-    "sanka-migrate-connector-clickhouse": "Apache-2.0",
-    "sanka-migrate-connector-csv": "Apache-2.0",
-    "sanka-migrate-connector-hubspot": "Apache-2.0",
-    "sanka-migrate-connector-markdown": "Apache-2.0",
-    "sanka-migrate-connector-postgres": "Apache-2.0",
-    "sanka-migrate-connector-salesforce": "Apache-2.0",
-    "sanka-migrate-connector-sqlite": "Apache-2.0",
+    "sanka-migrate": "AGPL-3.0-only AND Apache-2.0",
     "sanka-migrate-mcp": "Apache-2.0",
 }
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
@@ -109,15 +101,20 @@ def main() -> int:
         if project_name == "sanka-migrate":
             if "sanka-migrate = sanka.cli:main" not in entry_points:
                 errors.append("sanka-migrate: primary CLI entry point is missing")
-            if not any(
-                str(requirement).lower().startswith("sanka-migrate-connector-sdk")
-                for requirement in requirements
-            ):
-                errors.append("sanka-migrate: public SDK distribution dependency is missing")
+            if "[sanka.connectors]" not in entry_points:
+                errors.append("sanka-migrate: bundled connector entry-point group is missing")
             required_imports = {
                 "sanka/__init__.py",
                 "sanka/_client.py",
+                "sanka/connector/__init__.py",
                 "sanka/runtime/__init__.py",
+                "sanka_connector_clickhouse/__init__.py",
+                "sanka_connector_csv/__init__.py",
+                "sanka_connector_hubspot/__init__.py",
+                "sanka_connector_markdown/__init__.py",
+                "sanka_connector_postgres/__init__.py",
+                "sanka_connector_salesforce/__init__.py",
+                "sanka_connector_sqlite/__init__.py",
             }
             missing_imports = sorted(required_imports - wheel_members)
             if missing_imports:
@@ -142,10 +139,6 @@ def main() -> int:
                 errors.append(f"sanka-migrate-mcp: wheel is missing imports: {missing_imports}")
             if any(name.startswith("sanka/") for name in wheel_members):
                 errors.append("sanka-migrate-mcp: wheel must not ship the runtime namespace")
-        elif project_name != "sanka-migrate-connector-sdk":
-            if "[sanka.connectors]" not in entry_points:
-                errors.append(f"{project_name}: canonical sanka.connectors entry-point group moved")
-
     expected_files = len(EXPECTED_LICENSES) * 2
     release_files = list(dist.glob("*.whl")) + list(dist.glob("*.tar.gz"))
     if len(release_files) != expected_files:
