@@ -68,7 +68,7 @@ def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) 
 
 def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["connect", "not-a-provider"]) == 1
-    assert "no connector installed" in capsys.readouterr().err
+    assert "no bundled provider" in capsys.readouterr().err
 
 
 # -- sanka-migrate validate ---------------------------------------------------

@@ -10,7 +10,7 @@ from sanka.connector.protocols import DestinationConnector, SourceConnector
 
 
 class UnknownConnectorError(ValueError):
-    """No installed connector distribution provides the requested type."""
+    """No available bundled provider exposes the requested type."""
 
 
 class ConnectorRegistry:
@@ -59,7 +59,7 @@ class ConnectorRegistry:
         try:
             return self._registrations[type_name]
         except KeyError:
-            installed = ", ".join(self.names()) or "none"
+            available = ", ".join(self.names()) or "none"
             raise UnknownConnectorError(
-                f"no connector installed for type {type_name!r} (installed: {installed})"
+                f"no bundled provider for type {type_name!r} (available: {available})"
             ) from None
