@@ -1,19 +1,34 @@
-# Sanka — The Migration API
+# Sanka — Migrate Django REST Framework APIs to FastAPI
 
-> Plan, execute, and verify migrations between databases, warehouses, files, and business systems — with one API.
+> Inspect a DRF application, generate a reviewable FastAPI migration plan,
+> create a compatibility application, and verify observable API parity.
 
-Sanka turns migration into a reusable developer primitive. Instead of
-writing a one-off script for every migration, you (or your AI agent) point it at
-a source and a target; Sanka inspects both sides, proposes a reviewable plan,
-executes it with checkpoints and retries, and verifies the result. Then it's
-**done** — Sanka is for finite migrations (move from A to B and finish), not
-continuous ETL.
+Sanka turns migration into a reusable developer primitive. Its first
+application recipe moves Django REST Framework APIs toward FastAPI through a
+verified compatibility bridge: FastAPI owns the generated route graph while
+the original Django/DRF handlers remain available in-process. Teams can replace
+one route at a time without a flag-day rewrite and keep verification green
+throughout the transition.
+
+```bash
+python -m pip install --pre sanka-migrate
+cd my-django-app
+
+sanka scan
+sanka plan --to fastapi
+sanka apply --plan-hash sha256:REVIEWED_PLAN_HASH
+sanka verify
+```
+
+The package also includes the existing data-migration runtime and bundled
+connectors for databases, warehouses, files, Salesforce, and HubSpot.
 
 ## Current release status
 
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
+| DRF → FastAPI recipe | Alpha compatibility mode: resolved-route scan, hashed plan, separate FastAPI output, manifest verification, and safe read-only differential probes |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
@@ -30,6 +45,34 @@ HubSpot connectors are ports of adapters used for production migrations at
 Sanka.
 
 ## Why Sanka?
+
+Framework migrations and data migrations look different at the code level,
+but the reliable lifecycle is the same:
+
+```text
+Source → Inspect → Plan → Apply → Verify → Cut over → Done
+```
+
+### A migration with a finish line is not continuous ETL
+
+Earlier Sanka material called this a "finite migration." The phrase means a
+one-time move with a defined completion condition. It is useful internally,
+but it is not the product headline because most developers should not need to
+learn a new category term.
+
+| | Sanka migration | ETL / ELT pipeline | Replication / CDC | iPaaS synchronization |
+|---|---|---|---|---|
+| Goal | Move from a defined source to a defined target and finish | Continuously populate analytics systems | Continuously copy changes | Keep applications synchronized |
+| Lifecycle | Inspect → plan → apply → verify → cut over | Extract → transform → load on a schedule | Stream each change indefinitely | Run mappings and workflows indefinitely |
+| Completion condition | Explicit parity and cutover checks | Pipeline remains healthy | Replica remains current | Connections remain active |
+| State after success | Migration can be closed and infrastructure removed | Pipeline keeps running | Replication keeps running | Integration keeps running |
+| Main safety concern | Reviewed scope, resumability, and proof that nothing was missed | Freshness and transformation correctness | Lag, ordering, and conflict handling | Mapping drift and workflow failures |
+
+Sanka is built for the first column. A migration is not complete because code
+was generated or a transfer process exited zero; it is complete when the
+reviewed source scope and observable target behavior reconcile.
+
+### The same lifecycle also applies to data
 
 Markdown → SQLite. CSV → PostgreSQL. PostgreSQL → ClickHouse. Salesforce →
 HubSpot. Every one of these is usually built as a custom project, yet they
@@ -54,7 +97,29 @@ migrations actually need:
   transfer exited zero: Sanka reconciles source counts, the ledger, and
   destination readback before calling it done.
 
-## Quick start
+## DRF → FastAPI compatibility quick start
+
+Run Sanka inside the Django project's existing Python environment so it can
+load the real URL configuration, including routes created dynamically by DRF
+routers and `@action` decorators:
+
+```bash
+sanka scan                         # writes .sanka/scan.json
+sanka scan --json                  # also prints the application IR
+sanka plan --to fastapi            # writes a reviewable, hashed plan
+sanka apply --plan-hash sha256:…   # writes only to .sanka/output/fastapi
+sanka verify                       # integrity + route parity + safe HTTP probes
+```
+
+Compatibility mode intentionally retains Django models, migrations, ORM,
+authentication, permissions, DRF handlers, and synchronous transaction code.
+It creates a real FastAPI route graph that dispatches to those handlers
+in-process. This is a safe strangler starting point, not a claim that all DRF
+code has already been removed. See
+[the DRF → FastAPI guide](docs/django-to-fastapi.md) for the support boundary
+and verification levels.
+
+## Data migration quick start
 
 Install the current alpha from PyPI (Python ≥ 3.12):
 
@@ -65,9 +130,9 @@ python -m pip install --pre sanka-migrate
 Migrate a Markdown folder into SQLite:
 
 ```bash
-sanka-migrate connect markdown
-sanka-migrate connect sqlite
-sanka-migrate migrate ./content sqlite://content.db
+sanka connect markdown
+sanka connect sqlite
+sanka migrate ./content sqlite://content.db
 ```
 
 ```text
@@ -99,10 +164,10 @@ target:
 ```
 
 ```bash
-uv run sanka-migrate plan     # inspect both sides, print the reviewable plan + hash
-uv run sanka-migrate apply    # execute exactly the reviewed plan; resumable
-uv run sanka-migrate verify   # reconcile source, ledger, and destination
-uv run sanka-migrate status   # run status + per-route ledger counts
+uv run sanka plan     # inspect both sides, print the reviewable plan + hash
+uv run sanka apply    # execute exactly the reviewed plan; resumable
+uv run sanka verify   # reconcile source, ledger, and destination
+uv run sanka status   # run status + per-route ledger counts
 ```
 
 Specs never contain secrets: `$ENV_VAR` references resolve only at execution

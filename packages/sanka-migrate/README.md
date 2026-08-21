@@ -1,9 +1,11 @@
-# sanka-migrate
+# Sanka
 
 The [Sanka](https://github.com/sankaHQ/sanka) Runtime: the migration
 lifecycle (`create → inspect → plan → apply → verify`), planner, execution
 engine (batching, throttling, retries, checkpoints, resume, identity ledger),
-local state store, verification framework, and the `sanka-migrate` CLI.
+local state store, verification framework, and the `sanka` CLI. The installed
+distribution remains `sanka-migrate`; `sanka-migrate` is retained as a CLI
+compatibility alias.
 
 The runtime is licensed **AGPL-3.0-only**; the connector interface and bundled
 first-party connectors retain **Apache-2.0** source licenses inside the same
@@ -16,6 +18,23 @@ the runtime without AGPL obligations.
 secret-key rejection) and canonical plan hashing (`sanka.runtime.hashing`) are
 in place, together with the engine, state store, and CLI lifecycle commands.
 APIs may still change before `1.0`.
+
+## Django REST Framework → FastAPI
+
+Run the four-command compatibility migration from a Django repository root:
+
+```bash
+sanka scan
+sanka plan --to fastapi
+sanka apply --plan-hash sha256:REVIEWED_PLAN_HASH
+sanka verify
+```
+
+Sanka resolves the live Django URL graph, including DRF router routes and
+custom actions. Apply creates a separate FastAPI compatibility application in
+`.sanka/output/fastapi`; it does not overwrite the Django source. The generated
+route graph forwards to the current DRF handlers in-process so teams can prove
+parity first and replace handlers incrementally.
 
 ## Python quick start
 
@@ -48,7 +67,7 @@ asyncio.run(main())
 The same bundled-provider discovery is available from the CLI:
 
 ```bash
-sanka-migrate connect hubspot
+sanka connect hubspot
 ```
 
 Advanced integrations can use the typed `sanka.runtime` modules directly.
@@ -59,10 +78,10 @@ The CLI also reads Sanka's cited, keyless research API and can submit
 a free migration assessment:
 
 ```bash
-sanka-migrate research eol --after 2027-01 --type shutdown
-sanka-migrate research tco salesforce --lang en
-sanka-migrate research compare crm-migration --platforms salesforce,hubspot
-sanka-migrate assess --source "SAP ECC" --destination "HubSpot"
+sanka research eol --after 2027-01 --type shutdown
+sanka research tco salesforce --lang en
+sanka research compare crm-migration --platforms salesforce,hubspot
+sanka assess --source "SAP ECC" --destination "HubSpot"
 ```
 
 Research output includes per-claim vendor sources and terminal attribution.

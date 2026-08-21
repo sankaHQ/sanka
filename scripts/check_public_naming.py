@@ -11,7 +11,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 RETIRED_TOKEN = "fer" + "ry"
-LEGACY_DISPLAY_TOKEN = "sanka " + "migrate"
+LEGACY_DISPLAY_TOKEN = "Sanka " + "Migrate"
 IGNORED_PARTS = {
     ".git",
     ".mypy_cache",
@@ -73,7 +73,7 @@ def _legacy_display_name_references() -> list[str]:
             content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if LEGACY_DISPLAY_TOKEN in content.lower():
+        if LEGACY_DISPLAY_TOKEN in content:
             references.append(f"content: {relative}")
     return references
 
@@ -122,7 +122,10 @@ def main() -> int:
 
     runtime = _load(ROOT / "packages/sanka-migrate/pyproject.toml")
     scripts = runtime["project"].get("scripts", {})
-    expected_scripts = {"sanka-migrate": "sanka.cli:main"}
+    expected_scripts = {
+        "sanka": "sanka.cli:main",
+        "sanka-migrate": "sanka.cli:main",
+    }
     if scripts != expected_scripts:
         errors.append(f"runtime scripts must be exactly: {expected_scripts}")
     runtime_packages = (

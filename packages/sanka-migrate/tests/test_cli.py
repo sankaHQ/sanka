@@ -41,11 +41,11 @@ def test_default_paths_use_public_project_names() -> None:
 def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([]) == 0
     output = capsys.readouterr().out
-    assert "verify finite migrations" in output
+    assert "migrations with a finish line" in output
     # `validate` joined the subcommand set in F-6; argparse renders the choices
     # line from the full set, so this is the one pre-existing assertion the
     # additive subcommand forces to grow.
-    assert "{plan,validate,apply,verify,status,migrate,connect,research,assess}" in output
+    assert "{scan,plan,validate,apply,verify,status,migrate,connect,research,assess}" in output
 
 
 def test_connect_reports_a_bundled_provider(capsys: pytest.CaptureFixture[str]) -> None:
@@ -107,7 +107,7 @@ def test_validate_requires_a_plan(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert main(["validate", *base]) == 1
 
     captured = capsys.readouterr()
-    assert "run `sanka-migrate plan` first" in captured.err
+    assert "run `sanka plan` first" in captured.err
     assert not db.exists()
 
 
