@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""stdio MCP server exposing the Sanka Migrate public research API."""
+"""stdio MCP server exposing the Sanka public research API."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ ASSESSMENT_WRITE = ToolAnnotations(
 )
 
 mcp = FastMCP(
-    "Sanka Migrate Research",
+    "Sanka Research",
     instructions=(
         "Use the research tools for cited software lifecycle and migration evidence. "
         "The assessment tool creates one assessment only when the user asks for it."
@@ -135,7 +135,7 @@ async def research_compare(
 @mcp.tool(
     name="sanka_migrate_assess",
     description=(
-        "Create one free Sanka Migrate assessment from the supplied migration answers. "
+        "Create one free Sanka assessment from the supplied migration answers. "
         "This records an assessment but does not create an account or start a migration."
     ),
     annotations=ASSESSMENT_WRITE,

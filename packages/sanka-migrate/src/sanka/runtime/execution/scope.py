@@ -146,7 +146,7 @@ async def frozen_route_totals(
             if upper_bound is not None:
                 if not isinstance(source, SupportsBoundedCounts):
                     raise ExecutionFault(
-                        "Source provider cannot count the frozen Sanka Migrate record set.",
+                        "Source provider cannot count the frozen Sanka record set.",
                         code="SANKA_MIGRATE_SOURCE_HIGH_WATER_MARK_UNSUPPORTED",
                     )
                 count = await source.count_records_bounded(

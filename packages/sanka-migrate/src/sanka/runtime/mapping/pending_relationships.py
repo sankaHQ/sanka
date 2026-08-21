@@ -92,7 +92,7 @@ async def resolve_destination_record_ids(
     )
     if ambiguous_count:
         raise MappingError(
-            "Referenced destination records are ambiguous across compatible Sanka Migrate runs.",
+            "Referenced destination records are ambiguous across compatible Sanka runs.",
             code="SANKA_MIGRATE_RELATIONSHIP_TARGET_AMBIGUOUS",
             details={
                 "sourceReferenceObject": source_object,

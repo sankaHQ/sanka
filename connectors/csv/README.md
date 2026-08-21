@@ -1,6 +1,6 @@
 # CSV connector (bundled)
 
-Reads a single CSV or TSV file as a Sanka Migrate **source**: the header
+Reads a single CSV or TSV file as a Sanka **source**: the header
 row defines the fields, every data row becomes one record, and the sanitized
 file stem is the object key. The delimiter is sniffed, falling back to `,`
 (tab for `.tsv`). Inventory infers number/boolean column types by sampling

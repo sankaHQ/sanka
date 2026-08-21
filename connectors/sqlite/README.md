@@ -1,6 +1,6 @@
 # SQLite connector (bundled)
 
-SQLite as either side of a Sanka Migrate run.
+SQLite as either side of a Sanka run.
 
 As a **source**, every user table becomes a migratable object: fields and
 types come from `PRAGMA table_info`, the identity is the table's

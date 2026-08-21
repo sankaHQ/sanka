@@ -1,37 +1,31 @@
 # Legal documents
 
-> **Status: DRAFT.** Every document in this directory was prepared as a working
-> draft for review by Sanka, Inc.'s legal counsel. Nothing here is an offer,
-> and none of it is in effect until counsel approves it and it is formally
-> adopted. The signing automation (CLA bot) is wired up only after that
-> approval.
+The commercial-license document is a working draft for review by Sanka,
+Inc.'s legal counsel. It is not an offer and is not in effect until formally
+adopted. The contributor-agreement files are inactive planning drafts retained
+for possible future evaluation; no CLA is required and no CLA automation is
+active.
 
 | Document | Purpose |
 |---|---|
-| [`individual-cla.md`](individual-cla.md) | Individual Contributor License Agreement — signed once by each external contributor before their first merged contribution |
-| [`corporate-cla.md`](corporate-cla.md) | Corporate CLA — signed by an employer whose employees contribute on work time |
-| [`commercial-license.md`](commercial-license.md) | Commercial license for the AGPL-3.0-only Sanka Migrate Runtime — alternative terms for organizations that cannot accept AGPL obligations |
+| [`individual-cla.md`](individual-cla.md) | Inactive planning draft; not part of the current contribution terms |
+| [`corporate-cla.md`](corporate-cla.md) | Inactive planning draft; not part of the current contribution terms |
+| [`commercial-license.md`](commercial-license.md) | Commercial license for the AGPL-3.0-only Sanka Runtime — alternative terms for organizations that cannot accept AGPL obligations |
 
-## Why a CLA at all
+## Current contribution policy
 
-The Sanka Migrate Runtime is dual-licensed: AGPL-3.0-only publicly, plus
-commercial licenses sold by Sanka, Inc. Dual licensing requires that Sanka can
-relicense the entire work. Sanka's own code poses no problem (Sanka holds the
-copyright), but an external contribution accepted *without* a CLA would be
-licensed to us only under AGPL-3.0 — freezing the combined work as
-AGPL-3.0-only forever and breaking both the commercial runtime license and the
-ability to ship contributed fixes inside proprietary Sanka Migrate Cloud. The CLAs
-below grant Sanka the explicit right to relicense contributions, which is the
-single clause that keeps the model working.
+Contributions use the license applicable to the files they modify:
+AGPL-3.0-only for runtime and CLI code, and Apache-2.0 for the connector
+interface, bundled connectors, MCP package, scripts, tests, and documentation.
+Accepting an AGPL contribution does not give Sanka separate proprietary or
+commercial relicensing rights.
 
-Drafting notes for counsel:
+Commercial licenses therefore cover only code Sanka owns or otherwise has
+permission to relicense. If substantial third-party runtime contributions make
+additional commercial licensing rights important in the future, Sanka may
+evaluate a contributor agreement prospectively. Any such agreement would
+require explicit adoption and acceptance and would not retroactively change
+existing contribution terms.
 
-- Both CLAs are adapted from the Apache Software Foundation's ICLA/CCLA v2.2
-  structure (the de-facto industry standard), with the grantee changed to
-  Sanka, Inc. and an explicit relicensing clause added to the copyright grant
-  (§2) — stock Apache language relies on the sublicensing right alone.
-- Licensing model reference: the repository follows the same per-directory
-  split as firecrawl/firecrawl (AGPL core + permissively licensed SDKs);
-  we use Apache-2.0 rather than MIT for the SDK to carry a patent grant.
-- The commercial license is a short-form template; fees, support, and any
-  service-restriction carve-outs are deliberately pushed to an Order Form.
+The commercial license remains a short-form template; fees, support, and any
+service-restriction carve-outs are deliberately pushed to an Order Form.

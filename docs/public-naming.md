@@ -1,15 +1,15 @@
-# Sanka Migrate public naming contract
+# Sanka public naming contract
 
-Sanka is the company and platform brand. **Sanka Migrate** is the public name
-of this open-source migration project. The short label **Migrate** is suitable
-inside a Sanka-owned product switcher, but package, repository, documentation,
-and third-party references use the full name.
+**Sanka** is the company, platform, and public name of this open-source
+migration project. The short label **Migrate** remains suitable inside a
+Sanka-owned product switcher. Package, executable, environment-variable, and
+API identifiers keep their existing migration-specific names for stability.
 
 ## Public names
 
 | Surface | Name |
 |---|---|
-| Project and product | Sanka Migrate |
+| Project and product | Sanka |
 | GitHub repository | `sankaHQ/sanka` |
 | Runtime and built-in connector distribution | `sanka-migrate` |
 | Preferred Python facade | `from sanka import Sanka` |
@@ -83,5 +83,6 @@ API migration if they are ever changed.
 
 This naming contract prepares artifacts only. It does not publish a package,
 change repository visibility, configure a PyPI trusted publisher, or adopt the
-draft CLA/commercial-license text. Those are separate approval gates. The draft
-legal documents must be reviewed by counsel before adoption.
+draft commercial-license text. Those are separate approval gates. The current
+contribution terms use the license applicable to each modified file and do not
+require a CLA.

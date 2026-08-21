@@ -660,14 +660,14 @@ Rules of the road for every PR below:
 
 - **Delivery mechanism** sanka-side: revendor the wheels per
   `vendor/sanka/PROVENANCE.txt` (pinned sanka commit, `uv build` from a
-  clean worktree, sha256s recorded). Sanka Migrate-side PRs land first; the matching
+  clean worktree, sha256s recorded). Sanka-side PRs land first; the matching
   sanka PR pins their commit.
 - **Tripwires** sanka-side always include:
   `tests/unit/service/sanka/test_runtime_service.py` (≈70 pinned behaviors,
   4,069 lines) and the #2811 characterization suite
   `tests/api/test_sanka_record_runtime_contract_api.py` (1,048 lines pinning
   HTTP codes, envelopes, and load-bearing report keys), run with bounded
-  workers and diffed against the known-failures baseline. Sanka Migrate-side always
+  workers and diffed against the known-failures baseline. Sanka-side always
   include `packages/sanka-migrate/tests/` (engine e2e, pg→CH flagship e2e,
   state store, planner) plus the import-boundary and license scripts.
 - **Rollback** sanka-side is always `git revert` + redeploy: every PR is
@@ -740,7 +740,7 @@ architecture pins (hosts depend on the runtime; the runtime knows no host).
    status→copy table in the sanka journal adapter; the codec round-trips
    unknown keys through `JournalEntry.extras` untouched. Revisit only if a
    second host needs the same copy.
-2. **Closing the `reconcile_resources` pydantic pass-through.** Sanka Migrate
+2. **Closing the `reconcile_resources` pydantic pass-through.** Sanka
    `b98231e` added stage `probability` and custom-object `properties` to the
    SDK provisioning types, removing the reason for the pass-through
    documented at `sdk_adapters.py:27-33` and the pydantic-signature

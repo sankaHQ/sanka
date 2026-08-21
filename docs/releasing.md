@@ -1,8 +1,22 @@
-# Sanka Migrate release procedure
+# Sanka release procedure
 
 No package is published by a push or merge. Publishing is a manual GitHub
 Actions workflow, restricted to an exact version tag and protected by a GitHub
 environment approval. The repository rename/public flip is a separate gate.
+
+## Current release state
+
+- Production PyPI: `sanka-migrate==0.1.0a2` and
+  `sanka-migrate-mcp==0.1.0a2`.
+- Source release: tag `v0.1.0a2`; each package's `pyproject.toml` is the source
+  version authority, and PyPI is the publication authority.
+- Hosted API: `https://api.sanka.com/v2/migrate`; the live
+  `/research/datasets` response is the availability authority.
+- Repository visibility: private until the separately approved open-source
+  launch.
+
+The root `README.md` summarizes this state for readers. This document owns the
+release procedure; it does not override PyPI or live-service status.
 
 ## Prepared package set
 
@@ -48,8 +62,10 @@ artifacts. It does not upload anything.
 5. Protect `main`, require the `check` job, enable dependency alerts, secret
    scanning/push protection, code scanning, private vulnerability reporting,
    and Discussions before changing visibility.
-6. Confirm counsel-approved CLA/commercial-license text and activate the CLA
-   signing gate before accepting external pull requests.
+6. Confirm `README.md`, `CONTRIBUTING.md`, and `LICENSE` retain the
+   inbound-equals-outbound contribution policy. No CLA check is required. Any
+   commercial offer must cover only code Sanka owns or otherwise has permission
+   to relicense.
 7. Verify `https://api.sanka.com/v2/migrate/research/datasets` and the
    assessment contract on the canonical public host. Do not point public
    packages back at a retired product hostname or internal route while that

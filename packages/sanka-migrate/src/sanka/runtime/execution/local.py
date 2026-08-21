@@ -222,7 +222,7 @@ class SqliteExecutionState:
         persisted = await self._run(lambda: self._upsert_rows_sync(rows))
         if persisted != len(results):
             raise ExecutionFault(
-                "Sanka Migrate did not persist every destination result in the current batch.",
+                "Sanka did not persist every destination result in the current batch.",
                 code="SANKA_MIGRATE_RECORD_RESULT_BULK_SAVE_INCOMPLETE",
                 details={"expectedCount": len(results), "savedCount": persisted},
             )
@@ -296,7 +296,7 @@ class SqliteExecutionState:
                 return None
             if self._job_id is not None and row["job_id"] not in (None, self._job_id):
                 raise ExecutionFault(
-                    "Sanka Migrate execution job was superseded.",
+                    "Sanka execution job was superseded.",
                     code="SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED",
                 )
             return load_journal(json.loads(row["entry_json"]))

@@ -1,16 +1,17 @@
-# Sanka Migrate Individual Contributor License Agreement
+# Sanka Individual Contributor License Agreement
 
-> **DRAFT v0.1 (2026-08-15) — for review by Sanka, Inc. counsel. Not yet in
-> effect.** Adapted from the Apache Software Foundation Individual CLA v2.2,
-> with Sanka, Inc. as grantee and an explicit relicensing clause in Section 2.
+> **INACTIVE PLANNING DRAFT — not part of the current contribution terms.**
+> No CLA is required, no signature process is active, and this document is not
+> in effect. If Sanka adopts a contributor agreement in the future, it will
+> apply prospectively only after explicit acceptance.
 
-Thank you for your interest in contributing to Sanka Migrate, a project of
+Thank you for your interest in contributing to Sanka, a project of
 **Sanka, Inc.** ("Sanka"). In order to clarify the intellectual property
 license granted with Contributions from any person or entity, Sanka must have
 a Contributor License Agreement ("CLA") on file that has been agreed to by
 each Contributor, indicating agreement to the license terms below. This
 license is for your protection as a Contributor as well as the protection of
-Sanka and users of Sanka Migrate; it does not change your rights to use your own
+Sanka and users of Sanka; it does not change your rights to use your own
 Contributions for any other purpose.
 
 You accept and agree to the following terms and conditions for Your present
@@ -30,7 +31,7 @@ are considered to be a single Contributor.
 modifications or additions to an existing work, that is intentionally
 submitted by You to Sanka for inclusion in, or documentation of, any of the
 products owned or managed by Sanka (the "**Work**"), including without
-limitation the software repositories of the Sanka Migrate project. For the purposes
+limitation the software repositories of the Sanka project. For the purposes
 of this definition, "submitted" means any form of electronic, verbal, or
 written communication sent to Sanka or its representatives, including but not
 limited to communication on electronic mailing lists, source code control
@@ -114,6 +115,5 @@ aware that would make these representations inaccurate in any respect.
 
 ---
 
-*Signature is collected electronically per pull request author via the CLA
-automation configured on the Sanka Migrate repositories (name, email, GitHub
-username, and date are recorded with the signature).*
+*No signature process is active. This document is retained only for possible
+future evaluation and is not part of the current contribution terms.*

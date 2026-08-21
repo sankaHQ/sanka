@@ -79,7 +79,7 @@ _EXECUTION_STATUS_VALUES: frozenset[str] = frozenset(get_args(ExecutionStatus))
 
 _ROUTE_COUNT_STATUSES = ("created", "updated", "skipped", "failed")
 
-_INVALID_MANIFEST_MESSAGE = "The saved Sanka Migrate route manifest is invalid."
+_INVALID_MANIFEST_MESSAGE = "The saved Sanka route manifest is invalid."
 
 _TOP_LEVEL_KEY_ORDER = (
     "stage",
@@ -173,7 +173,7 @@ def canonical_route_manifest(raw: Any) -> MappingRouteManifest:
 
     if not isinstance(raw, list) or not raw:
         raise ExecutionFault(
-            "A complete Sanka Migrate route manifest is required before continuous execution.",
+            "A complete Sanka route manifest is required before continuous execution.",
             code="SANKA_MIGRATE_ROUTE_MANIFEST_MISSING",
         )
     normalized: MappingRouteManifest = []
@@ -196,14 +196,14 @@ def canonical_route_manifest(raw: Any) -> MappingRouteManifest:
             )
         except ValueError as exc:
             raise ExecutionFault(
-                "The saved Sanka Migrate route manifest contains an invalid source filter.",
+                "The saved Sanka route manifest contains an invalid source filter.",
                 code="SANKA_MIGRATE_ROUTE_MANIFEST_INVALID",
             ) from exc
         route_key = mapping_group_key(source_object, destination_object, source_filter)
         saved_route_key = str(item.get("routeKey") or route_key).strip()
         if saved_route_key != route_key or route_key in seen:
             raise ExecutionFault(
-                "The saved Sanka Migrate route identity does not match its source filter.",
+                "The saved Sanka route identity does not match its source filter.",
                 code="SANKA_MIGRATE_ROUTE_MANIFEST_INVALID",
             )
         seen.add(route_key)
@@ -230,7 +230,7 @@ def require_matching_route_manifest(
     expected = canonical_route_manifest(expected_route_manifest)
     if current != expected:
         raise ExecutionFault(
-            "The Sanka Migrate mapping routes changed after continuous execution was queued. "
+            "The Sanka mapping routes changed after continuous execution was queued. "
             "Review the source filters before starting a new job.",
             code="SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED",
         )
@@ -254,7 +254,7 @@ def selected_route_keys(
         return known_route_keys
     if not isinstance(requested_route_keys, list | tuple):
         raise ExecutionFault(
-            "Sanka Migrate execution route keys must be a list.",
+            "Sanka execution route keys must be a list.",
             code="SANKA_MIGRATE_EXECUTION_ROUTE_INVALID",
         )
     requested = {str(route_key or "").strip() for route_key in requested_route_keys}
@@ -264,7 +264,7 @@ def selected_route_keys(
     unknown = sorted(requested.difference(known_route_keys))
     if unknown:
         raise ExecutionFault(
-            "Sanka Migrate execution includes routes outside the reviewed mapping.",
+            "Sanka execution includes routes outside the reviewed mapping.",
             code="SANKA_MIGRATE_EXECUTION_ROUTE_INVALID",
             details={"unknownRouteKeys": unknown},
         )
@@ -306,13 +306,13 @@ def execution_route_high_water_marks(
         return {}
     if not isinstance(raw, dict):
         raise ExecutionFault(
-            "The saved Sanka Migrate route high-water marks are invalid.",
+            "The saved Sanka route high-water marks are invalid.",
             code="SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID",
         )
     known_route_keys = {str(row["routeKey"]) for row in route_manifest}
     if set(raw) != known_route_keys:
         raise ExecutionFault(
-            "The saved Sanka Migrate route high-water marks do not match the reviewed routes.",
+            "The saved Sanka route high-water marks do not match the reviewed routes.",
             code="SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID",
         )
     normalized: dict[str, str | None] = {}
@@ -324,7 +324,7 @@ def execution_route_high_water_marks(
         normalized_value = str(value).strip()
         if not normalized_value:
             raise ExecutionFault(
-                "The saved Sanka Migrate route high-water mark is blank.",
+                "The saved Sanka route high-water mark is blank.",
                 code="SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID",
             )
         normalized[route_key] = normalized_value
@@ -357,7 +357,7 @@ def prepare_route_state(
         and canonical_route_manifest(saved_manifest) != normalized_manifest
     ):
         raise ExecutionFault(
-            "The saved Sanka Migrate checkpoints belong to different mapping routes.",
+            "The saved Sanka checkpoints belong to different mapping routes.",
             code="SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED",
         )
 
@@ -378,7 +378,7 @@ def prepare_route_state(
         if "|" not in route_key and legacy_source_keys.get(route_key):
             return legacy_source_keys[route_key]
         raise ExecutionFault(
-            "A saved Sanka Migrate checkpoint does not match the reviewed source-filter route.",
+            "A saved Sanka checkpoint does not match the reviewed source-filter route.",
             code="SANKA_MIGRATE_ROUTE_CHECKPOINT_MISMATCH",
         )
 
@@ -397,7 +397,7 @@ def prepare_route_state(
             route_key = resolve_route_key(raw_key)
             if route_key in remapped and str(raw_key) != route_key:
                 raise ExecutionFault(
-                    "Multiple saved Sanka Migrate checkpoints resolve to the same route.",
+                    "Multiple saved Sanka checkpoints resolve to the same route.",
                     code="SANKA_MIGRATE_ROUTE_CHECKPOINT_MISMATCH",
                 )
             remapped[route_key] = field_value

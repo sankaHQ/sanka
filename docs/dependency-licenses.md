@@ -32,6 +32,6 @@ metadata.
 ## Review boundary
 
 This is an engineering compatibility review, not legal advice. Counsel still
-owns adoption of the CLA, commercial license, and any dataset license. Any
-future vendoring, copying, static linking, or modification of third-party code
+owns adoption of the commercial license and any dataset license. Any future
+vendoring, copying, static linking, or modification of third-party code
 requires a fresh review even if the dependency name already appears above.

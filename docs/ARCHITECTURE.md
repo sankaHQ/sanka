@@ -1,6 +1,6 @@
-# Sanka Migrate architecture
+# Sanka architecture
 
-Sanka Migrate is an open-core monorepo with one user-facing Python
+Sanka is an open-core monorepo with one user-facing Python
 distribution: an AGPL-3.0-only migration runtime plus Apache-2.0 connector
 interfaces and first-party connectors. This document pins the decisions the
 scaffold encodes.
@@ -20,6 +20,19 @@ connectors never depend on the runtime. `scripts/check_import_boundaries.py`
 enforces this at the source-file level in CI, and
 `scripts/check_license_headers.py` keeps every file's SPDX header consistent
 with its zone.
+
+## Hosted-product boundary
+
+This repository contains only the open-source runtime and the permissive
+components listed above. Proprietary cloud-only features, hosted control-plane
+implementations, customer data, credentials, and production deployment
+configuration remain in separately governed systems. They are not vendored,
+generated, or copied into release artifacts from this repository.
+
+The hosted solution may integrate with the open-source packages through their
+published interfaces. The open-source packages do not import proprietary
+modules, silently fall back to private services, or require hosted-product code
+to provide their documented local behavior.
 
 ## Single-distribution layout
 
@@ -47,7 +60,7 @@ These come from the migration PRD and from operating production migrations, and
 they bind every later phase:
 
 1. **Finite migrations.** A migration has a desired end state and completes.
-   Sanka Migrate is not a continuous ETL/CDC platform.
+   Sanka is not a continuous ETL/CDC platform.
 2. **`plan` is write-free.** Planning and validation never construct a
    destination writer; nothing changes during planning — provably, not by
    convention.

@@ -1,23 +1,35 @@
-# Sanka Migrate — The Migration API
+# Sanka — The Migration API
 
 > Plan, execute, and verify migrations between databases, warehouses, files, and business systems — with one API.
 
-Sanka Migrate turns migration into a reusable developer primitive. Instead of
+Sanka turns migration into a reusable developer primitive. Instead of
 writing a one-off script for every migration, you (or your AI agent) point it at
-a source and a target; Sanka Migrate inspects both sides, proposes a reviewable plan,
+a source and a target; Sanka inspects both sides, proposes a reviewable plan,
 executes it with checkpoints and retries, and verifies the result. Then it's
-**done** — Sanka Migrate is for finite migrations (move from A to B and finish), not
+**done** — Sanka is for finite migrations (move from A to B and finish), not
 continuous ETL.
 
-> **Status: pre-release.** The runtime, CLI, and every connector below work
-> end to end — the database connectors are exercised in CI against live
-> databases, and the Salesforce/HubSpot connectors are ports of the adapters
-> running production migrations at Sanka. APIs may still move and nothing is
-> published to PyPI yet; this repository includes pre-release CLI and
-> standalone MCP clients for the hosted research API. The canonical public API
-> base is still a release-readiness gate.
+## Current release status
 
-## Why Sanka Migrate?
+| Surface | Current status and authority |
+|---|---|
+| Runtime and CLI | Alpha `0.1.0a2`, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
+| Standalone MCP server | Alpha `0.1.0a2`, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
+| Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
+| Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
+| Source repository | Private until the separately approved open-source visibility launch |
+
+The package versions declared in each package's `pyproject.toml`, the matching
+Git tag, and the files published on PyPI are authoritative for a release. The
+client `DEFAULT_API_BASE` constants and the live dataset-catalog response are
+authoritative for the hosted API. This table is the human-readable summary.
+
+The runtime, CLI, and every bundled connector below work end to end. Database
+connectors are exercised in CI against live databases, and the Salesforce and
+HubSpot connectors are ports of adapters used for production migrations at
+Sanka.
+
+## Why Sanka?
 
 Markdown → SQLite. CSV → PostgreSQL. PostgreSQL → ClickHouse. Salesforce →
 HubSpot. Every one of these is usually built as a custom project, yet they
@@ -27,7 +39,7 @@ all share the same workflow:
 Source → Inspect → Plan → Map / Transform → Transfer → Remediate → Verify → Target
 ```
 
-Sanka Migrate is that workflow as infrastructure, with the safety rules production
+Sanka is that workflow as infrastructure, with the safety rules production
 migrations actually need:
 
 - **Nothing changes during planning.** Inspection and planning are write-free
@@ -39,25 +51,23 @@ migrations actually need:
   checkpoints, and an identity ledger (source ID → destination ID) that makes
   re-running an interrupted migration converge instead of duplicating.
 - **Verification is first-class.** A migration isn't successful because the
-  transfer exited zero: Sanka Migrate reconciles source counts, the ledger, and
+  transfer exited zero: Sanka reconciles source counts, the ledger, and
   destination readback before calling it done.
 
 ## Quick start
 
-Not on PyPI yet — run from a checkout (Python ≥ 3.12 +
-[uv](https://docs.astral.sh/uv/)):
+Install the current alpha from PyPI (Python ≥ 3.12):
 
 ```bash
-git clone https://github.com/sankaHQ/sanka.git && cd sanka
-uv sync --all-packages
+python -m pip install --pre sanka-migrate
 ```
 
 Migrate a Markdown folder into SQLite:
 
 ```bash
-uv run sanka-migrate connect markdown
-uv run sanka-migrate connect sqlite
-uv run sanka-migrate migrate ./content sqlite://content.db
+sanka-migrate connect markdown
+sanka-migrate connect sqlite
+sanka-migrate migrate ./content sqlite://content.db
 ```
 
 ```text
@@ -206,11 +216,11 @@ default, not a requirement.
 
 ## For AI agents
 
-Sanka Migrate is built to be driven by agents safely: plans are structured, hashable
+Sanka is built to be driven by agents safely: plans are structured, hashable
 documents an agent can present for approval, and `apply` executes only the
 approved hash. The standalone Apache-2.0 `sanka-migrate-mcp` package exposes
 three credential-free, read-only research tools plus one explicit assessment
-write over the public Sanka Migrate API. It is deliberately separate from the
+write over the public Sanka API. It is deliberately separate from the
 AGPL runtime and can be configured after publication with:
 
 ```json
@@ -227,13 +237,12 @@ AGPL runtime and can be configured after publication with:
 The migration execution toolset remains part of the separately governed hosted
 API roadmap; this MCP server does not plan or execute migrations.
 
-## Open source vs hosted Sanka Migrate
+## Open source vs hosted solution
 
-Sanka Migrate follows an open-core model (the same shape as Firecrawl's AGPL core +
-permissive SDKs — we use Apache-2.0 for the SDK so it carries a patent
-grant):
+Sanka follows an open-core model (AGPL core + permissive SDKs — we use
+Apache-2.0 for the SDK so it carries a patent grant):
 
-| | Sanka Migrate Open Source | [Hosted Sanka Migrate](https://sanka.com/migrate/) |
+| | Open source | [Hosted solution](https://sanka.com/migrate/) |
 |---|:---:|:---:|
 | Migration runtime, CLI, local state | ✅ | ✅ |
 | Bundled first-party connectors | ✅ | ✅ |
@@ -263,9 +272,11 @@ boundary:
 | `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
 | `connectors/*` — provider documentation and tests | Apache-2.0 |
 
-The runtime is also available under a
-[commercial license](docs/legal/commercial-license.md) from Sanka, Inc. for
-embedding without AGPL obligations. See [LICENSE](LICENSE) for the full map.
+Runtime code that Sanka owns or otherwise has permission to relicense is also
+available under a [commercial license](docs/legal/commercial-license.md) from
+Sanka, Inc. for embedding without AGPL obligations. Third-party contributions
+remain under the license applicable to their files unless their rights holder
+separately grants additional rights. See [LICENSE](LICENSE) for the full map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
@@ -288,9 +299,8 @@ provisions both); they skip cleanly otherwise. Architecture notes:
 
 ## Contributing
 
-External contributions require a signed CLA
-([individual](docs/legal/individual-cla.md) ·
-[corporate](docs/legal/corporate-cla.md)) — dual licensing depends on it.
-**The CLA texts are drafts under counsel review and the signing flow is not
-live yet**, so external pull requests cannot be merged for now; issues and
-discussions are very welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+No CLA is required. Contributions use the license already applicable to the
+modified files: AGPL-3.0-only for the runtime and Apache-2.0 for the connector
+interface, bundled connectors, MCP package, tests, scripts, and documentation.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact path map and contribution
+workflow.

@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sanka-migrate",
-        description="Sanka Migrate — plan, execute, and verify finite migrations.",
+        description="Sanka — plan, execute, and verify finite migrations.",
     )
     parser.add_argument("--version", action="version", version=f"sanka-migrate {__version__}")
     parser.set_defaults(command=None)
@@ -133,7 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     research = commands.add_parser(
         "research",
-        help="query cited Sanka Migrate lifecycle, cost, and comparison research",
+        help="query cited Sanka lifecycle, cost, and comparison research",
     )
     research_commands = research.add_subparsers(dest="research_command", required=True)
 

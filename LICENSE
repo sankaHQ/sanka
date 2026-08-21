@@ -1,4 +1,4 @@
-Sanka Migrate monorepo — per-component licensing
+Sanka monorepo — per-component licensing
 ================================================
 
 This repository contains packages under different licenses. The
@@ -15,9 +15,9 @@ SPDX-License-Identifier header in each source file is authoritative.
 The `sanka-migrate` wheel includes both full license texts and a NOTICE file.
 Source-file SPDX headers identify which license governs each component.
 
-The Sanka Migrate Runtime (packages/sanka-migrate) is also available under a
-commercial license from Sanka, Inc. for use without AGPL-3.0 obligations —
-see docs/legal/commercial-license.md (draft).
+Runtime code that Sanka owns or otherwise has permission to relicense is also
+available under a commercial license from Sanka, Inc. for use without
+AGPL-3.0 obligations — see docs/legal/commercial-license.md (draft).
 
-All contributions require a signed Contributor License Agreement; see
-CONTRIBUTING.md.
+Contributions use the license applicable to the files they modify. No
+Contributor License Agreement is required; see CONTRIBUTING.md.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""HTTP and rendering helpers for the public Sanka Migrate research surface."""
+"""HTTP and rendering helpers for the public Sanka research surface."""
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ class SankaMigrateApiClient:
         except (URLError, TimeoutError, OSError) as error:
             raise SankaMigrateApiError(
                 "SANKA_MIGRATE_API_UNAVAILABLE",
-                f"Sanka Migrate API request failed: {error}",
+                f"Sanka API request failed: {error}",
             ) from error
         if not isinstance(envelope, dict) or envelope.get("success") is not True:
             details = _error_details(envelope)
@@ -149,7 +149,7 @@ class SankaMigrateApiClient:
         if not isinstance(data, dict):
             raise SankaMigrateApiError(
                 "SANKA_MIGRATE_API_INVALID_RESPONSE",
-                "Sanka Migrate API returned an invalid response.",
+                "Sanka API returned an invalid response.",
             )
         return cast(dict[str, Any], data)
 
@@ -187,11 +187,11 @@ def _error_details(envelope: Any) -> dict[str, str]:
     if not isinstance(error, dict):
         return {
             "code": "SANKA_MIGRATE_API_ERROR",
-            "message": "Sanka Migrate API request failed.",
+            "message": "Sanka API request failed.",
         }
     return {
         "code": str(error.get("code") or "SANKA_MIGRATE_API_ERROR"),
-        "message": str(error.get("message") or "Sanka Migrate API request failed."),
+        "message": str(error.get("message") or "Sanka API request failed."),
     }
 
 
@@ -311,7 +311,7 @@ def _print_sources(sources: list[tuple[str, str]]) -> None:
 def _print_attribution(value: Any) -> None:
     if not isinstance(value, dict):
         return
-    name = value.get("name") or "Sanka Migrate Research"
+    name = value.get("name") or "Sanka Research"
     url = value.get("url") or "https://sanka.com/docs/migrate/"
     license_name = value.get("license") or "CC BY 4.0"
     print(f"\n{name} — {url}  ({license_name})")

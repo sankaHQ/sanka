@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""How a built-in provider plugs into the Sanka Migrate runtime.
+"""How a built-in provider plugs into the Sanka runtime.
 
 The ``sanka-migrate`` distribution exposes each first-party
 :class:`ConnectorRegistration` through the ``sanka.connectors`` entry-point

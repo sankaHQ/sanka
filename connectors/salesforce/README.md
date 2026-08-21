@@ -1,6 +1,6 @@
 # Salesforce connector (bundled)
 
-Salesforce connector for Sanka Migrate, registering a **source role only** under the
+Salesforce connector for Sanka, registering a **source role only** under the
 `salesforce` type — a faithful port of the production adapter behind Sanka's
 commercial Salesforce migrations, which never wrote to Salesforce. Talks to
 the Salesforce REST API (default `v60.0`) over httpx.

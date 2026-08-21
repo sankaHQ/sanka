@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Credential-free MCP tools for Sanka Migrate research and assessments."""
+"""Credential-free MCP tools for Sanka research and assessments."""
 
 from sanka_migrate_mcp.client import SankaMigrateApiClient, SankaMigrateApiError
 

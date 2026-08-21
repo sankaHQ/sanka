@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enforce the public Sanka Migrate naming contract."""
+"""Enforce the public Sanka naming contract."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 RETIRED_TOKEN = "fer" + "ry"
+LEGACY_DISPLAY_TOKEN = "sanka " + "migrate"
 IGNORED_PARTS = {
     ".git",
     ".mypy_cache",
@@ -62,6 +63,21 @@ def _retired_name_references() -> list[str]:
     return references
 
 
+def _legacy_display_name_references() -> list[str]:
+    references: list[str] = []
+    for path in ROOT.rglob("*"):
+        relative = path.relative_to(ROOT)
+        if any(part in IGNORED_PARTS for part in relative.parts) or not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if LEGACY_DISPLAY_TOKEN in content.lower():
+            references.append(f"content: {relative}")
+    return references
+
+
 def main() -> int:
     errors: list[str] = []
     versions: set[str] = set()
@@ -71,6 +87,13 @@ def main() -> int:
         errors.append(
             "retired project name remains in the public source tree: "
             + ", ".join(retired_references)
+        )
+
+    legacy_display_references = _legacy_display_name_references()
+    if legacy_display_references:
+        errors.append(
+            "legacy display name remains in the public source tree: "
+            + ", ".join(legacy_display_references)
         )
 
     root_project = _load(ROOT / "pyproject.toml")["project"]

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """HubSpot destination connector.
 
-A faithful port of the production Sanka HubSpot Sanka Migrate adapter: conflict
+A faithful port of the production Sanka HubSpot Sanka adapter: conflict
 policies via identity search, 100-record batch create/update/upsert with
 ``objectWriteTraceId`` reconciliation, v4 association batches, inline
 property / pipeline / custom-object provisioning with a pure dry run, the
@@ -227,7 +227,7 @@ def _custom_object_schema_payload(
                 "fieldType": "text",
                 "hasUniqueValue": False,
                 "displayOrder": 0,
-                "description": f"Migrated from {definition.source_object} with Sanka Migrate.",
+                "description": f"Migrated from {definition.source_object} with Sanka.",
             }
         )
     offset = len(properties)
@@ -240,7 +240,7 @@ def _custom_object_schema_payload(
             "fieldType": field_type,
             "hasUniqueValue": prop.unique,
             "displayOrder": offset + index,
-            "description": f"Migrated from {prop.source_field} with Sanka Migrate.",
+            "description": f"Migrated from {prop.source_field} with Sanka.",
         }
         if target_type == "bool":
             property_payload["options"] = boolean_property_options()
@@ -341,7 +341,7 @@ def _contact_email_fallback_properties(
     normalized_audit_field = str(audit_field or "").strip()
     if not normalized_audit_field or normalized_audit_field == "email":
         raise ValidationFailedError(
-            "An audit property is required before Sanka Migrate can omit an invalid HubSpot email.",
+            "An audit property is required before Sanka can omit an invalid HubSpot email.",
             details={"code": "SANKA_MIGRATE_INVALID_EMAIL_AUDIT_FIELD_REQUIRED"},
         ) from error
     if normalized_audit_field in identity_fields:
@@ -363,8 +363,7 @@ def _contact_email_fallback_properties(
     ]
     if not alternate_identity_fields:
         raise ValidationFailedError(
-            "An alternate identity is required before Sanka Migrate can omit "
-            "an invalid HubSpot email.",
+            "An alternate identity is required before Sanka can omit an invalid HubSpot email.",
             details={
                 "code": "SANKA_MIGRATE_INVALID_EMAIL_ALTERNATE_IDENTITY_REQUIRED",
                 "objectType": object_type,
@@ -383,7 +382,7 @@ def _contact_email_fallback_message(
 ) -> str:
     if kind == "duplicate":
         return (
-            "HubSpot email uniqueness conflict: Sanka Migrate matched an existing record with an "
+            "HubSpot email uniqueness conflict: Sanka matched an existing record with an "
             "alternate identity and left it unchanged."
             if status == "skipped"
             else (
@@ -392,11 +391,11 @@ def _contact_email_fallback_message(
             )
         )
     return (
-        "HubSpot rejected the standard email value; Sanka Migrate matched an existing record "
+        "HubSpot rejected the standard email value; Sanka matched an existing record "
         "with an alternate identity and left it unchanged."
         if status == "skipped"
         else (
-            "HubSpot rejected the standard email value; Sanka Migrate preserved it in the "
+            "HubSpot rejected the standard email value; Sanka preserved it in the "
             "configured audit property and continued with an alternate identity."
         )
     )
@@ -942,7 +941,7 @@ class HubSpotDestination:
                     "label": definition.label,
                     "type": target_type,
                     "fieldType": field_type,
-                    "description": f"Migrated from {definition.source_field} with Sanka Migrate.",
+                    "description": f"Migrated from {definition.source_field} with Sanka.",
                     "hidden": False,
                 }
                 if target_type == "bool":
@@ -1123,7 +1122,7 @@ class HubSpotDestination:
         trace_ids = [record.trace_id for record in records]
         if len(set(trace_ids)) != len(trace_ids):
             raise ValidationFailedError(
-                "Sanka Migrate destination batch trace ids must be unique.",
+                "Sanka destination batch trace ids must be unique.",
                 details={"code": "SANKA_MIGRATE_DESTINATION_BATCH_TRACE_DUPLICATE"},
             )
         effective_identity_fields = list(

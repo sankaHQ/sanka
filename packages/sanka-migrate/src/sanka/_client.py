@@ -22,7 +22,7 @@ class Connection:
     """A selected built-in provider and its non-secret endpoint configuration.
 
     Creating a connection is write-free. It verifies that the provider ships
-    with Sanka Migrate and returns a descriptor that can be passed directly to
+    with Sanka and returns a descriptor that can be passed directly to
     :meth:`Sanka.migrate`. Authentication and reachability are evaluated by the
     migration lifecycle, never while selecting the provider.
     """
@@ -89,7 +89,7 @@ class Migration:
 
 
 class Sanka:
-    """Entry point for local Sanka Migrate lifecycles.
+    """Entry point for local Sanka lifecycles.
 
     ``Sanka`` owns a local SQLite state store. Use it as a context manager for
     deterministic cleanup in long-running processes; short scripts may rely on

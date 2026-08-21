@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Async HTTP client for the public Sanka Migrate research surface."""
+"""Async HTTP client for the public Sanka research surface."""
 
 from __future__ import annotations
 
@@ -148,12 +148,12 @@ class SankaMigrateApiClient:
         except httpx.TimeoutException as error:
             raise SankaMigrateApiError(
                 "SANKA_MIGRATE_API_TIMEOUT",
-                "Sanka Migrate API request timed out.",
+                "Sanka API request timed out.",
             ) from error
         except httpx.TransportError as error:
             raise SankaMigrateApiError(
                 "SANKA_MIGRATE_API_UNAVAILABLE",
-                f"Sanka Migrate API request failed: {error}",
+                f"Sanka API request failed: {error}",
             ) from error
 
         envelope = _json_object(response)
@@ -177,7 +177,7 @@ class SankaMigrateApiClient:
         if not isinstance(data, dict):
             raise SankaMigrateApiError(
                 "SANKA_MIGRATE_API_INVALID_RESPONSE",
-                "Sanka Migrate API returned an invalid response.",
+                "Sanka API returned an invalid response.",
             )
         return cast(dict[str, Any], data)
 
@@ -197,7 +197,7 @@ def _error_details(envelope: Mapping[str, Any]) -> tuple[str, str, str | None]:
     metadata = meta if isinstance(meta, dict) else {}
     return (
         str(details.get("code") or "SANKA_MIGRATE_API_ERROR"),
-        str(details.get("message") or "Sanka Migrate API request failed."),
+        str(details.get("message") or "Sanka API request failed."),
         str(metadata.get("ctx_id")) if metadata.get("ctx_id") else None,
     )
 

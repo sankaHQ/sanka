@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Sanka Migrate connector SPI: base protocols plus optional capability protocols.
+"""The Sanka connector SPI: base protocols plus optional capability protocols.
 
 Base protocols carry the minimum a connector must implement. Everything else
 is an optional capability protocol the runtime discovers with ``isinstance``

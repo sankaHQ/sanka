@@ -7,7 +7,7 @@ write scope) to run these; without it the whole module is skipped so
 ``make check`` stays green offline.
 
 The tests restrict themselves to clearly marked test contacts
-(``sanka-migrate-connector-test-…@example.com`` with firstname ``Sanka Migrate Connector
+(``sanka-migrate-connector-test-…@example.com`` with firstname ``Sanka Connector
 Test``), poll for search-index visibility instead of assuming immediate
 consistency, and archive every record they create.
 """
@@ -33,7 +33,7 @@ pytestmark = pytest.mark.skipif(
     not ACCESS_TOKEN, reason="SANKA_MIGRATE_TEST_HUBSPOT_ACCESS_TOKEN is not set"
 )
 
-TEST_FIRSTNAME = "Sanka Migrate Connector Test"
+TEST_FIRSTNAME = "Sanka Connector Test"
 SEARCH_VISIBILITY_TIMEOUT_SECONDS = 90.0
 
 

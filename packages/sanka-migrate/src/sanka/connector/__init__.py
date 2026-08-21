@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Sanka Migrate Connector SDK — Apache-2.0 migration connector interfaces.
+"""Sanka Connector SDK — Apache-2.0 migration connector interfaces.
 
 Connectors implement the base protocols (:class:`SourceConnector`,
 :class:`DestinationConnector`) plus any optional capability protocols, and

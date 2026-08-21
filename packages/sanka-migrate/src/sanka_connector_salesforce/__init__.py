@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Salesforce connector: a source role for Sanka Migrate migrations.
+"""Salesforce connector: a source role for Sanka migrations.
 
 Reads a Salesforce org through the REST API: sObject discovery and describes,
 exact record counts, an active-user owner directory, and keyset-paginated

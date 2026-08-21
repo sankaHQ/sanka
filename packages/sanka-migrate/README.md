@@ -1,6 +1,6 @@
 # sanka-migrate
 
-The [Sanka Migrate](https://github.com/sankaHQ/sanka) Runtime: the migration
+The [Sanka](https://github.com/sankaHQ/sanka) Runtime: the migration
 lifecycle (`create → inspect → plan → apply → verify`), planner, execution
 engine (batching, throttling, retries, checkpoints, resume, identity ledger),
 local state store, verification framework, and the `sanka-migrate` CLI.
@@ -10,11 +10,12 @@ first-party connectors retain **Apache-2.0** source licenses inside the same
 distribution. Commercial licenses are available from Sanka, Inc. for embedding
 the runtime without AGPL obligations.
 
-**Status: pre-release.** Migration-as-code specs (`sanka.runtime.spec`, YAML +
-programmatic, with env-reference resolution and secret-key rejection) and
-canonical plan hashing (`sanka.runtime.hashing`) are in place, together with
-the engine, state store, and CLI lifecycle commands. APIs may still change
-before the first stable release.
+**Status: alpha.** Version `0.1.0a2` is published on
+[PyPI](https://pypi.org/project/sanka-migrate/). Migration-as-code specs
+(`sanka.runtime.spec`, YAML + programmatic, with env-reference resolution and
+secret-key rejection) and canonical plan hashing (`sanka.runtime.hashing`) are
+in place, together with the engine, state store, and CLI lifecycle commands.
+APIs may still change before `1.0`.
 
 ## Python quick start
 
@@ -54,7 +55,7 @@ Advanced integrations can use the typed `sanka.runtime` modules directly.
 
 ## Public research and assessment
 
-The CLI also reads Sanka Migrate's cited, keyless research API and can submit
+The CLI also reads Sanka's cited, keyless research API and can submit
 a free migration assessment:
 
 ```bash
