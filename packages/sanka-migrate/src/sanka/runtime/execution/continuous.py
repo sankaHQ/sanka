@@ -67,9 +67,9 @@ FROZEN_TOTAL_SHORTFALL_WARNING = (
 
 BATCH_SAFETY_LIMIT_MESSAGE = "Continuous migration stopped after the batch safety limit."
 
-_ATTEMPT_SUPERSEDED_MESSAGE = "Sanka Migrate execution attempt was superseded."
+_ATTEMPT_SUPERSEDED_MESSAGE = "Sanka execution attempt was superseded."
 _ATTEMPT_SUPERSEDED_CODE = "SANKA_MIGRATE_EXECUTION_ATTEMPT_SUPERSEDED"
-_JOB_SUPERSEDED_MESSAGE = "Sanka Migrate execution job was superseded."
+_JOB_SUPERSEDED_MESSAGE = "Sanka execution job was superseded."
 _JOB_SUPERSEDED_CODE = "SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED"
 
 _FAILURE_MESSAGE_LIMIT = 500
@@ -212,7 +212,7 @@ def reopen_incomplete_routes(
             cursor = page.source_record_ids[-1]
         if not cursor and require_checkpoint:
             raise ExecutionFault(
-                "The incomplete Sanka Migrate route has no safe keyset checkpoint.",
+                "The incomplete Sanka route has no safe keyset checkpoint.",
                 code="SANKA_MIGRATE_SOURCE_CHECKPOINT_MISSING",
             )
         if cursor:
@@ -671,7 +671,7 @@ def _validated_scope(scope: ExecutionScope, entry: JournalEntry | None) -> Execu
     saved = entry.scope if entry is not None else None
     if entry is not None and saved is None:
         raise ExecutionFault(
-            "A complete Sanka Migrate route manifest is required before continuous execution.",
+            "A complete Sanka route manifest is required before continuous execution.",
             code="SANKA_MIGRATE_ROUTE_MANIFEST_MISSING",
         )
     if saved is None:
@@ -680,17 +680,17 @@ def _validated_scope(scope: ExecutionScope, entry: JournalEntry | None) -> Execu
     saved_manifest = canonical_route_manifest([dict(row) for row in saved.route_manifest])
     if current_manifest != saved_manifest:
         raise ExecutionFault(
-            "The saved Sanka Migrate mapping route manifest does not match the queued job.",
+            "The saved Sanka mapping route manifest does not match the queued job.",
             code="SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED",
         )
     if list(scope.selected_route_keys) != list(saved.selected_route_keys):
         raise ExecutionFault(
-            "The Sanka Migrate execution route selection changed after the job was queued.",
+            "The Sanka execution route selection changed after the job was queued.",
             code="SANKA_MIGRATE_EXECUTION_ROUTE_CHANGED",
         )
     if dict(scope.route_high_water_marks) != dict(saved.route_high_water_marks):
         raise ExecutionFault(
-            "The saved Sanka Migrate route high-water marks do not match the reviewed routes.",
+            "The saved Sanka route high-water marks do not match the reviewed routes.",
             code="SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID",
         )
     return scope

@@ -1,6 +1,6 @@
 # sanka-migrate
 
-The [Sanka Migrate](https://github.com/sankaHQ/sanka) Runtime: the migration
+The [Sanka](https://github.com/sankaHQ/sanka) Runtime: the migration
 lifecycle (`create → inspect → plan → apply → verify`), planner, execution
 engine (batching, throttling, retries, checkpoints, resume, identity ledger),
 local state store, verification framework, and the `sanka-migrate` CLI.
@@ -55,7 +55,7 @@ Advanced integrations can use the typed `sanka.runtime` modules directly.
 
 ## Public research and assessment
 
-The CLI also reads Sanka Migrate's cited, keyless research API and can submit
+The CLI also reads Sanka's cited, keyless research API and can submit
 a free migration assessment:
 
 ```bash

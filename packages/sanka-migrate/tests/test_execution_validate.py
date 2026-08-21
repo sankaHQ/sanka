@@ -372,7 +372,7 @@ def test_validation_rejection_falls_back_to_the_production_mapping_code() -> Non
 
 def test_validation_rejection_keeps_structured_codes_and_filters_details() -> None:
     error = MappingError(
-        "No reviewed Sanka Migrate value-map predicate matched the source record.",
+        "No reviewed Sanka value-map predicate matched the source record.",
         code="SANKA_MIGRATE_VALUE_MAP_UNMATCHED",
         details={
             "sourceField": "Account.Stage",
@@ -395,7 +395,7 @@ def test_validation_rejection_keeps_structured_codes_and_filters_details() -> No
     assert "sourceValue" not in rejection
     assert validation_reason(rejection) == {
         "code": "SANKA_MIGRATE_VALUE_MAP_UNMATCHED",
-        "message": "No reviewed Sanka Migrate value-map predicate matched the source record.",
+        "message": "No reviewed Sanka value-map predicate matched the source record.",
         "sourceField": "Account.Stage",
         "targetField": "stage",
     }

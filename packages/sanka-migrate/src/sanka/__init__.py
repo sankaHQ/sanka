@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The public Sanka Migrate Python facade.
+"""The public Sanka Python facade.
 
 Install the ``sanka-migrate`` distribution, then start here::
 

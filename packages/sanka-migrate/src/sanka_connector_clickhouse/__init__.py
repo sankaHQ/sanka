@@ -11,7 +11,7 @@ added with ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` as ``Nullable``.
 
 Engine choice is deliberate: when the run's
 :class:`sanka.connector.WriteOptions` declare identity fields, tables are
-created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Sanka Migrate's
+created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Sanka's
 engine guarantees at-least-once writes reconciled against an identity ledger,
 so a re-applied migration inserts a fresh *version* of each row rather than
 mutating in place — exactly the contract ReplacingMergeTree implements by
@@ -268,7 +268,7 @@ def _error_codes(exc: Exception) -> set[int]:
 
 
 def _map_error(exc: Exception, *, action: str) -> ConnectorError:
-    """Map a clickhouse-connect exception onto the Sanka Migrate error taxonomy."""
+    """Map a clickhouse-connect exception onto the Sanka error taxonomy."""
     message = f"clickhouse {action} failed: {exc}"
     codes = _error_codes(exc)
     text = str(exc)

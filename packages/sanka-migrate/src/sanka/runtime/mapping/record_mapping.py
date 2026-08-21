@@ -211,7 +211,7 @@ def _apply_value_map(
         return matches[0].value
     if len(matches) > 1:
         raise MappingError(
-            "More than one Sanka Migrate value-map predicate matched the source record.",
+            "More than one Sanka value-map predicate matched the source record.",
             code="SANKA_MIGRATE_VALUE_MAP_AMBIGUOUS",
         )
     if field.unmapped_value_policy == "preserve":
@@ -219,7 +219,7 @@ def _apply_value_map(
     if field.unmapped_value_policy == "omit":
         return _OMIT_MAPPED_VALUE
     raise MappingError(
-        "No reviewed Sanka Migrate value-map predicate matched the source record.",
+        "No reviewed Sanka value-map predicate matched the source record.",
         code="SANKA_MIGRATE_VALUE_MAP_UNMATCHED",
     )
 
@@ -277,7 +277,7 @@ def apply_transform(value: Any, transform_rule: str | None) -> Any:
             default=str,
         )
     raise MappingError(
-        f"Unsupported Sanka Migrate transform rule: {rule}",
+        f"Unsupported Sanka transform rule: {rule}",
         code="SANKA_MIGRATE_TRANSFORM_UNSUPPORTED",
     )
 

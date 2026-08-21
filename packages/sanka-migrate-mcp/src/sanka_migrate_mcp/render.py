@@ -142,7 +142,7 @@ def rate_limited_result(error: Any) -> dict[str, Any]:
     return {
         "rate_limited": True,
         "retry_after_seconds": getattr(error, "retry_after_seconds", None),
-        "message": getattr(error, "message", "Sanka Migrate API rate limit reached."),
+        "message": getattr(error, "message", "Sanka API rate limit reached."),
     }
 
 
@@ -168,12 +168,12 @@ def _attribution(value: Any) -> str:
     if isinstance(value, str) and value:
         return value
     if isinstance(value, dict):
-        name = value.get("name") or "Sanka Migrate Research"
+        name = value.get("name") or "Sanka Research"
         url = value.get("url") or "https://sanka.com/docs/migrate/"
         license_name = value.get("license") or "CC BY 4.0"
         return f"{name} — {url} ({license_name}). Cite the vendor source_url for each claim."
     return (
-        "Sanka Migrate Research — https://sanka.com/docs/migrate/ (CC BY 4.0). "
+        "Sanka Research — https://sanka.com/docs/migrate/ (CC BY 4.0). "
         "Cite the vendor source_url for each claim."
     )
 

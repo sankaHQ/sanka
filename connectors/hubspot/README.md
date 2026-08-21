@@ -1,6 +1,6 @@
 # HubSpot connector (bundled)
 
-HubSpot connector for Sanka Migrate, registering both roles under the `hubspot` type.
+HubSpot connector for Sanka, registering both roles under the `hubspot` type.
 This is a port of the HubSpot migration adapter that runs Sanka's production
 migrations — the batch, retry, conflict, and provisioning semantics below are
 the production semantics, not a reimplementation.

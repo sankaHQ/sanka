@@ -33,7 +33,7 @@ def test_eol_is_bounded_localized_and_keeps_terminal_attribution() -> None:
         ],
         "dataset": {"name": "eol", "version": "test"},
         "attribution": {
-            "name": "Sanka Migrate Research",
+            "name": "Sanka Research",
             "url": "https://sanka.com/docs/migrate/eol/",
             "license": "CC BY 4.0",
         },

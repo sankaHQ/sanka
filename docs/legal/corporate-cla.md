@@ -1,4 +1,4 @@
-# Sanka Migrate Corporate Contributor License Agreement
+# Sanka Corporate Contributor License Agreement
 
 > **INACTIVE PLANNING DRAFT — not part of the current contribution terms.**
 > No CLA is required, no signature process is active, and this document is not
@@ -6,7 +6,7 @@
 > apply prospectively only after explicit acceptance.
 
 This version of the Agreement allows an entity (the "Corporation") to submit
-Contributions to **Sanka, Inc.** ("Sanka") for the Sanka Migrate project, to
+Contributions to **Sanka, Inc.** ("Sanka") for the Sanka project, to
 authorize Contributions submitted by its designated employees to Sanka, and
 to grant copyright and patent licenses thereto.
 
@@ -21,7 +21,7 @@ control with that entity are considered to be a single Contributor.
 modifications or additions to an existing work, that is intentionally
 submitted by You to Sanka for inclusion in, or documentation of, any of the
 products owned or managed by Sanka (the "**Work**"), including without
-limitation the software repositories of the Sanka Migrate project. For the purposes
+limitation the software repositories of the Sanka project. For the purposes
 of this definition, "submitted" means any form of electronic, verbal, or
 written communication sent to Sanka or its representatives, including but not
 limited to communication on electronic mailing lists, source code control

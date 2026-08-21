@@ -2,7 +2,7 @@
 [project]
 name = "sanka-migrate-workspace"
 version = "0.0.0"
-description = "Development workspace for the Sanka Migrate open-source monorepo"
+description = "Development workspace for the Sanka open-source monorepo"
 requires-python = ">=3.12"
 
 [tool.uv]

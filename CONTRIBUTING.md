@@ -1,4 +1,4 @@
-# Contributing to Sanka Migrate
+# Contributing to Sanka
 
 Thanks for your interest! Please keep changes focused, include tests where
 behavior changes, and follow the repository's license boundaries.

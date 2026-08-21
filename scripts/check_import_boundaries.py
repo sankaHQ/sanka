@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enforce Sanka Migrate's license/import boundaries.
+"""Enforce Sanka's license/import boundaries.
 
 Rules (see docs/ARCHITECTURE.md):
 

@@ -92,7 +92,7 @@ class HubSpotSource:
     ) -> RecordPage:
         if source_filter is not None:
             raise UnsupportedFeatureError(
-                "HubSpot source filters are not supported by Sanka Migrate yet.",
+                "HubSpot source filters are not supported by Sanka yet.",
                 details={"code": "SANKA_MIGRATE_SOURCE_FILTER_UNSUPPORTED"},
             )
         async with hubspot_errors():

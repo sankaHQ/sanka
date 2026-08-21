@@ -1,12 +1,12 @@
-# Sanka Migrate — The Migration API
+# Sanka — The Migration API
 
 > Plan, execute, and verify migrations between databases, warehouses, files, and business systems — with one API.
 
-Sanka Migrate turns migration into a reusable developer primitive. Instead of
+Sanka turns migration into a reusable developer primitive. Instead of
 writing a one-off script for every migration, you (or your AI agent) point it at
-a source and a target; Sanka Migrate inspects both sides, proposes a reviewable plan,
+a source and a target; Sanka inspects both sides, proposes a reviewable plan,
 executes it with checkpoints and retries, and verifies the result. Then it's
-**done** — Sanka Migrate is for finite migrations (move from A to B and finish), not
+**done** — Sanka is for finite migrations (move from A to B and finish), not
 continuous ETL.
 
 ## Current release status
@@ -29,7 +29,7 @@ connectors are exercised in CI against live databases, and the Salesforce and
 HubSpot connectors are ports of adapters used for production migrations at
 Sanka.
 
-## Why Sanka Migrate?
+## Why Sanka?
 
 Markdown → SQLite. CSV → PostgreSQL. PostgreSQL → ClickHouse. Salesforce →
 HubSpot. Every one of these is usually built as a custom project, yet they
@@ -39,7 +39,7 @@ all share the same workflow:
 Source → Inspect → Plan → Map / Transform → Transfer → Remediate → Verify → Target
 ```
 
-Sanka Migrate is that workflow as infrastructure, with the safety rules production
+Sanka is that workflow as infrastructure, with the safety rules production
 migrations actually need:
 
 - **Nothing changes during planning.** Inspection and planning are write-free
@@ -51,7 +51,7 @@ migrations actually need:
   checkpoints, and an identity ledger (source ID → destination ID) that makes
   re-running an interrupted migration converge instead of duplicating.
 - **Verification is first-class.** A migration isn't successful because the
-  transfer exited zero: Sanka Migrate reconciles source counts, the ledger, and
+  transfer exited zero: Sanka reconciles source counts, the ledger, and
   destination readback before calling it done.
 
 ## Quick start
@@ -216,11 +216,11 @@ default, not a requirement.
 
 ## For AI agents
 
-Sanka Migrate is built to be driven by agents safely: plans are structured, hashable
+Sanka is built to be driven by agents safely: plans are structured, hashable
 documents an agent can present for approval, and `apply` executes only the
 approved hash. The standalone Apache-2.0 `sanka-migrate-mcp` package exposes
 three credential-free, read-only research tools plus one explicit assessment
-write over the public Sanka Migrate API. It is deliberately separate from the
+write over the public Sanka API. It is deliberately separate from the
 AGPL runtime and can be configured after publication with:
 
 ```json
@@ -237,12 +237,12 @@ AGPL runtime and can be configured after publication with:
 The migration execution toolset remains part of the separately governed hosted
 API roadmap; this MCP server does not plan or execute migrations.
 
-## Open source vs hosted Sanka Migrate
+## Open source vs hosted solution
 
-Sanka Migrate follows an open-core model (AGPL core + permissive SDKs — we use
+Sanka follows an open-core model (AGPL core + permissive SDKs — we use
 Apache-2.0 for the SDK so it carries a patent grant):
 
-| | Sanka Migrate Open Source | [Hosted Sanka Migrate](https://sanka.com/migrate/) |
+| | Open source | [Hosted solution](https://sanka.com/migrate/) |
 |---|:---:|:---:|
 | Migration runtime, CLI, local state | ✅ | ✅ |
 | Bundled first-party connectors | ✅ | ✅ |

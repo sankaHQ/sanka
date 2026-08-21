@@ -1,4 +1,4 @@
-# Sanka Migrate release procedure
+# Sanka release procedure
 
 No package is published by a push or merge. Publishing is a manual GitHub
 Actions workflow, restricted to an exact version tag and protected by a GitHub

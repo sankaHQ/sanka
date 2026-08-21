@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Salesforce source connector.
 
-A faithful port of the production Salesforce → Sanka Migrate source adapter. Objects
+A faithful port of the production Salesforce → Sanka source adapter. Objects
 are discovered from the org's sObject catalog (queryable, non-deprecated
 types), inventoried with a REST describe plus ``SELECT COUNT()``, and read
 with keyset SOQL pagination on ``Id`` (``WHERE Id > cursor [AND Id <= bound]
@@ -91,7 +91,7 @@ def _record_count(payload: dict[str, Any]) -> int:
 
 
 class SalesforceSource:
-    """Reads a Salesforce org as a Sanka Migrate migration source."""
+    """Reads a Salesforce org as a Sanka migration source."""
 
     provider = "salesforce"
     binding_kind = "channel"
@@ -377,7 +377,7 @@ class SalesforceSource:
         # Salesforce can split a query response before the SOQL LIMIT when a
         # wide projection reaches its response-size boundary. In that case the
         # first response contains fewer than ``safe_limit`` rows while
-        # ``done`` is false and ``nextRecordsUrl`` is present. Sanka Migrate uses an Id
+        # ``done`` is false and ``nextRecordsUrl`` is present. Sanka uses an Id
         # keyset cursor instead of Salesforce's opaque locator, so advancing
         # from the last returned Id remains deterministic across retries.
         provider_has_more = payload.get("done") is False or bool(payload.get("nextRecordsUrl"))

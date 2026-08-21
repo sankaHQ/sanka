@@ -1155,7 +1155,7 @@ async def test_reconcile_properties_confirm_creates_missing() -> None:
     options = payload["options"]
     assert isinstance(options, list)
     assert [option["value"] for option in options] == ["true", "false"]  # type: ignore[index]
-    assert payload["description"] == "Migrated from IsActive with Sanka Migrate."
+    assert payload["description"] == "Migrated from IsActive with Sanka."
 
 
 def _pipeline_definition() -> PipelineDefinition:
@@ -1518,7 +1518,7 @@ def test_custom_object_schema_payload_includes_provided_properties() -> None:
     assert primary["fieldType"] == "text"
     assert primary["hasUniqueValue"] is True
     assert primary["displayOrder"] == 0
-    assert primary["description"] == "Migrated from OrderNumber with Sanka Migrate."
+    assert primary["description"] == "Migrated from OrderNumber with Sanka."
     assert priority["type"] == "bool"
     assert priority["fieldType"] == "booleancheckbox"
     assert priority["hasUniqueValue"] is False
@@ -1765,7 +1765,7 @@ async def test_retry_on_429_honors_retry_after_and_counts_metrics() -> None:
     result = await dest.write_record(
         credentials(),
         object_type="deals",
-        properties={"dealname": "Sanka Migrate"},
+        properties={"dealname": "Sanka"},
         options=write_options(),
     )
     assert result.status == "created"
@@ -1792,7 +1792,7 @@ async def test_429_exhausts_after_five_attempts() -> None:
         await dest.write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Sanka Migrate"},
+            properties={"dealname": "Sanka"},
             options=write_options(),
         )
     assert attempts == 5
@@ -1816,7 +1816,7 @@ async def test_client_error_is_not_retried() -> None:
         await dest.write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Sanka Migrate"},
+            properties={"dealname": "Sanka"},
             options=write_options(),
         )
     assert attempts == 1
@@ -1859,7 +1859,7 @@ async def test_transient_5xx_retried_only_for_identity_bearing_writes() -> None:
         await destination(respond_create, clock=FakeClock()).write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Sanka Migrate"},
+            properties={"dealname": "Sanka"},
             options=write_options(),
         )
     assert attempts == 1
@@ -1903,7 +1903,7 @@ async def test_423_uses_fixed_two_second_backoff() -> None:
     result = await dest.write_record(
         credentials(),
         object_type="deals",
-        properties={"dealname": "Sanka Migrate"},
+        properties={"dealname": "Sanka"},
         options=write_options(),
     )
     assert result.status == "created"
@@ -1923,7 +1923,7 @@ async def test_min_interval_paces_consecutive_requests() -> None:
         await dest.write_record(
             credentials(),
             object_type="deals",
-            properties={"dealname": "Sanka Migrate"},
+            properties={"dealname": "Sanka"},
             options=write_options(),
         )
     assert clock.sleeps == [0.25]

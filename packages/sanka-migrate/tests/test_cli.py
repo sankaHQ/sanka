@@ -313,7 +313,7 @@ class _FakeResearchClient:
             ],
             "dataset": {"name": "eol", "version": "2026-08-19.eol0001"},
             "attribution": {
-                "name": "Sanka Migrate Research",
+                "name": "Sanka Research",
                 "url": "https://sanka.com/docs/migrate/eol/",
                 "license": "CC BY 4.0",
             },
@@ -345,7 +345,7 @@ def test_research_cli_renders_citations_and_attribution(
     assert "Support ends [1]" in output
     assert "https://vendor.example/eol  (verified 2026-08-09)" in output
     assert output.rstrip().endswith(
-        "Sanka Migrate Research — https://sanka.com/docs/migrate/eol/  (CC BY 4.0)"
+        "Sanka Research — https://sanka.com/docs/migrate/eol/  (CC BY 4.0)"
     )
     assert fake.calls == [
         (

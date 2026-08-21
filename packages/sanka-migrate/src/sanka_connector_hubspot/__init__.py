@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HubSpot connector: source + destination roles for Sanka Migrate migrations.
+"""HubSpot connector: source + destination roles for Sanka migrations.
 
 A port of Sanka's production HubSpot migration adapter. Authentication is a
 bearer token in ``Credentials.access_token`` (HubSpot private-app token, or

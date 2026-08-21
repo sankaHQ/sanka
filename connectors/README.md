@@ -1,4 +1,4 @@
-# Sanka Migrate connectors
+# Sanka connectors
 
 First-party connector documentation and tests live here, one directory per
 provider, all licensed **Apache-2.0**. Their source modules are bundled into the

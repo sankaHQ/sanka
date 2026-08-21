@@ -1,6 +1,6 @@
-# Sanka Migrate MCP
+# Sanka MCP
 
-Credential-free MCP tools for Sanka Migrate's public software lifecycle,
+Credential-free MCP tools for Sanka's public software lifecycle,
 cost, and comparison research, plus the free migration assessment handoff.
 
 > **Alpha:** version `0.1.0a2` is published on
@@ -23,7 +23,7 @@ Run the standalone server with `uvx`:
 ```
 
 No API key is required. Set `SANKA_MIGRATE_API_BASE` only when testing an
-alternate Sanka Migrate API deployment; the default is
+alternate Sanka API deployment; the default is
 `https://api.sanka.com/v2/migrate`.
 
 ## Tools

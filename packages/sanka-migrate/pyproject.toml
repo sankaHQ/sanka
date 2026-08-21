@@ -1,7 +1,7 @@
 [project]
 name = "sanka-migrate"
 version = "0.1.0a2"
-description = "Sanka Migrate — connect, plan, execute, and verify finite migrations between databases, warehouses, files, and business systems"
+description = "Sanka — connect, plan, execute, and verify finite migrations between databases, warehouses, files, and business systems"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only AND Apache-2.0"

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Mapping and relationship semantics for the migration planner and engine.
 
-Faithful port of the production Sanka Migrate mapping modules: reviewed field
+Faithful port of the production Sanka mapping modules: reviewed field
 mappings and scalar transforms, heuristic auto-mapping candidates, owner
 (assignee) resolution, and deferred relationship linking. Behavior —
 transform rules, scoring weights, thresholds, tie-breaking, and route-key

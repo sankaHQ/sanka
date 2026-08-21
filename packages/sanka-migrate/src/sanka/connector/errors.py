@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Structured error taxonomy for Sanka Migrate connectors.
+"""Structured error taxonomy for Sanka connectors.
 
 Connectors raise :class:`ConnectorError` subclasses instead of leaking raw
 provider exceptions. The engine keys retry policy off ``category`` and

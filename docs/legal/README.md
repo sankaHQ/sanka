@@ -10,7 +10,7 @@ active.
 |---|---|
 | [`individual-cla.md`](individual-cla.md) | Inactive planning draft; not part of the current contribution terms |
 | [`corporate-cla.md`](corporate-cla.md) | Inactive planning draft; not part of the current contribution terms |
-| [`commercial-license.md`](commercial-license.md) | Commercial license for the AGPL-3.0-only Sanka Migrate Runtime — alternative terms for organizations that cannot accept AGPL obligations |
+| [`commercial-license.md`](commercial-license.md) | Commercial license for the AGPL-3.0-only Sanka Runtime — alternative terms for organizations that cannot accept AGPL obligations |
 
 ## Current contribution policy
 

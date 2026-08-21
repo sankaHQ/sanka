@@ -261,7 +261,7 @@ async def _read_route_page(
     if upper_bound is not None:
         if not isinstance(source, SupportsBoundedReads):
             raise ExecutionFault(
-                "Source provider cannot resume the frozen Sanka Migrate record set.",
+                "Source provider cannot resume the frozen Sanka record set.",
                 code="SANKA_MIGRATE_SOURCE_HIGH_WATER_MARK_UNSUPPORTED",
             )
         return await source.read_records_bounded(
@@ -448,7 +448,7 @@ async def run_batch(
             route_candidate_ids = candidate_ids_by_route.get(route.route_key)
             if route_candidate_ids is None:
                 raise ExecutionFault(
-                    "Sanka Migrate execution includes a route outside the exact-ID scope.",
+                    "Sanka execution includes a route outside the exact-ID scope.",
                     code="SANKA_MIGRATE_EXECUTION_ROUTE_INVALID",
                     details={"routeKey": route.route_key},
                 )
@@ -834,7 +834,7 @@ async def run_batch(
         saved_result_count = await host.ledger.upsert_results(new_outcomes)
         if saved_result_count != len(new_outcomes):
             raise ExecutionFault(
-                "Sanka Migrate did not persist every destination result in the current batch.",
+                "Sanka did not persist every destination result in the current batch.",
                 code="SANKA_MIGRATE_RECORD_RESULT_BULK_SAVE_INCOMPLETE",
                 details={
                     "expectedCount": len(new_outcomes),

@@ -1,4 +1,4 @@
-# Sanka Migrate Commercial License Agreement
+# Sanka Commercial License Agreement
 
 > **DRAFT v0.1 (2026-08-15) — template for review by Sanka, Inc. counsel.
 > This document is not an offer and is not in effect. Bracketed items are
@@ -6,12 +6,12 @@
 > agreement over an AGPL-3.0-only core, with variable business terms pushed to
 > an Order Form.
 
-This Sanka Migrate Commercial License Agreement (the "**Agreement**") is entered into
+This Sanka Commercial License Agreement (the "**Agreement**") is entered into
 between **Sanka, Inc.** ("**Sanka**") and the customer identified on the
 applicable Order Form ("**Licensee**"), effective as of the effective date
 stated there (the "**Effective Date**").
 
-**Background.** Sanka publishes the Sanka Migrate Runtime under the GNU
+**Background.** Sanka publishes the Sanka Runtime under the GNU
 Affero General Public License v3.0 only (AGPL-3.0-only). This Agreement
 grants Licensee the right to use the portions that Sanka owns or otherwise has
 permission to relicense under alternative commercial terms, without the
@@ -64,7 +64,7 @@ Products);
 
 (b) offer the Runtime, or a service whose primary value is the Runtime's
 migration functionality, as a hosted or managed service to third parties in a
-manner that competes with Sanka's Sanka Migrate Cloud offering;
+manner that competes with Sanka's hosted offering;
 
 (c) remove or alter copyright, license, or attribution notices in the
 Runtime; or
