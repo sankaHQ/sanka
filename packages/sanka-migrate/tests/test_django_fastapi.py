@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -58,7 +59,7 @@ def test_four_command_drf_to_fastapi_lifecycle(
     assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
     plan_output = capsys.readouterr().out
     assert "DRF → FastAPI Migration Plan" in plan_output
-    assert "Migration readiness: 100%" in plan_output
+    assert "Bridge generation readiness: 100%" in plan_output
 
     plan = load_fastapi_plan(drf_project)
     assert main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
@@ -96,10 +97,29 @@ def test_four_command_drf_to_fastapi_lifecycle(
     verify_output = capsys.readouterr().out
     assert "10 / 10 generated" in verify_output
     assert "8 / 8 read-only routes compatible" in verify_output
-    assert "Compatibility verification: complete" in verify_output
+    assert "Compatibility bridge verification: complete" in verify_output
 
     assert main(["apply", "--root", str(drf_project)]) == 1
     assert "output is not empty" in capsys.readouterr().err
 
     assert main(["apply", "--root", str(drf_project), "--plan-hash", "sha256:wrong"]) == 1
     assert "does not match current plan" in capsys.readouterr().err
+
+    unsupported = replace(
+        scan,
+        routes=(replace(scan.routes[0], supported=False), *scan.routes[1:]),
+        scan_hash="",
+    ).with_hash()
+    (drf_project / ".sanka" / "scan.json").write_text(
+        json.dumps(unsupported.to_dict()),
+        encoding="utf-8",
+    )
+    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert main(["apply", "--root", str(drf_project), "--force"]) == 0
+    capsys.readouterr()
+
+    assert main(["verify", "--root", str(drf_project), "--no-http"]) == 1
+    incomplete_output = capsys.readouterr().out
+    assert "9 / 10 generated" in incomplete_output
+    assert "Needs adaptation" in incomplete_output
+    assert "Compatibility bridge verification: FAILED" in incomplete_output

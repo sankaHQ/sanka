@@ -1,7 +1,8 @@
 # Sanka — Migrate Django REST Framework APIs to FastAPI
 
 > Inspect a DRF application, generate a reviewable FastAPI migration plan,
-> create a compatibility application, and verify observable API parity.
+> create a compatibility application, and verify route integrity plus selected
+> HTTP behavior.
 
 Sanka turns migration into a reusable developer primitive. Its first
 application recipe moves Django REST Framework APIs toward FastAPI through a
@@ -16,7 +17,7 @@ cd my-django-app
 
 sanka scan
 sanka plan --to fastapi
-sanka apply --plan-hash sha256:REVIEWED_PLAN_HASH
+sanka apply
 sanka verify
 ```
 
@@ -28,7 +29,7 @@ connectors for databases, warehouses, files, Salesforce, and HubSpot.
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| DRF → FastAPI recipe | Alpha compatibility mode: resolved-route scan, hashed plan, separate FastAPI output, manifest verification, and safe read-only differential probes |
+| DRF → FastAPI recipe | Source preview in this repository; not included in the current PyPI `0.1.0a3`. Compatibility mode provides resolved-route scan, a hashed plan, separate FastAPI output, manifest verification, and safe read-only differential probes |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
@@ -107,7 +108,7 @@ routers and `@action` decorators:
 sanka scan                         # writes .sanka/scan.json
 sanka scan --json                  # also prints the application IR
 sanka plan --to fastapi            # writes a reviewable, hashed plan
-sanka apply --plan-hash sha256:…   # writes only to .sanka/output/fastapi
+sanka apply                         # writes only to .sanka/output/fastapi
 sanka verify                       # integrity + route parity + safe HTTP probes
 ```
 

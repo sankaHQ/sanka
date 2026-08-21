@@ -16,7 +16,7 @@ python -m pip install --pre sanka-migrate
 
 sanka scan
 sanka plan --to fastapi
-sanka apply --plan-hash sha256:REVIEWED_PLAN_HASH
+sanka apply
 sanka verify
 ```
 
@@ -54,6 +54,10 @@ same machine-readable application IR for agents and other tools.
 The plan classifies every discovered route, records the compatibility strategy,
 lists retained components and manual adaptations, and binds the result to the
 exact scan hash. The canonical artifact is `.sanka/plan-fastapi.json`.
+
+`sanka apply` verifies the current scan and canonical plan hashes. For an
+approval workflow or CI gate, pass the exact reviewed hash explicitly with
+`sanka apply --plan-hash sha256:...`.
 
 Planning never modifies application source or destination code.
 

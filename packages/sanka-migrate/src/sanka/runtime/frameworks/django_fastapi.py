@@ -239,6 +239,7 @@ def verify_fastapi_migration(
     if manifest.get("plan_hash") != plan.plan_hash:
         raise FrameworkMigrationError("generated output does not match the reviewed plan")
     expected = {route.key for route in plan.routes if route.automatic}
+    needs_adaptation = sorted(route.key for route in plan.routes if not route.automatic)
     actual = {
         f"{str(route['method']).upper()} {route['path']}" for route in manifest.get("routes", [])
     }
@@ -255,13 +256,14 @@ def verify_fastapi_migration(
         )
     failed_probes = [probe for probe in probes if not probe["ok"]]
     return {
-        "ok": not missing and not extra and not failed_probes,
+        "ok": not missing and not extra and not failed_probes and not needs_adaptation,
         "routes": {
             "scanned": len(scan.routes),
             "planned": len(plan.routes),
             "generated": len(actual),
             "missing": missing,
             "extra": extra,
+            "needs_adaptation": needs_adaptation,
         },
         "http": {
             "safe_routes": len(

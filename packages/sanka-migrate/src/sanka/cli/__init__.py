@@ -623,7 +623,7 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
             print(f"  {risk.severity.upper()} {risk.code}{location}")
             print(f"    {risk.message}")
     print()
-    print(f"Migration readiness: {plan.readiness:.0%}")
+    print(f"Bridge generation readiness: {plan.readiness:.0%}")
     print(f"plan hash: {plan.plan_hash}")
     print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
 
@@ -632,7 +632,7 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
     routes = report["routes"]
     http = report["http"]
     verdict = "complete" if report["ok"] else "FAILED"
-    print("Verifying DRF → FastAPI compatibility migration...")
+    print("Verifying the DRF → FastAPI compatibility bridge...")
     print()
     print("Routes")
     print(f"  {routes['generated']} / {routes['planned']} generated")
@@ -646,6 +646,10 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
         print("Missing routes")
         for route in routes["missing"]:
             print(f"  - {route}")
+    if routes["needs_adaptation"]:
+        print("Needs adaptation")
+        for route in routes["needs_adaptation"]:
+            print(f"  - {route}")
     if http["failed"]:
         print("HTTP mismatches")
         for probe in http["failed"]:
@@ -654,7 +658,7 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
                 f" source={probe['source_status']} target={probe['target_status']}"
             )
     print()
-    print(f"Compatibility verification: {verdict}")
+    print(f"Compatibility bridge verification: {verdict}")
     print(f"plan hash: {report['plan_hash']}")
 
 

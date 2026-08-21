@@ -26,11 +26,12 @@ Run the four-command compatibility migration from a Django repository root:
 ```bash
 sanka scan
 sanka plan --to fastapi
-sanka apply --plan-hash sha256:REVIEWED_PLAN_HASH
+sanka apply
 sanka verify
 ```
 
-Sanka resolves the live Django URL graph, including DRF router routes and
+This recipe is a source preview and is not part of the currently published
+PyPI `0.1.0a3` artifacts. Sanka resolves the live Django URL graph, including DRF router routes and
 custom actions. Apply creates a separate FastAPI compatibility application in
 `.sanka/output/fastapi`; it does not overwrite the Django source. The generated
 route graph forwards to the current DRF handlers in-process so teams can prove
