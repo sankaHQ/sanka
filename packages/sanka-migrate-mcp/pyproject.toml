@@ -1,6 +1,6 @@
 [project]
 name = "sanka-migrate-mcp"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Credential-free MCP tools for Sanka research and assessments"
 readme = "README.md"
 requires-python = ">=3.12"

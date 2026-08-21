@@ -10,7 +10,7 @@ first-party connectors retain **Apache-2.0** source licenses inside the same
 distribution. Commercial licenses are available from Sanka, Inc. for embedding
 the runtime without AGPL obligations.
 
-**Status: alpha.** Version `0.1.0a2` is published on
+**Status: alpha.** Published releases are available on
 [PyPI](https://pypi.org/project/sanka-migrate/). Migration-as-code specs
 (`sanka.runtime.spec`, YAML + programmatic, with env-reference resolution and
 secret-key rejection) and canonical plan hashing (`sanka.runtime.hashing`) are
