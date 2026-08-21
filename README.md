@@ -13,8 +13,8 @@ continuous ETL.
 
 | Surface | Current status and authority |
 |---|---|
-| Runtime and CLI | Alpha `0.1.0a2`, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| Standalone MCP server | Alpha `0.1.0a2`, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
+| Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
+| Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
 | Source repository | Private until the separately approved open-source visibility launch |

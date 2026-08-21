@@ -1162,7 +1162,7 @@ wheels = [
 
 [[package]]
 name = "sanka-migrate"
-version = "0.1.0a2"
+version = "0.1.0a3"
 source = { editable = "packages/sanka-migrate" }
 dependencies = [
     { name = "clickhouse-connect" },
@@ -1181,7 +1181,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-migrate-mcp"
-version = "0.1.0a2"
+version = "0.1.0a3"
 source = { editable = "packages/sanka-migrate-mcp" }
 dependencies = [
     { name = "httpx" },

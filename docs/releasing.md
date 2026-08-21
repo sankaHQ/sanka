@@ -1,15 +1,18 @@
 # Sanka release procedure
 
 No package is published by a push or merge. Publishing is a manual GitHub
-Actions workflow, restricted to an exact version tag and protected by a GitHub
-environment approval. The repository rename/public flip is a separate gate.
+Actions workflow, restricted to an exact version tag, a GitHub environment,
+and an explicit release flag. The repository rename/public flip is a separate
+gate.
 
 ## Current release state
 
-- Production PyPI: `sanka-migrate==0.1.0a2` and
-  `sanka-migrate-mcp==0.1.0a2`.
-- Source release: tag `v0.1.0a2`; each package's `pyproject.toml` is the source
-  version authority, and PyPI is the publication authority.
+- Production PyPI: the live [`sanka-migrate`](https://pypi.org/project/sanka-migrate/)
+  and [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) project
+  pages are the publication authority.
+- Source candidate: both package `pyproject.toml` files define `0.1.0a3`; the
+  matching `v0.1.0a3` tag is the source release authority after the reviewed
+  commit is merged and tagged.
 - Hosted API: `https://api.sanka.com/v2/migrate`; the live
   `/research/datasets` response is the availability authority.
 - Repository visibility: private until the separately approved open-source
@@ -35,7 +38,7 @@ runtime namespace.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a2 tag
+uv run python scripts/check_release_tag.py v0.1.0a3 tag
 ```
 
 `make build-release` creates wheels and sdists, checks licenses, project URLs,
@@ -44,19 +47,19 @@ dependencies, entry points, and the complete artifact set, then runs
 `release/SHA256SUMS`; the publication workflow retains both beside the staged
 artifacts. It does not upload anything.
 
-## One-time external configuration (separately approved)
+## External configuration (separately approved)
 
 1. Verify the completed repository rename to `sankaHQ/sanka`, GitHub's redirect,
    and the matching workspace repository manifest entry.
-2. Configure one pending PyPI trusted publisher for `sanka-migrate`. The owner
-   must be `sankaHQ`, repository `sanka`, workflow `publish.yml`, and environment
-   `pypi`. Configure the matching TestPyPI publisher with environment `testpypi`.
-3. Configure the `sanka-migrate-mcp` pending publisher with the same owner,
-   repository, and workflow. Use `pypi-sanka-migrate-mcp` on PyPI and
-   `testpypi-sanka-migrate-mcp` on TestPyPI until each first upload converts the
-   pending identity into an active project publisher.
-4. Create all referenced GitHub environments and limit deployment to `v*` tags.
-   Keep repository variables `SANKA_MIGRATE_PUBLISH_ENABLED` and
+2. Configure the same trusted-publisher identity on both PyPI projects: owner
+   `sankaHQ`, repository `sanka`, workflow `publish.yml`, and environment
+   `pypi`. Configure the same shared TestPyPI identity on both TestPyPI projects
+   with environment `testpypi`.
+3. Keep only the shared `pypi` and `testpypi` GitHub environments and limit
+   deployment to `v*` tags. Remove temporary first-publication package
+   environments and their corresponding publisher identities after verifying
+   the shared identities on both indexes.
+4. Keep repository variables `SANKA_MIGRATE_PUBLISH_ENABLED` and
    `SANKA_MIGRATE_BOOTSTRAP_ENABLED` absent or set to `false`; neither normal nor
    bootstrap publish jobs can run without its corresponding exact value `true`.
 5. Protect `main`, require the `check` job, enable dependency alerts, secret
@@ -72,11 +75,13 @@ artifacts. It does not upload anything.
    cutover is pending.
 
 The `sankaHQ` organization currently uses GitHub Team. GitHub does not offer
-required environment reviewers for private repositories on that plan. After
-the separately approved public-repository flip, require an authorized human
-reviewer on both environments, prevent self-review, verify those rules with a
-non-publishing test dispatch, and only then set
-`SANKA_MIGRATE_PUBLISH_ENABLED=true`.
+required environment reviewers for private repositories on that plan. A
+private prerelease therefore requires explicit authorization of the exact tag
+and artifact hashes; enable `SANKA_MIGRATE_PUBLISH_ENABLED=true` only for that
+approved dispatch and remove it immediately afterward. After the separately
+approved public-repository flip, require an authorized human reviewer on both
+environments, prevent self-review, and verify those rules with a non-publishing
+test dispatch.
 
 ## First-release bootstrap
 
@@ -100,9 +105,9 @@ production-PyPI request. Repeat with target `bootstrap-pypi` only after a
 separate approval of the exact tag and hashes.
 
 After both projects exist, add `publish.yml` plus the common `testpypi` or
-`pypi` environment to the MCP project, verify the common identity on both
-projects, then remove the temporary MCP publishers and environments behind a
-separate approval gate. Future releases use only the steady-state `testpypi`
+`pypi` environment to both projects, verify the common identity on both
+indexes, then remove all temporary publishers and environments behind an
+explicit approval gate. Future releases use only the steady-state `testpypi`
 and `pypi` targets.
 
 ## Publication gate
@@ -111,15 +116,18 @@ and `pypi` targets.
    `uv.lock`.
 2. Run `make check` and `make build-release` on the exact commit.
 3. Create and push `v<version>` only after review.
-4. Confirm the environment-reviewer rules are active and repository variable
-   `SANKA_MIGRATE_PUBLISH_ENABLED` is exactly `true`.
+4. Confirm the exact tag and artifact hashes have human authorization. For a
+   private prerelease, set `SANKA_MIGRATE_PUBLISH_ENABLED=true` only for the
+   approved dispatch; after the public flip, also require the environment
+   reviewer rules.
 5. Dispatch **Publish Python packages** while the workflow is checked out at
    that tag. Enter the exact confirmation phrase for TestPyPI first.
 6. Install every artifact from TestPyPI in a clean environment and run the CLI
    and connector-discovery smoke tests.
-7. Obtain a new approval for the exact tag and artifact hashes, then dispatch
-   the PyPI target. PyPI releases are immutable; never overwrite or reuse a
-   version.
+7. Confirm the same authorized tag and artifact hashes, then dispatch the PyPI
+   target. PyPI releases are immutable; never overwrite or reuse a version.
+8. Remove `SANKA_MIGRATE_PUBLISH_ENABLED` immediately after the production
+   dispatch finishes.
 
 The workflow uses OIDC trusted publishing. No long-lived PyPI token belongs in
 GitHub secrets, local environment files, or repository history.

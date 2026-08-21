@@ -3,7 +3,7 @@
 Credential-free MCP tools for Sanka's public software lifecycle,
 cost, and comparison research, plus the free migration assessment handoff.
 
-> **Alpha:** version `0.1.0a2` is published on
+> **Alpha:** releases are published on
 > [PyPI](https://pypi.org/project/sanka-migrate-mcp/). MCP tool contracts may
 > still change before `1.0`.
 

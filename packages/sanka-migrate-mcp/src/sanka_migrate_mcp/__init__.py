@@ -5,4 +5,4 @@ from sanka_migrate_mcp.client import SankaMigrateApiClient, SankaMigrateApiError
 
 __all__ = ["SankaMigrateApiClient", "SankaMigrateApiError"]
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
