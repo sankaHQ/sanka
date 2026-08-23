@@ -1,0 +1,44 @@
+name: Bench
+
+# Sanka Migration Bench regression gate: generate candidates from this
+# revision and grade them with the tool-neutral evaluator. sanka-bench is a
+# private repository, so the job needs a fine-grained PAT with read access to
+# sankaHQ/sanka-bench stored as the SANKA_BENCH_TOKEN secret; without the
+# secret the workflow reports a skip instead of failing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check bench token
+        id: token
+        env:
+          HAVE_TOKEN: ${{ secrets.SANKA_BENCH_TOKEN != '' }}
+        run: echo "have=${HAVE_TOKEN}" >> "$GITHUB_OUTPUT"
+      - name: Skip (no SANKA_BENCH_TOKEN secret configured)
+        if: steps.token.outputs.have != 'true'
+        run: echo "SANKA_BENCH_TOKEN is not configured; the bench gate was skipped."
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.have == 'true'
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.have == 'true'
+        with:
+          repository: sankaHQ/sanka-bench
+          token: ${{ secrets.SANKA_BENCH_TOKEN }}
+          path: .bench/sanka-bench
+      - uses: astral-sh/setup-uv@v5
+        if: steps.token.outputs.have == 'true'
+      - name: Sync
+        if: steps.token.outputs.have == 'true'
+        run: uv sync --frozen --all-packages
+      - name: Run bench gate
+        if: steps.token.outputs.have == 'true'
+        run: make bench BENCH_DIR=.bench/sanka-bench

@@ -57,6 +57,7 @@ class SerializerFieldIR:
     max_value: int | None = None
     has_default: bool = False
     default: Any = None
+    attname: str | None = None
     messages: tuple[tuple[str, str], ...] = ()
     supported: bool = True
 
@@ -92,6 +93,51 @@ class SerializerIR:
 
 
 @dataclass(frozen=True, slots=True)
+class ViewAuthIR:
+    """Authentication and permission semantics captured for one view.
+
+    Only exactly-recognized configurations are captured: DRF
+    TokenAuthentication, IsAuthenticated, the owner-or-read-only object
+    permission idiom, and the ``serializer.save(field=self.request.user)``
+    perform_create injection. Anything else keeps the view outside the
+    native envelope."""
+
+    require_authenticated: bool = False
+    token_keyword: str | None = None
+    token_db_table: str | None = None
+    token_key_column: str = "key"
+    token_key_max_length: int = 40
+    token_user_column: str = "user_id"
+    owner_field: str | None = None
+    owner_attname: str | None = None
+    inject_owner: str | None = None
+    inject_owner_attname: str | None = None
+    messages: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ViewAuthIR:
+        data = dict(payload)
+        data["messages"] = tuple(
+            (str(key), str(value)) for key, value in payload.get("messages", ())
+        )
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class ViewIR:
+    name: str
+    auth: ViewAuthIR | None = None
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
+        auth = payload.get("auth")
+        return cls(
+            name=str(payload["name"]),
+            auth=ViewAuthIR.from_dict(auth) if isinstance(auth, dict) else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ApiRootIR:
     path: str
     links: tuple[tuple[str, str], ...] = ()
@@ -124,6 +170,7 @@ class FrameworkScan:
     risks: tuple[FrameworkRisk, ...] = ()
     serializer_details: tuple[SerializerIR, ...] = ()
     api_roots: tuple[ApiRootIR, ...] = ()
+    view_details: tuple[ViewIR, ...] = ()
     middleware: tuple[str, ...] = ()
     generic_messages: tuple[tuple[str, str], ...] = ()
     scan_hash: str = field(default="")
@@ -162,6 +209,7 @@ class FrameworkScan:
                 SerializerIR.from_dict(item) for item in payload.get("serializer_details", [])
             ),
             api_roots=tuple(ApiRootIR.from_dict(item) for item in payload.get("api_roots", [])),
+            view_details=tuple(ViewIR.from_dict(item) for item in payload.get("view_details", [])),
             middleware=tuple(payload.get("middleware", [])),
             generic_messages=tuple(
                 (str(key), str(value)) for key, value in payload.get("generic_messages", ())

@@ -138,7 +138,7 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     assert all("{format}" not in key for key in generated_keys)
     assert manifest["dropped_routes"]
     settings_text = (output / "sanka_settings.py").read_text(encoding="utf-8")
-    assert 'if app != "rest_framework"' in settings_text
+    assert 'startswith("rest_framework")' in settings_text
     runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
     for forbidden in ("rest_framework", "get_asgi_application", "django.core.asgi", "_dispatch"):
         assert forbidden not in runtime_text
