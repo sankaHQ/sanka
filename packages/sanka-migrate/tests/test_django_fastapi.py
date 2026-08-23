@@ -56,7 +56,7 @@ def test_four_command_drf_to_fastapi_lifecycle(
     assert next(route for route in scan.routes if route.operation == "featured").transactional
     assert not next(route for route in scan.routes if route.operation == "list").transactional
 
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
     plan_output = capsys.readouterr().out
     assert "DRF → FastAPI Migration Plan" in plan_output
     assert "Bridge generation readiness: 100%" in plan_output
@@ -114,7 +114,7 @@ def test_four_command_drf_to_fastapi_lifecycle(
         json.dumps(unsupported.to_dict()),
         encoding="utf-8",
     )
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
     assert main(["apply", "--root", str(drf_project), "--force"]) == 0
     capsys.readouterr()
 

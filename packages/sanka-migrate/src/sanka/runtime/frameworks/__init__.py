@@ -2,8 +2,10 @@
 """Framework migration recipes exposed by the Sanka CLI."""
 
 from sanka.runtime.frameworks.django_fastapi import (
+    COMPATIBILITY_STRATEGY,
     DEFAULT_ARTIFACT_DIR,
     DEFAULT_FASTAPI_OUTPUT,
+    NATIVE_STRATEGY,
     FrameworkMigrationError,
     apply_fastapi_plan,
     load_fastapi_plan,
@@ -11,11 +13,14 @@ from sanka.runtime.frameworks.django_fastapi import (
     plan_fastapi,
     scan_django,
     verify_fastapi_migration,
+    write_bench_candidate,
 )
 
 __all__ = [
+    "COMPATIBILITY_STRATEGY",
     "DEFAULT_ARTIFACT_DIR",
     "DEFAULT_FASTAPI_OUTPUT",
+    "NATIVE_STRATEGY",
     "FrameworkMigrationError",
     "apply_fastapi_plan",
     "load_fastapi_plan",
@@ -23,4 +28,5 @@ __all__ = [
     "plan_fastapi",
     "scan_django",
     "verify_fastapi_migration",
+    "write_bench_candidate",
 ]

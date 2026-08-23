@@ -48,14 +48,17 @@ from sanka.runtime.__about__ import __version__
 from sanka.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
 from sanka.runtime.frameworks import (
+    COMPATIBILITY_STRATEGY,
     DEFAULT_ARTIFACT_DIR,
     DEFAULT_FASTAPI_OUTPUT,
+    NATIVE_STRATEGY,
     FrameworkMigrationError,
     apply_fastapi_plan,
     load_fastapi_plan,
     plan_fastapi,
     scan_django,
     verify_fastapi_migration,
+    write_bench_candidate,
 )
 from sanka.runtime.frameworks.model import FrameworkPlan, FrameworkScan
 from sanka.runtime.planner import MigrationPlan
@@ -116,6 +119,12 @@ def _build_parser() -> argparse.ArgumentParser:
     common(plan)
     plan.add_argument("root", nargs="?", default=".", help="application repository root")
     plan.add_argument("--to", choices=("fastapi",), help="target application framework")
+    plan.add_argument(
+        "--strategy",
+        choices=(NATIVE_STRATEGY, COMPATIBILITY_STRATEGY),
+        default=NATIVE_STRATEGY,
+        help="native FastAPI generation (default) or the in-process compatibility bridge",
+    )
     plan.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     plan.add_argument("--output", default=DEFAULT_FASTAPI_OUTPUT)
     plan.add_argument("--json", action="store_true", help="print the framework plan as JSON")
@@ -149,6 +158,11 @@ def _build_parser() -> argparse.ArgumentParser:
     apply_.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     apply_.add_argument("--output", default=None, help="generated FastAPI output directory")
     apply_.add_argument("--force", action="store_true", help="replace existing generated files")
+    apply_.add_argument(
+        "--bench-candidate",
+        default=None,
+        help="also emit a Sanka Migration Bench candidate (overlay + candidate.yaml) here",
+    )
     apply_.set_defaults(handler=_cmd_apply)
 
     verify = commands.add_parser("verify", help="verify the target against the source and ledger")
@@ -272,6 +286,7 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
             args.root,
             artifact_dir=args.artifact_dir,
             output=args.output,
+            strategy=args.strategy,
         )
         if args.json:
             print(json.dumps(framework_plan.to_dict(), ensure_ascii=False, indent=2))
@@ -311,8 +326,18 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
             force=args.force,
         )
         plan = load_fastapi_plan(args.root, artifact_dir=args.artifact_dir)
-        print(f"generated {routes} FastAPI routes in {output}")
+        if plan.mode == NATIVE_STRATEGY:
+            print(f"generated {routes} native FastAPI routes in {output}")
+        else:
+            print(f"generated {routes} FastAPI routes in {output}")
         print(f"applied plan: {plan.plan_hash}")
+        if args.bench_candidate:
+            candidate = write_bench_candidate(
+                args.root,
+                args.bench_candidate,
+                artifact_dir=args.artifact_dir,
+            )
+            print(f"benchmark candidate written to {candidate}")
         print("next: sanka verify")
         return 0
     spec = _load_spec(args.file)
@@ -328,12 +353,17 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
 
 async def _cmd_verify(args: argparse.Namespace) -> int:
     if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
-        framework_report = verify_fastapi_migration(
-            args.root,
-            artifact_dir=args.artifact_dir,
-            output=args.output,
-            probe_http=not args.no_http,
-            cases=args.cases,
+        # The framework verifier drives the Django ORM synchronously; run it in
+        # a worker thread so the CLI's event loop does not trip Django's
+        # async-context guard.
+        framework_report = await asyncio.to_thread(
+            lambda: verify_fastapi_migration(
+                args.root,
+                artifact_dir=args.artifact_dir,
+                output=args.output,
+                probe_http=not args.no_http,
+                cases=args.cases,
+            )
         )
         if args.json:
             print(json.dumps(framework_report, ensure_ascii=False, indent=2))
@@ -589,7 +619,7 @@ def _print_framework_scan(scan: FrameworkScan) -> None:
     print(f"  {scan.test_files} test files")
     print()
     print("Migration candidates")
-    print("  → FastAPI     Supported (compatibility mode)")
+    print("  → FastAPI     Supported (native + compatibility strategies)")
     if scan.risks:
         print()
         print(f"Risks: {len(scan.risks)} route(s) need adaptation")
@@ -602,17 +632,27 @@ def _print_framework_scan(scan: FrameworkScan) -> None:
 
 
 def _print_framework_plan(plan: FrameworkPlan) -> None:
-    print("DRF → FastAPI Migration Plan")
+    native = plan.mode == NATIVE_STRATEGY
+    dropped = sum(route.strategy == "dropped-format-suffix-alias" for route in plan.routes)
+    print("DRF → FastAPI Migration Plan" + (" (native)" if native else " (compatibility)"))
     print()
     print(f"  {len(plan.routes)} endpoints")
     print()
-    print("Automatic compatibility bridge")
-    print(f"  {plan.automatic_routes} endpoints")
+    if native:
+        print("Native FastAPI generation")
+        print(f"  {plan.automatic_routes - dropped} endpoints")
+        if dropped:
+            print()
+            print("Dropped format-suffix aliases (disclosed contract change)")
+            print(f"  {dropped} endpoints")
+    else:
+        print("Automatic compatibility bridge")
+        print(f"  {plan.automatic_routes} endpoints")
     print()
     print("Needs adaptation")
     print(f"  {len(plan.routes) - plan.automatic_routes} endpoints")
     print()
-    print("Retained in compatibility mode")
+    print("Retained in native mode" if native else "Retained in compatibility mode")
     for item in plan.retained:
         print(f"  - {item}")
     if plan.risks:
@@ -623,7 +663,10 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
             print(f"  {risk.severity.upper()} {risk.code}{location}")
             print(f"    {risk.message}")
     print()
-    print(f"Bridge generation readiness: {plan.readiness:.0%}")
+    if native:
+        print(f"Native migration readiness: {plan.readiness:.0%}")
+    else:
+        print(f"Bridge generation readiness: {plan.readiness:.0%}")
     print(f"plan hash: {plan.plan_hash}")
     print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
 
@@ -631,11 +674,18 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
 def _print_framework_verify(report: dict[str, Any]) -> None:
     routes = report["routes"]
     http = report["http"]
+    native = report.get("mode") == NATIVE_STRATEGY
     verdict = "complete" if report["ok"] else "FAILED"
-    print("Verifying the DRF → FastAPI compatibility bridge...")
+    if native:
+        print("Verifying the native DRF → FastAPI migration...")
+    else:
+        print("Verifying the DRF → FastAPI compatibility bridge...")
     print()
     print("Routes")
-    print(f"  {routes['generated']} / {routes['planned']} generated")
+    expected_total = routes["planned"] - len(routes.get("dropped", []))
+    print(f"  {routes['generated']} / {expected_total} generated")
+    if routes.get("dropped"):
+        print(f"  {len(routes['dropped'])} format-suffix aliases dropped by design")
     print("Generated code")
     print("  syntax and manifest integrity ✓")
     print("Safe HTTP behavior")
@@ -658,7 +708,10 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
                 f" source={probe['source_status']} target={probe['target_status']}"
             )
     print()
-    print(f"Compatibility bridge verification: {verdict}")
+    if native:
+        print(f"Native migration verification: {verdict}")
+    else:
+        print(f"Compatibility bridge verification: {verdict}")
     print(f"plan hash: {report['plan_hash']}")
 
 

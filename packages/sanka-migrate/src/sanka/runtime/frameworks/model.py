@@ -32,10 +32,76 @@ class RouteIR:
     source_file: str | None = None
     source_line: int | None = None
     supported: bool = True
+    native: bool = False
 
     @property
     def key(self) -> str:
         return f"{self.method} {self.path}"
+
+
+@dataclass(frozen=True, slots=True)
+class SerializerFieldIR:
+    """One serializer field with enough captured semantics to regenerate its
+    validation natively, including the exact rendered DRF error strings."""
+
+    name: str
+    kind: str
+    required: bool = False
+    read_only: bool = False
+    allow_null: bool = False
+    allow_blank: bool = False
+    trim_whitespace: bool = True
+    max_length: int | None = None
+    min_length: int | None = None
+    min_value: int | None = None
+    max_value: int | None = None
+    has_default: bool = False
+    default: Any = None
+    messages: tuple[tuple[str, str], ...] = ()
+    supported: bool = True
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
+        data = dict(payload)
+        data["messages"] = tuple(
+            (str(key), str(value)) for key, value in payload.get("messages", ())
+        )
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class SerializerIR:
+    name: str
+    model: str
+    model_module: str
+    model_class: str
+    object_name: str
+    ordering: tuple[str, ...] = ()
+    lookup: str = "pk"
+    fields: tuple[SerializerFieldIR, ...] = ()
+    supported: bool = True
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SerializerIR:
+        data = dict(payload)
+        data["ordering"] = tuple(payload.get("ordering", ()))
+        data["fields"] = tuple(
+            SerializerFieldIR.from_dict(item) for item in payload.get("fields", ())
+        )
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class ApiRootIR:
+    path: str
+    links: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ApiRootIR:
+        return cls(
+            path=str(payload["path"]),
+            links=tuple((str(key), str(value)) for key, value in payload.get("links", ())),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +122,10 @@ class FrameworkScan:
     authentication: tuple[str, ...] = ()
     test_files: int = 0
     risks: tuple[FrameworkRisk, ...] = ()
+    serializer_details: tuple[SerializerIR, ...] = ()
+    api_roots: tuple[ApiRootIR, ...] = ()
+    middleware: tuple[str, ...] = ()
+    generic_messages: tuple[tuple[str, str], ...] = ()
     scan_hash: str = field(default="")
 
     def hash_payload(self) -> dict[str, Any]:
@@ -88,6 +158,14 @@ class FrameworkScan:
             authentication=tuple(payload.get("authentication", [])),
             test_files=int(payload.get("test_files", 0)),
             risks=tuple(FrameworkRisk(**item) for item in payload.get("risks", [])),
+            serializer_details=tuple(
+                SerializerIR.from_dict(item) for item in payload.get("serializer_details", [])
+            ),
+            api_roots=tuple(ApiRootIR.from_dict(item) for item in payload.get("api_roots", [])),
+            middleware=tuple(payload.get("middleware", [])),
+            generic_messages=tuple(
+                (str(key), str(value)) for key, value in payload.get("generic_messages", ())
+            ),
             scan_hash=str(payload.get("scan_hash", "")),
         )
 
