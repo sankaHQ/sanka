@@ -1,7 +1,7 @@
 [project]
 name = "sanka-migrate"
 version = "0.1.0a3"
-description = "Sanka — connect, plan, execute, and verify finite migrations between databases, warehouses, files, and business systems"
+description = "Sanka — inspect, plan, execute, and verify migrations across applications and data systems"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only AND Apache-2.0"
@@ -16,12 +16,14 @@ classifiers = [
 ]
 dependencies = [
   "clickhouse-connect>=0.8",
+  "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
   "psycopg[binary]>=3.2",
   "pyyaml>=6",
 ]
 
 [project.scripts]
+sanka = "sanka.cli:main"
 sanka-migrate = "sanka.cli:main"
 
 [project.entry-points."sanka.connectors"]

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The ``sanka-migrate`` CLI: plan / validate / apply / verify / status.
+"""The ``sanka`` CLI: scan / plan / validate / apply / verify / status.
 
 Spec-driven flow (migration-as-code)::
 
-    sanka-migrate plan     -f sanka-migrate.yaml
-    sanka-migrate validate -f sanka-migrate.yaml
-    sanka-migrate apply    -f sanka-migrate.yaml
-    sanka-migrate verify   -f sanka-migrate.yaml
+    sanka plan     -f sanka-migrate.yaml
+    sanka validate -f sanka-migrate.yaml
+    sanka apply    -f sanka-migrate.yaml
+    sanka verify   -f sanka-migrate.yaml
 
 ``validate`` is write-free by construction: it samples live source records
 through the reviewed plan and reports rejects without ever resolving the
@@ -14,8 +14,15 @@ destination connector, exiting non-zero when invalid records exist.
 
 Shorthand and provider selection::
 
-    sanka-migrate connect hubspot
-    sanka-migrate migrate ./content sqlite://content.db
+    sanka connect hubspot
+    sanka migrate ./content sqlite://content.db
+
+Django REST Framework to FastAPI compatibility flow::
+
+    sanka scan
+    sanka plan --to fastapi
+    sanka apply
+    sanka verify
 
 Run state lives in a local SQLite file (default ``.sanka/migrate/state.db``), so
 ``apply`` resumes where an interrupted run stopped.
@@ -40,6 +47,17 @@ from sanka.cli._research import (
 from sanka.runtime.__about__ import __version__
 from sanka.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
+from sanka.runtime.frameworks import (
+    DEFAULT_ARTIFACT_DIR,
+    DEFAULT_FASTAPI_OUTPUT,
+    FrameworkMigrationError,
+    apply_fastapi_plan,
+    load_fastapi_plan,
+    plan_fastapi,
+    scan_django,
+    verify_fastapi_migration,
+)
+from sanka.runtime.frameworks.model import FrameworkPlan, FrameworkScan
 from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
@@ -57,7 +75,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return int(asyncio.run(args.handler(args)))
-    except (SpecError, UnknownConnectorError, ExecutionError, FileNotFoundError) as error:
+    except (
+        SpecError,
+        UnknownConnectorError,
+        ExecutionError,
+        FrameworkMigrationError,
+        FileNotFoundError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     except SankaMigrateApiError as error:
@@ -68,10 +92,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="sanka-migrate",
-        description="Sanka — plan, execute, and verify finite migrations.",
+        prog="sanka",
+        description="Sanka — inspect, plan, execute, and verify migrations with a finish line.",
     )
-    parser.add_argument("--version", action="version", version=f"sanka-migrate {__version__}")
+    parser.add_argument("--version", action="version", version=f"sanka {__version__}")
     parser.set_defaults(command=None)
     commands = parser.add_subparsers(dest="command")
 
@@ -79,8 +103,22 @@ def _build_parser() -> argparse.ArgumentParser:
         sub.add_argument("-f", "--file", default=DEFAULT_SPEC_FILE, help="migration spec YAML")
         sub.add_argument("--state", default=DEFAULT_STATE_FILE, help="run-state SQLite file")
 
+    scan = commands.add_parser(
+        "scan", help="inspect a source application and write its semantic scan artifact"
+    )
+    scan.add_argument("root", nargs="?", default=".", help="Django repository root")
+    scan.add_argument("--settings", help="Django settings module (auto-detected by default)")
+    scan.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    scan.add_argument("--json", action="store_true", help="print the scan artifact as JSON")
+    scan.set_defaults(handler=_cmd_scan)
+
     plan = commands.add_parser("plan", help="inspect source/target and produce a reviewable plan")
     common(plan)
+    plan.add_argument("root", nargs="?", default=".", help="application repository root")
+    plan.add_argument("--to", choices=("fastapi",), help="target application framework")
+    plan.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    plan.add_argument("--output", default=DEFAULT_FASTAPI_OUTPUT)
+    plan.add_argument("--json", action="store_true", help="print the framework plan as JSON")
     plan.set_defaults(handler=_cmd_plan)
 
     validate = commands.add_parser(
@@ -106,10 +144,26 @@ def _build_parser() -> argparse.ArgumentParser:
     apply_ = commands.add_parser("apply", help="execute the reviewed plan (resumable)")
     common(apply_)
     apply_.add_argument("--plan-hash", default=None, help="require this exact plan hash")
+    apply_.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    apply_.add_argument("--root", default=".", help="application repository root")
+    apply_.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    apply_.add_argument("--output", default=None, help="generated FastAPI output directory")
+    apply_.add_argument("--force", action="store_true", help="replace existing generated files")
     apply_.set_defaults(handler=_cmd_apply)
 
     verify = commands.add_parser("verify", help="verify the target against the source and ledger")
     common(verify)
+    verify.add_argument("--root", default=".", help="application repository root")
+    verify.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    verify.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    verify.add_argument("--output", default=None, help="generated FastAPI output directory")
+    verify.add_argument(
+        "--cases",
+        default=None,
+        help="JSON file with additional read-only HTTP verification cases",
+    )
+    verify.add_argument("--no-http", action="store_true", help="skip safe read-only HTTP probes")
+    verify.add_argument("--json", action="store_true", help="print framework verification as JSON")
     verify.set_defaults(handler=_cmd_verify)
 
     status = commands.add_parser("status", help="show run status and ledger counts")
@@ -213,11 +267,22 @@ def _load_spec(path: str) -> MigrationSpec:
 
 
 async def _cmd_plan(args: argparse.Namespace) -> int:
+    if args.to == "fastapi":
+        framework_plan = plan_fastapi(
+            args.root,
+            artifact_dir=args.artifact_dir,
+            output=args.output,
+        )
+        if args.json:
+            print(json.dumps(framework_plan.to_dict(), ensure_ascii=False, indent=2))
+        else:
+            _print_framework_plan(framework_plan)
+        return 0
     spec = _load_spec(args.file)
     engine = _engine(args.state)
     run_id = engine.create(spec)
-    plan = await engine.plan(run_id)
-    _print_plan(run_id, plan)
+    migration_plan = await engine.plan(run_id)
+    _print_plan(run_id, migration_plan)
     return 0
 
 
@@ -227,7 +292,7 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
     run_id = engine.create(spec)
     run = engine.store.get_run(run_id)
     if run.plan_json is None:
-        raise ExecutionError("no plan for this spec yet; run `sanka-migrate plan` first")
+        raise ExecutionError("no plan for this spec yet; run `sanka plan` first")
     payload = await engine.validate(run_id, sample_size=args.sample, full=args.full)
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -237,24 +302,63 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 async def _cmd_apply(args: argparse.Namespace) -> int:
+    if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
+        output, routes = apply_fastapi_plan(
+            args.root,
+            artifact_dir=args.artifact_dir,
+            output=args.output,
+            plan_hash=args.plan_hash,
+            force=args.force,
+        )
+        plan = load_fastapi_plan(args.root, artifact_dir=args.artifact_dir)
+        print(f"generated {routes} FastAPI routes in {output}")
+        print(f"applied plan: {plan.plan_hash}")
+        print("next: sanka verify")
+        return 0
     spec = _load_spec(args.file)
     engine = _engine(args.state)
     run_id = engine.create(spec)
     run = engine.store.get_run(run_id)
     if run.plan_json is None:
-        raise ExecutionError("no plan for this spec yet; run `sanka-migrate plan` first")
+        raise ExecutionError("no plan for this spec yet; run `sanka plan` first")
     await engine.apply(run_id, plan_hash=args.plan_hash)
     print(f"run {run_id}: applied")
     return 0
 
 
 async def _cmd_verify(args: argparse.Namespace) -> int:
+    if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
+        framework_report = verify_fastapi_migration(
+            args.root,
+            artifact_dir=args.artifact_dir,
+            output=args.output,
+            probe_http=not args.no_http,
+            cases=args.cases,
+        )
+        if args.json:
+            print(json.dumps(framework_report, ensure_ascii=False, indent=2))
+        else:
+            _print_framework_verify(framework_report)
+        return 0 if framework_report["ok"] else 1
     spec = _load_spec(args.file)
     engine = _engine(args.state)
     run_id = engine.create(spec)
-    report = await engine.verify(run_id)
-    _print_verify(report)
-    return 0 if report.ok else 1
+    verify_report = await engine.verify(run_id)
+    _print_verify(verify_report)
+    return 0 if verify_report.ok else 1
+
+
+async def _cmd_scan(args: argparse.Namespace) -> int:
+    scan = scan_django(
+        args.root,
+        settings_module=args.settings,
+        artifact_dir=args.artifact_dir,
+    )
+    if args.json:
+        print(json.dumps(scan.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        _print_framework_scan(scan)
+    return 0
 
 
 async def _cmd_status(args: argparse.Namespace) -> int:
@@ -432,6 +536,130 @@ def _infer_endpoint(value: str, *, role: str) -> EndpointSpec:
         f"cannot infer the {role} connector from {value!r}; use a URL-style endpoint"
         " (e.g. sqlite://out.db) or a directory path"
     )
+
+
+def _use_framework_lifecycle(
+    root: str, spec_file: str, artifact_dir: str, target: str | None
+) -> bool:
+    """Select the application-migration lifecycle only when no data spec exists."""
+    if target == "fastapi":
+        return True
+    if spec_file != DEFAULT_SPEC_FILE or Path(spec_file).is_file():
+        return False
+    artifact = Path(artifact_dir)
+    if not artifact.is_absolute():
+        artifact = Path(root) / artifact
+    return (artifact / "plan-fastapi.json").is_file()
+
+
+def _print_framework_scan(scan: FrameworkScan) -> None:
+    custom_actions = {
+        route.operation
+        for route in scan.routes
+        if route.operation
+        not in {
+            "get",
+            "post",
+            "put",
+            "patch",
+            "delete",
+            "list",
+            "retrieve",
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+        }
+    }
+    print("Sanka")
+    print()
+    print("Scanning repository...")
+    print()
+    print("Detected")
+    print(f"  Python       {scan.python_version}")
+    print(f"  Django       {scan.django_version}")
+    print(f"  DRF          {scan.drf_version}")
+    print()
+    print("Application")
+    print(f"  {len(scan.routes)} endpoints")
+    print(f"  {len(scan.serializers)} serializers")
+    print(f"  {len(scan.models)} models")
+    print(f"  {len(scan.permissions)} permissions")
+    print(f"  {len(custom_actions)} custom actions")
+    print(f"  {scan.test_files} test files")
+    print()
+    print("Migration candidates")
+    print("  → FastAPI     Supported (compatibility mode)")
+    if scan.risks:
+        print()
+        print(f"Risks: {len(scan.risks)} route(s) need adaptation")
+    print()
+    print(f"scan hash: {scan.scan_hash}")
+    print("Scan complete.")
+    print()
+    print("Run:")
+    print("  sanka plan --to fastapi")
+
+
+def _print_framework_plan(plan: FrameworkPlan) -> None:
+    print("DRF → FastAPI Migration Plan")
+    print()
+    print(f"  {len(plan.routes)} endpoints")
+    print()
+    print("Automatic compatibility bridge")
+    print(f"  {plan.automatic_routes} endpoints")
+    print()
+    print("Needs adaptation")
+    print(f"  {len(plan.routes) - plan.automatic_routes} endpoints")
+    print()
+    print("Retained in compatibility mode")
+    for item in plan.retained:
+        print(f"  - {item}")
+    if plan.risks:
+        print()
+        print("Potential issues")
+        for risk in plan.risks:
+            location = f" ({risk.file}:{risk.line})" if risk.file and risk.line else ""
+            print(f"  {risk.severity.upper()} {risk.code}{location}")
+            print(f"    {risk.message}")
+    print()
+    print(f"Bridge generation readiness: {plan.readiness:.0%}")
+    print(f"plan hash: {plan.plan_hash}")
+    print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
+
+
+def _print_framework_verify(report: dict[str, Any]) -> None:
+    routes = report["routes"]
+    http = report["http"]
+    verdict = "complete" if report["ok"] else "FAILED"
+    print("Verifying the DRF → FastAPI compatibility bridge...")
+    print()
+    print("Routes")
+    print(f"  {routes['generated']} / {routes['planned']} generated")
+    print("Generated code")
+    print("  syntax and manifest integrity ✓")
+    print("Safe HTTP behavior")
+    print(f"  {http['passed']} / {http['probed']} read-only routes compatible")
+    if http["safe_routes"] == 0:
+        print("  no parameter-free GET/HEAD routes were available for automatic probing")
+    if routes["missing"]:
+        print("Missing routes")
+        for route in routes["missing"]:
+            print(f"  - {route}")
+    if routes["needs_adaptation"]:
+        print("Needs adaptation")
+        for route in routes["needs_adaptation"]:
+            print(f"  - {route}")
+    if http["failed"]:
+        print("HTTP mismatches")
+        for probe in http["failed"]:
+            print(
+                f"  - {probe['method']} {probe['path']}:"
+                f" source={probe['source_status']} target={probe['target_status']}"
+            )
+    print()
+    print(f"Compatibility bridge verification: {verdict}")
+    print(f"plan hash: {report['plan_hash']}")
 
 
 def _print_plan(run_id: str, plan: MigrationPlan) -> None:
