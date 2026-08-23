@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-# Django REST Framework to FastAPI compatibility migration
+# Django REST Framework to FastAPI migration
 
 Sanka's first application-migration recipe creates a verified transition from
-Django REST Framework (DRF) to FastAPI. Version 0.1 is intentionally
-compatibility-first: it gives the target a real FastAPI route graph while
-preserving the existing Django behavior behind that graph.
+Django REST Framework (DRF) to FastAPI. Two strategies share one scan:
+
+- **`native` (default)** generates a genuinely native FastAPI request layer
+  for the supported envelope. The generated serving process keeps Django for
+  the ORM only — DRF never loads into it. Routes outside the envelope are
+  reported as needing manual adaptation, never silently bridged.
+- **`compatibility`** generates the strangler bridge: a real FastAPI route
+  graph that dispatches every route into the existing Django application
+  in-process. It preserves behavior for the whole surface but still serves
+  through DRF, so it can never support the claim that DRF was replaced.
 
 ## The four-command contract
 
@@ -51,9 +58,25 @@ same machine-readable application IR for agents and other tools.
 
 ### `sanka plan --to fastapi`
 
-The plan classifies every discovered route, records the compatibility strategy,
-lists retained components and manual adaptations, and binds the result to the
-exact scan hash. The canonical artifact is `.sanka/plan-fastapi.json`.
+The plan classifies every discovered route, records the selected strategy
+(`--strategy native` is the default; `--strategy compatibility` selects the
+bridge), lists retained components and manual adaptations, and binds the
+result to the exact scan hash. The canonical artifact is
+`.sanka/plan-fastapi.json`.
+
+In native mode every route receives one of four dispositions:
+
+- `native-fastapi-crud` — default-behavior `ModelViewSet` CRUD over a
+  `ModelSerializer` whose field semantics the scan captured (including the
+  exact DRF error strings, rendered live);
+- `native-fastapi-api-root` — the router API root, regenerated from the
+  captured link table;
+- `dropped-format-suffix-alias` — DRF's `.{format}` alias routes are dropped
+  as a disclosed contract change; clients negotiate content types with
+  headers instead;
+- `needs-manual-adaptation` — everything else (APIViews, custom actions,
+  custom permissions or auth, pagination, filters, overridden viewset
+  methods). Verification fails while these remain.
 
 `sanka apply` verifies the current scan and canonical plan hashes. For an
 approval workflow or CI gate, pass the exact reviewed hash explicitly with
@@ -68,18 +91,24 @@ modified plans. It writes a standalone generated application to
 `.sanka/output/fastapi` by default and refuses to overwrite a non-empty output
 without `--force`.
 
-The generated application contains:
+The generated native application contains:
 
 | File | Purpose |
 |---|---|
 | `app.py` | FastAPI ASGI entrypoint |
-| `sanka_compat.py` | In-process Django compatibility dispatcher |
-| `sanka-manifest.json` | Exact scan hash, plan hash, routes, and source reference |
+| `sanka_native.py` | Native request layer: FastAPI routes, DRF-parity validation, Django ORM access |
+| `sanka_settings.py` | Serving settings — the original settings with the DRF request layer removed |
+| `sanka-manifest.json` | Exact scan hash, plan hash, routes, captured field semantics, dropped aliases |
 | `requirements.txt` | Target server dependencies |
-| `README.md` | Run and incremental-replacement guidance |
+| `README.md` | Run guidance |
 
-Source files are never overwritten. Teams can replace one compatibility route
-at a time with native FastAPI code and rerun verification after every change.
+In compatibility mode `sanka_native.py` and `sanka_settings.py` are replaced
+by `sanka_compat.py`, the in-process Django dispatcher.
+
+Source files are never overwritten. `sanka apply --bench-candidate <dir>`
+additionally emits a Sanka Migration Bench candidate (overlay plus
+`candidate.yaml`) from the reviewed native plan, so the tool-neutral benchmark
+can grade the exact generated output.
 
 ### `sanka verify`
 
@@ -115,19 +144,32 @@ requests require project-specific fixtures before they can be claimed as
 behaviorally verified. `sanka verify --no-http` runs integrity and route checks
 only.
 
-## Version 0.1 compatibility boundary
+## Strategy boundaries
 
-### Retained deliberately
+### Retained deliberately (both strategies)
 
 - Django models and migrations;
 - Django ORM;
 - synchronous `transaction.atomic` handlers (Django does not currently support
   transactions in async mode);
-- Django authentication and permissions;
-- Celery and other existing background workers;
-- DRF handlers behind the generated bridge, until replaced route by route.
+- Celery and other existing background workers.
 
-### Detected and bridged automatically
+### Generated natively (native strategy)
+
+- default-behavior `ModelViewSet` CRUD routes over `ModelSerializer` fields
+  with captured semantics (integer and char fields today: required, null,
+  blank, trim, min/max bounds, defaults, and the exact rendered DRF error
+  strings, including validation, 404, JSON parse, and `Allow` header
+  behavior);
+- the router API root;
+- generated handlers are synchronous so the retained ORM runs in FastAPI's
+  worker threads, never on the event loop.
+
+The source DRF application and its test suite stay intact in the repository;
+only the serving process stops loading DRF. Routes outside the envelope fail
+verification until a human adapts them.
+
+### Detected and bridged automatically (compatibility strategy)
 
 - `APIView` methods;
 - DRF `ViewSet` and `ModelViewSet` router routes;
@@ -135,18 +177,27 @@ only.
 - `@action` routes;
 - Django path converters and standard DRF named-regex parameters.
 
-### Not claimed by version 0.1
+### Not claimed yet
 
-- automatic removal of the DRF dependency;
+- native generation for authentication, object permissions, pagination,
+  filters, custom actions, nested serializers, or non-trivial field kinds;
 - automatic conversion of arbitrary serializer/business logic to Pydantic;
 - Django templates, Admin, Channels, GraphQL, or ORM replacement;
-- semantic verification of mutating or parameterized requests without fixtures;
+- semantic verification of mutating or parameterized requests without
+  fixtures;
 - compatibility for arbitrary custom regex URL patterns.
 
 Unsupported route patterns stay in the plan as explicit adaptation risks. Sanka
 does not silently call a partial generation complete.
 
 ## Launch acceptance gate
+
+The tool-neutral acceptance suite is Sanka Migration Bench
+(`sankaHQ/sanka-bench`). Its native-target gate is decided by recorded serving
+evidence from a guarded process, so only output whose serving path genuinely
+excludes DRF can pass; the compatibility bridge is pinned there as a
+permanent negative control. `sanka apply --bench-candidate` produces the
+candidate the benchmark grades.
 
 Do not publish a numerical compatibility or time-saved claim until a pinned
 public reference repository proves it. The launch packet must record:
