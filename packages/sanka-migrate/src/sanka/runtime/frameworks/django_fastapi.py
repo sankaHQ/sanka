@@ -21,6 +21,7 @@ completed migration.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import importlib.util
 import inspect
@@ -42,6 +43,8 @@ from sanka.runtime.frameworks.model import (
     RouteIR,
     SerializerFieldIR,
     SerializerIR,
+    ViewAuthIR,
+    ViewIR,
 )
 
 DEFAULT_ARTIFACT_DIR = ".sanka"
@@ -118,6 +121,7 @@ def scan_django(
             walk.serializer_details[name] for name in sorted(walk.serializer_details)
         ),
         api_roots=tuple(sorted(walk.api_roots, key=lambda item: item.path)),
+        view_details=tuple(walk.view_details[name] for name in sorted(walk.view_details)),
         middleware=middleware,
         generic_messages=_generic_messages(),
     ).with_hash()
@@ -388,6 +392,7 @@ def _render_native_output(
     dropped = [route for route in plan.routes if route.strategy == ROUTE_STRATEGY_DROPPED_ALIAS]
     scan_routes = {route.key: route for route in scan.routes}
     serializer_by_name = {item.name: item for item in scan.serializer_details}
+    views_by_name = {item.name: item for item in scan.view_details}
     resources: dict[str, dict[str, Any]] = {}
     api_root_paths: set[str] = set()
     for planned in sorted(generated, key=lambda route: (route.path, route.method)):
@@ -400,9 +405,25 @@ def _render_native_output(
                 f"native route {planned.key} has no captured serializer; run `sanka scan`"
             )
         ir = serializer_by_name[route.serializer]
+        view_ir = views_by_name.get(route.view)
+        auth_payload: dict[str, Any] | None = None
+        if view_ir is not None and view_ir.auth is not None and view_ir.auth.require_authenticated:
+            auth = view_ir.auth
+            auth_payload = {
+                "token_keyword": auth.token_keyword,
+                "token_db_table": auth.token_db_table,
+                "token_key_column": auth.token_key_column,
+                "token_key_max_length": auth.token_key_max_length,
+                "token_user_column": auth.token_user_column,
+                "owner_attname": auth.owner_attname,
+                "inject_owner_attname": auth.inject_owner_attname,
+                "messages": dict(auth.messages),
+            }
         resource = resources.setdefault(
-            ir.name,
+            route.view,
             {
+                "view": route.view,
+                "auth": auth_payload,
                 "serializer": ir.name,
                 "model_module": ir.model_module,
                 "model_class": ir.model_class,
@@ -424,6 +445,7 @@ def _render_native_output(
                         "max_value": field.max_value,
                         "has_default": field.has_default,
                         "default": field.default,
+                        "attname": field.attname,
                         "messages": dict(field.messages),
                     }
                     for field in ir.fields
@@ -595,6 +617,7 @@ class _WalkResult:
         self.risks: list[FrameworkRisk] = []
         self.serializer_details: dict[str, SerializerIR] = {}
         self.api_roots: list[ApiRootIR] = []
+        self.view_details: dict[str, ViewIR] = {}
 
 
 def _walk_patterns(
@@ -717,6 +740,10 @@ def _native_route_support(
         return False
     routers = importlib.import_module("rest_framework.routers")
     if inspect.isclass(view_class) and issubclass(view_class, routers.APIRootView):
+        permissions_module = importlib.import_module("rest_framework.permissions")
+        root_permissions = getattr(view_class, "permission_classes", ())
+        if any(item is not permissions_module.AllowAny for item in root_permissions):
+            return False
         links = _api_root_links(callback)
         if links is None:
             return False
@@ -732,8 +759,13 @@ def _native_route_support(
         return False
     if getattr(view_class, "lookup_field", "pk") != "pk":
         return False
-    permissions_module = importlib.import_module("rest_framework.permissions")
-    if any(item is not permissions_module.AllowAny for item in view_class.permission_classes):
+    view_name = f"{view_class.__module__}.{view_class.__qualname__}"
+    if view_name not in result.view_details:
+        queryset = getattr(view_class, "queryset", None)
+        model = getattr(queryset, "model", None)
+        auth_ir = _view_auth_support(view_class, model)
+        result.view_details[view_name] = ViewIR(name=view_name, auth=auth_ir)
+    if result.view_details[view_name].auth is None:
         return False
     if getattr(view_class, "pagination_class", None) is not None:
         return False
@@ -760,7 +792,6 @@ def _has_viewset_overrides(view_class: type[Any]) -> bool:
     expected = {
         "list": mixins.ListModelMixin.list,
         "create": mixins.CreateModelMixin.create,
-        "perform_create": mixins.CreateModelMixin.perform_create,
         "retrieve": mixins.RetrieveModelMixin.retrieve,
         "update": mixins.UpdateModelMixin.update,
         "partial_update": mixins.UpdateModelMixin.partial_update,
@@ -774,6 +805,284 @@ def _has_viewset_overrides(view_class: type[Any]) -> bool:
         "filter_queryset": generics.GenericAPIView.filter_queryset,
     }
     return any(getattr(view_class, name, None) is not func for name, func in expected.items())
+
+
+def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
+    """Capture the view's auth semantics, or None when outside the envelope.
+
+    Recognized exactly: AllowAny (no enforcement, no perform_create override);
+    or IsAuthenticated with DRF TokenAuthentication, optionally one
+    owner-or-read-only object permission (matched structurally) and the
+    ``serializer.save(field=self.request.user)`` perform_create idiom.
+    """
+    permissions_module = importlib.import_module("rest_framework.permissions")
+    mixins = importlib.import_module("rest_framework.mixins")
+    permissions = list(view_class.permission_classes)
+    create_overridden = view_class.perform_create is not mixins.CreateModelMixin.perform_create
+    if all(item is permissions_module.AllowAny for item in permissions):
+        if create_overridden:
+            return None
+        return ViewAuthIR(require_authenticated=False)
+    if permissions_module.IsAuthenticated not in permissions:
+        return None
+    extras = [item for item in permissions if item is not permissions_module.IsAuthenticated]
+    owner_field: str | None = None
+    if len(extras) == 1:
+        owner_field = _match_owner_permission(extras[0])
+        if owner_field is None:
+            return None
+    elif extras:
+        return None
+    authentication_module = importlib.import_module("rest_framework.authentication")
+    authenticators = list(view_class.authentication_classes)
+    if len(authenticators) != 1:
+        return None
+    if authenticators[0] is not authentication_module.TokenAuthentication:
+        return None
+    inject_owner: str | None = None
+    if create_overridden:
+        inject_owner = _match_perform_create(view_class)
+        if inject_owner is None:
+            return None
+    owner_attname = _user_fk_attname(model, owner_field) if owner_field else None
+    if owner_field is not None and owner_attname is None:
+        return None
+    inject_attname = _user_fk_attname(model, inject_owner) if inject_owner else None
+    if inject_owner is not None and inject_attname is None:
+        return None
+    token_model = authenticators[0]().get_model()
+    key_field = token_model._meta.pk
+    return ViewAuthIR(
+        require_authenticated=True,
+        token_keyword=str(authenticators[0].keyword),
+        token_db_table=str(token_model._meta.db_table),
+        token_key_column=str(key_field.column),
+        token_key_max_length=int(getattr(key_field, "max_length", None) or 40),
+        token_user_column=str(token_model._meta.get_field("user").attname),
+        owner_field=owner_field,
+        owner_attname=owner_attname,
+        inject_owner=inject_owner,
+        inject_owner_attname=inject_attname,
+        messages=_probe_auth_messages(authenticators[0]),
+    )
+
+
+def _user_fk_attname(model: Any, field_name: str | None) -> str | None:
+    if model is None or field_name is None:
+        return None
+    exceptions_module = importlib.import_module("django.core.exceptions")
+    try:
+        field = model._meta.get_field(field_name)
+    except exceptions_module.FieldDoesNotExist:
+        return None
+    auth_module = importlib.import_module("django.contrib.auth")
+    if not getattr(field, "is_relation", False):
+        return None
+    if field.related_model is not auth_module.get_user_model():
+        return None
+    return str(field.attname)
+
+
+def _is_docstring(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
+
+def _attr_chain(node: ast.expr) -> list[str] | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return list(reversed(parts))
+    return None
+
+
+def _match_owner_permission(perm_class: Any) -> str | None:
+    """Return the owner field of an owner-or-read-only permission, or None.
+
+    Matched structurally from the AST: ``has_object_permission`` must be the
+    canonical safe-methods short-circuit plus an ownership comparison between
+    an attribute of the object and the requesting user. Arbitrary permission
+    logic cannot be regenerated honestly and keeps the view out of the
+    envelope.
+    """
+    permissions_module = importlib.import_module("rest_framework.permissions")
+    if not (
+        inspect.isclass(perm_class) and issubclass(perm_class, permissions_module.BasePermission)
+    ):
+        return None
+    permission_type: Any = perm_class
+    if permission_type.has_permission is not permissions_module.BasePermission.has_permission:
+        return None
+    if (
+        permission_type.has_object_permission
+        is permissions_module.BasePermission.has_object_permission
+    ):
+        return None
+    import textwrap
+
+    try:
+        source = textwrap.dedent(inspect.getsource(permission_type.has_object_permission))
+    except (OSError, TypeError):
+        return None
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    if not tree.body or not isinstance(tree.body[0], ast.FunctionDef):
+        return None
+    func = tree.body[0]
+    arg_names = [item.arg for item in func.args.args]
+    if len(arg_names) != 4:
+        return None
+    _, request_name, _, obj_name = arg_names
+    body = [node for node in func.body if not _is_docstring(node)]
+    if len(body) == 1 and isinstance(body[0], ast.Return):
+        value = body[0].value
+        if (
+            isinstance(value, ast.BoolOp)
+            and isinstance(value.op, ast.Or)
+            and len(value.values) == 2
+            and _is_safe_method_check(value.values[0], request_name)
+        ):
+            return _ownership_field(value.values[1], request_name, obj_name)
+        return None
+    if (
+        len(body) == 2
+        and isinstance(body[0], ast.If)
+        and _is_safe_method_check(body[0].test, request_name)
+        and not body[0].orelse
+        and len(body[0].body) == 1
+        and isinstance(body[0].body[0], ast.Return)
+        and isinstance(body[0].body[0].value, ast.Constant)
+        and body[0].body[0].value.value is True
+        and isinstance(body[1], ast.Return)
+        and body[1].value is not None
+    ):
+        return _ownership_field(body[1].value, request_name, obj_name)
+    return None
+
+
+def _is_safe_method_check(node: ast.expr, request_name: str) -> bool:
+    if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
+        return False
+    if not isinstance(node.ops[0], ast.In):
+        return False
+    left = _attr_chain(node.left)
+    if left != [request_name, "method"]:
+        return False
+    target = _attr_chain(node.comparators[0])
+    return target is not None and target[-1] == "SAFE_METHODS"
+
+
+def _ownership_field(node: ast.expr | None, request_name: str, obj_name: str) -> str | None:
+    if node is None:
+        return None
+    if not (
+        isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq)
+    ):
+        return None
+    left, right = node.left, node.comparators[0]
+    for obj_side, user_side in ((left, right), (right, left)):
+        field = _obj_owner_attr(obj_side, obj_name)
+        if field is not None and _is_request_user(user_side, request_name):
+            return field
+    return None
+
+
+def _obj_owner_attr(node: ast.expr, obj_name: str) -> str | None:
+    chain = _attr_chain(node)
+    if not chain or chain[0] != obj_name:
+        return None
+    if len(chain) == 2:
+        name = chain[1]
+        if name.endswith("_id") and len(name) > 3:
+            return name[:-3]
+        return name
+    if len(chain) == 3 and chain[2] in ("id", "pk"):
+        return chain[1]
+    return None
+
+
+def _is_request_user(node: ast.expr, request_name: str) -> bool:
+    chain = _attr_chain(node)
+    if not chain or len(chain) < 2 or chain[0] != request_name or chain[1] != "user":
+        return False
+    if len(chain) == 2:
+        return True
+    return len(chain) == 3 and chain[2] in ("id", "pk")
+
+
+def _match_perform_create(view_class: type[Any]) -> str | None:
+    """Return the injected kwarg of ``serializer.save(field=self.request.user)``."""
+    import textwrap
+
+    try:
+        source = textwrap.dedent(inspect.getsource(view_class.perform_create))
+    except (OSError, TypeError):
+        return None
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    if not tree.body or not isinstance(tree.body[0], ast.FunctionDef):
+        return None
+    func = tree.body[0]
+    arg_names = [item.arg for item in func.args.args]
+    if len(arg_names) != 2:
+        return None
+    self_name, serializer_name = arg_names
+    body = [node for node in func.body if not _is_docstring(node)]
+    if len(body) != 1 or not isinstance(body[0], ast.Expr):
+        return None
+    call = body[0].value
+    if not (isinstance(call, ast.Call) and not call.args and len(call.keywords) == 1):
+        return None
+    if _attr_chain(call.func) != [serializer_name, "save"]:
+        return None
+    keyword = call.keywords[0]
+    if keyword.arg is None:
+        return None
+    if _attr_chain(keyword.value) != [self_name, "request", "user"]:
+        return None
+    return str(keyword.arg)
+
+
+def _probe_auth_messages(auth_class: type[Any]) -> tuple[tuple[str, str], ...]:
+    """Capture the auth error strings the live DRF installation produces.
+
+    The header-parsing failures are probed with fake requests (no database
+    access). The invalid-key and inactive-user paths require database rows a
+    scan must never create, so those two strings are DRF's stable inline
+    defaults.
+    """
+    exceptions_module = importlib.import_module("rest_framework.exceptions")
+    authenticator = auth_class()
+    keyword = str(auth_class.keyword)
+    messages = {
+        "no_credentials": str(exceptions_module.NotAuthenticated.default_detail),
+        "forbidden": str(exceptions_module.PermissionDenied.default_detail),
+        "invalid_token": "Invalid token.",
+        "inactive_user": "User inactive or deleted.",
+        "www_authenticate": str(authenticator.authenticate_header(None)),
+    }
+
+    class _ProbeRequest:
+        def __init__(self, header: str) -> None:
+            self.META = {"HTTP_AUTHORIZATION": header}
+            self.headers = {"authorization": header}
+
+    for key, header in (("empty_header", keyword), ("spaced_header", f"{keyword} a b")):
+        try:
+            authenticator.authenticate(_ProbeRequest(header))
+        except exceptions_module.AuthenticationFailed as error:
+            messages[key] = str(error.detail)
+    return tuple(sorted(messages.items()))
 
 
 def _api_root_links(callback: Any) -> tuple[tuple[str, str], ...] | None:
@@ -808,7 +1117,7 @@ def _serializer_ir(view_class: type[Any], serializer_name: str) -> SerializerIR 
         supported = False
     fields: list[SerializerFieldIR] = []
     for name, field in serializer_class().fields.items():
-        field_ir = _serializer_field_ir(str(name), field)
+        field_ir = _serializer_field_ir(str(name), field, model)
         fields.append(field_ir)
         supported = supported and field_ir.supported
     ordering = tuple(str(item) for item in (queryset.query.order_by or model._meta.ordering or ()))
@@ -841,9 +1150,19 @@ def _defines_custom_validation(cls: type[Any]) -> bool:
     return False
 
 
-def _serializer_field_ir(name: str, field: Any) -> SerializerFieldIR:
+def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR:
     fields_module = importlib.import_module("rest_framework.fields")
+    relations_module = importlib.import_module("rest_framework.relations")
     validators_module = importlib.import_module("django.core.validators")
+    if type(field) is relations_module.PrimaryKeyRelatedField and field.read_only:
+        attname = _related_attname(model, name)
+        return SerializerFieldIR(
+            name=name,
+            kind="related_pk",
+            read_only=True,
+            attname=attname,
+            supported=attname is not None,
+        )
     kind: str | None = None
     if type(field) is fields_module.IntegerField:
         kind = "integer"
@@ -883,6 +1202,19 @@ def _serializer_field_ir(name: str, field: Any) -> SerializerFieldIR:
         messages=_field_messages(field, kind),
         supported=supported,
     )
+
+
+def _related_attname(model: Any, field_name: str) -> str | None:
+    if model is None:
+        return None
+    exceptions_module = importlib.import_module("django.core.exceptions")
+    try:
+        field = model._meta.get_field(field_name)
+    except exceptions_module.FieldDoesNotExist:
+        return None
+    if not getattr(field, "is_relation", False):
+        return None
+    return str(field.attname)
 
 
 def _maybe_int(value: Any) -> int | None:
@@ -1191,7 +1523,11 @@ def _render_native_settings(settings_module: str) -> str:
 
 from {settings_module} import *  # noqa: F401,F403
 
-INSTALLED_APPS = [app for app in INSTALLED_APPS if app != "rest_framework"]  # noqa: F405
+INSTALLED_APPS = [
+    app
+    for app in INSTALLED_APPS  # noqa: F405
+    if not app.startswith("rest_framework")
+]
 '''
 
 
@@ -1244,7 +1580,10 @@ def _model(resource: dict[str, Any]) -> Any:
 
 
 def _serialize(resource: dict[str, Any], instance: Any) -> dict[str, Any]:
-    return {spec["name"]: getattr(instance, spec["name"]) for spec in resource["fields"]}
+    return {
+        spec["name"]: getattr(instance, spec.get("attname") or spec["name"])
+        for spec in resource["fields"]
+    }
 
 
 def _clean_integer(spec: dict[str, Any], value: Any) -> tuple[Any, list[str]]:
@@ -1358,10 +1697,83 @@ def _get_instance(resource: dict[str, Any], request: Request) -> tuple[Any, str]
         return None, "invalid"
 
 
+def _token_user_id(auth: dict[str, Any], key: str) -> Any:
+    from django.db import connection
+
+    quote = connection.ops.quote_name
+    query = (
+        f"SELECT {quote(auth['token_user_column'])} "
+        f"FROM {quote(auth['token_db_table'])} "
+        f"WHERE {quote(auth['token_key_column'])} = %s"
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(query, [key])
+        row = cursor.fetchone()
+    return None if row is None else row[0]
+
+
+def _auth_error(message: str, auth: dict[str, Any], allow: str) -> Response:
+    return JSONResponse(
+        {"detail": message},
+        status_code=401,
+        headers={"Allow": allow, "WWW-Authenticate": auth["messages"]["www_authenticate"]},
+    )
+
+
+def _authenticate(request: Request, auth: dict[str, Any], allow: str) -> tuple[Any, Any]:
+    messages = auth["messages"]
+    header = request.headers.get("authorization", "")
+    parts = header.split()
+    if not parts or parts[0].lower() != auth["token_keyword"].lower():
+        return None, None
+    if len(parts) == 1:
+        return None, _auth_error(messages["empty_header"], auth, allow)
+    if len(parts) > 2:
+        return None, _auth_error(messages["spaced_header"], auth, allow)
+    user_id = _token_user_id(auth, parts[1])
+    if user_id is None:
+        return None, _auth_error(messages["invalid_token"], auth, allow)
+    from django.contrib.auth import get_user_model
+
+    is_active = (
+        get_user_model().objects.filter(pk=user_id).values_list("is_active", flat=True).first()
+    )
+    if is_active is None:
+        return None, _auth_error(messages["invalid_token"], auth, allow)
+    if not is_active:
+        return None, _auth_error(messages["inactive_user"], auth, allow)
+    return user_id, None
+
+
+def _require_user(request: Request, auth: dict[str, Any], allow: str) -> tuple[Any, Any]:
+    user_id, error = _authenticate(request, auth, allow)
+    if error is not None:
+        return None, error
+    if user_id is None:
+        return None, _auth_error(auth["messages"]["no_credentials"], auth, allow)
+    return user_id, None
+
+
+def _forbidden(auth: dict[str, Any], allow: str) -> Response:
+    return JSONResponse(
+        {"detail": auth["messages"]["forbidden"]}, status_code=403, headers={"Allow": allow}
+    )
+
+
 def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
+    auth = resource.get("auth")
+
+    def _gate(request: Request) -> tuple[Any, Any]:
+        if auth is None:
+            return None, None
+        return _require_user(request, auth, allow)
+
     if operation == "list":
 
         def handler(request: Request) -> Response:
+            _, gate_error = _gate(request)
+            if gate_error is not None:
+                return gate_error
             queryset = _model(resource).objects.all()
             if resource["ordering"]:
                 queryset = queryset.order_by(*resource["ordering"])
@@ -1371,6 +1783,9 @@ def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
     elif operation == "create":
 
         def handler(request: Request, raw_body: bytes = Depends(_read_raw_body)) -> Response:
+            user_id, gate_error = _gate(request)
+            if gate_error is not None:
+                return gate_error
             payload, parse_error = _parse_json(raw_body)
             if parse_error is not None:
                 parse_error.headers["Allow"] = allow
@@ -1378,7 +1793,10 @@ def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
             validated, errors = _validate(resource["fields"], payload, partial=False)
             if errors:
                 return JSONResponse(errors, status_code=400, headers={"Allow": allow})
-            instance = _model(resource).objects.create(**validated)
+            create_kwargs = dict(validated)
+            if auth is not None and auth.get("inject_owner_attname"):
+                create_kwargs[auth["inject_owner_attname"]] = user_id
+            instance = _model(resource).objects.create(**create_kwargs)
             return JSONResponse(
                 _serialize(resource, instance), status_code=201, headers={"Allow": allow}
             )
@@ -1386,6 +1804,9 @@ def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
     elif operation == "retrieve":
 
         def handler(request: Request) -> Response:
+            _, gate_error = _gate(request)
+            if gate_error is not None:
+                return gate_error
             instance, miss = _get_instance(resource, request)
             if instance is None:
                 return _not_found(resource, allow, miss)
@@ -1395,9 +1816,18 @@ def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
         partial = operation == "partial_update"
 
         def handler(request: Request, raw_body: bytes = Depends(_read_raw_body)) -> Response:
+            user_id, gate_error = _gate(request)
+            if gate_error is not None:
+                return gate_error
             instance, miss = _get_instance(resource, request)
             if instance is None:
                 return _not_found(resource, allow, miss)
+            if (
+                auth is not None
+                and auth.get("owner_attname")
+                and getattr(instance, auth["owner_attname"]) != user_id
+            ):
+                return _forbidden(auth, allow)
             payload, parse_error = _parse_json(raw_body)
             if parse_error is not None:
                 parse_error.headers["Allow"] = allow
@@ -1413,9 +1843,18 @@ def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
     elif operation == "destroy":
 
         def handler(request: Request) -> Response:
+            user_id, gate_error = _gate(request)
+            if gate_error is not None:
+                return gate_error
             instance, miss = _get_instance(resource, request)
             if instance is None:
                 return _not_found(resource, allow, miss)
+            if (
+                auth is not None
+                and auth.get("owner_attname")
+                and getattr(instance, auth["owner_attname"]) != user_id
+            ):
+                return _forbidden(auth, allow)
             instance.delete()
             return Response(status_code=204, headers={"Allow": allow})
 

@@ -68,15 +68,19 @@ In native mode every route receives one of four dispositions:
 
 - `native-fastapi-crud` — default-behavior `ModelViewSet` CRUD over a
   `ModelSerializer` whose field semantics the scan captured (including the
-  exact DRF error strings, rendered live);
+  exact DRF error strings, rendered live), optionally guarded by DRF
+  `TokenAuthentication` + `IsAuthenticated`, one structurally recognized
+  owner-or-read-only object permission, and the
+  `serializer.save(field=self.request.user)` perform_create idiom;
 - `native-fastapi-api-root` — the router API root, regenerated from the
   captured link table;
 - `dropped-format-suffix-alias` — DRF's `.{format}` alias routes are dropped
   as a disclosed contract change; clients negotiate content types with
   headers instead;
 - `needs-manual-adaptation` — everything else (APIViews, custom actions,
-  custom permissions or auth, pagination, filters, overridden viewset
-  methods). Verification fails while these remain.
+  non-token authentication, permission logic beyond the recognized owner
+  idiom, pagination, filters, other overridden viewset methods).
+  Verification fails while these remain.
 
 `sanka apply` verifies the current scan and canonical plan hashes. For an
 approval workflow or CI gate, pass the exact reviewed hash explicitly with
@@ -157,10 +161,19 @@ only.
 ### Generated natively (native strategy)
 
 - default-behavior `ModelViewSet` CRUD routes over `ModelSerializer` fields
-  with captured semantics (integer and char fields today: required, null,
-  blank, trim, min/max bounds, defaults, and the exact rendered DRF error
-  strings, including validation, 404, JSON parse, and `Allow` header
-  behavior);
+  with captured semantics (integer, char, and read-only primary-key relation
+  fields today: required, null, blank, trim, min/max bounds, defaults, and
+  the exact rendered DRF error strings, including validation, 404, JSON
+  parse, and `Allow` header behavior);
+- DRF `TokenAuthentication` with `IsAuthenticated`: the serving process reads
+  the retained token table directly (raw quoted-identifier lookup, no DRF
+  import), reproducing the 401 variants, `WWW-Authenticate`, and
+  inactive-user behavior with strings probed from the live installation;
+- owner-or-read-only object permissions, recognized structurally from the
+  permission class's AST (the canonical safe-methods short-circuit plus an
+  ownership comparison) — arbitrary permission logic is never guessed;
+- `perform_create` author injection matched from the
+  `serializer.save(field=self.request.user)` idiom;
 - the router API root;
 - generated handlers are synchronous so the retained ORM runs in FastAPI's
   worker threads, never on the event loop.
@@ -179,8 +192,9 @@ verification until a human adapts them.
 
 ### Not claimed yet
 
-- native generation for authentication, object permissions, pagination,
-  filters, custom actions, nested serializers, or non-trivial field kinds;
+- native generation for session or custom authentication, permission logic
+  beyond the recognized owner idiom, pagination, filters, custom actions,
+  nested serializers, or writable relation fields;
 - automatic conversion of arbitrary serializer/business logic to Pydantic;
 - Django templates, Admin, Channels, GraphQL, or ORM replacement;
 - semantic verification of mutating or parameterized requests without
