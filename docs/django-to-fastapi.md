@@ -71,7 +71,10 @@ In native mode every route receives one of four dispositions:
   exact DRF error strings, rendered live), optionally guarded by DRF
   `TokenAuthentication` + `IsAuthenticated`, one structurally recognized
   owner-or-read-only object permission, and the
-  `serializer.save(field=self.request.user)` perform_create idiom;
+  `serializer.save(field=self.request.user)` perform_create idiom; writable
+  `many=True` nested child serializers are supported when the author's
+  `create()` can be carried over (below) and `update()` matches the
+  drop-children idiom;
 - `native-fastapi-api-root` — the router API root, regenerated from the
   captured link table;
 - `dropped-format-suffix-alias` — DRF's `.{format}` alias routes are dropped
@@ -161,10 +164,22 @@ only.
 ### Generated natively (native strategy)
 
 - default-behavior `ModelViewSet` CRUD routes over `ModelSerializer` fields
-  with captured semantics (integer, char, and read-only primary-key relation
-  fields today: required, null, blank, trim, min/max bounds, defaults, and
-  the exact rendered DRF error strings, including validation, 404, JSON
-  parse, and `Allow` header behavior);
+  with captured semantics (integer, char, decimal, choice, unique, read-only
+  primary-key relation, and writable `many=True` nested child fields:
+  required, null, blank, trim, min/max bounds, digit/precision limits,
+  choices, defaults, and the exact rendered DRF error strings — including
+  DRF's index-keyed nested error format, validation, 404, JSON parse, and
+  `Allow` header behavior);
+- **carried-over write logic**: an overridden `create()` is re-emitted
+  verbatim into the generated serving layer when every free name it uses
+  resolves to the application's own models, `django.db.transaction`, or
+  `serializers.ValidationError` (swapped for a native shim). The author's
+  transaction boundaries and business rules — including rollback behavior —
+  run unchanged against the retained ORM. Anything else (request state,
+  helpers, other DRF machinery) is never guessed: the route set stays
+  needs-manual-adaptation. Overridden `update()` must match the
+  drop-children idiom (`validated_data.pop("<child>")` then
+  `super().update(...)`);
 - DRF `TokenAuthentication` with `IsAuthenticated`: the serving process reads
   the retained token table directly (raw quoted-identifier lookup, no DRF
   import), reproducing the 401 variants, `WWW-Authenticate`, and
@@ -194,7 +209,8 @@ verification until a human adapts them.
 
 - native generation for session or custom authentication, permission logic
   beyond the recognized owner idiom, pagination, filters, custom actions,
-  nested serializers, or writable relation fields;
+  write logic whose free names reach beyond models/transaction/ValidationError,
+  or writable non-nested relation fields;
 - automatic conversion of arbitrary serializer/business logic to Pydantic;
 - Django templates, Admin, Channels, GraphQL, or ORM replacement;
 - semantic verification of mutating or parameterized requests without

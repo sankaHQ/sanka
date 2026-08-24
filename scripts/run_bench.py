@@ -19,7 +19,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-TASKS = ("drf-fastapi-001", "drf-fastapi-002")
+
+def _discover_tasks(bench_dir: Path) -> tuple[str, ...]:
+    lane = bench_dir / "tasks" / "drf-fastapi"
+    return tuple(sorted(entry.name for entry in lane.iterdir() if (entry / "task.yaml").is_file()))
 
 
 def main() -> int:
@@ -35,8 +38,12 @@ def main() -> int:
     env = dict(os.environ)
     env.pop("DJANGO_SETTINGS_MODULE", None)
     env.pop("SANKA_TEST_DB", None)
+    tasks = _discover_tasks(bench_dir)
+    if not tasks:
+        print(f"no benchmark tasks found in {bench_dir}", file=sys.stderr)
+        return 2
     failures: list[str] = []
-    for task in TASKS:
+    for task in tasks:
         source = bench_dir / "tasks" / "drf-fastapi" / task / "source"
         if not source.is_dir():
             failures.append(f"{task}: fixture source missing in bench checkout")
@@ -117,7 +124,7 @@ def main() -> int:
         for line in failures:
             print(f"  {line}", file=sys.stderr)
         return 1
-    print(f"bench gate passed: {len(TASKS)} task(s) fully migrated")
+    print(f"bench gate passed: {len(tasks)} task(s) fully migrated")
     return 0
 
 
