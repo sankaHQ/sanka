@@ -58,6 +58,12 @@ class SerializerFieldIR:
     has_default: bool = False
     default: Any = None
     attname: str | None = None
+    max_digits: int | None = None
+    decimal_places: int | None = None
+    choices: tuple[Any, ...] = ()
+    unique: bool = False
+    unique_message: str | None = None
+    child: SerializerIR | None = None
     messages: tuple[tuple[str, str], ...] = ()
     supported: bool = True
 
@@ -67,6 +73,9 @@ class SerializerFieldIR:
         data["messages"] = tuple(
             (str(key), str(value)) for key, value in payload.get("messages", ())
         )
+        data["choices"] = tuple(payload.get("choices", ()))
+        child = payload.get("child")
+        data["child"] = SerializerIR.from_dict(child) if isinstance(child, dict) else None
         return cls(**data)
 
 
@@ -80,6 +89,10 @@ class SerializerIR:
     ordering: tuple[str, ...] = ()
     lookup: str = "pk"
     fields: tuple[SerializerFieldIR, ...] = ()
+    create_style: str = "default"
+    create_source: str | None = None
+    create_imports: tuple[tuple[str, str, str | None], ...] = ()
+    update_drops: tuple[str, ...] | None = None
     supported: bool = True
 
     @classmethod
@@ -89,6 +102,12 @@ class SerializerIR:
         data["fields"] = tuple(
             SerializerFieldIR.from_dict(item) for item in payload.get("fields", ())
         )
+        data["create_imports"] = tuple(
+            (str(alias), str(module), None if attr is None else str(attr))
+            for alias, module, attr in payload.get("create_imports", ())
+        )
+        drops = payload.get("update_drops")
+        data["update_drops"] = None if drops is None else tuple(str(item) for item in drops)
         return cls(**data)
 
 
