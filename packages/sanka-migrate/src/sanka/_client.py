@@ -9,6 +9,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from sanka.connector import CredentialProvider
 from sanka.runtime.engine import InspectionResult, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
 from sanka.runtime.planner import MigrationPlan
@@ -102,12 +103,14 @@ class Sanka:
         state: str | Path = ".sanka/migrate/state.db",
         batch_size: int = 100,
         env: Mapping[str, str] | None = None,
+        credential_provider: CredentialProvider | None = None,
     ) -> None:
         self._store = SqliteStateStore(state)
         self._registry = ConnectorRegistry.discover()
         self._engine = MigrationEngine(
             store=self._store,
             registry=self._registry,
+            credential_provider=credential_provider,
             batch_size=batch_size,
             env=None if env is None else dict(env),
         )

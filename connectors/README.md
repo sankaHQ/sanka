@@ -14,5 +14,5 @@ Rules:
 - One documentation/test directory per provider (`connectors/<name>/`); the
   runtime distribution owns all `sanka.connectors` entry points.
 
-Bundled first wave: `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`,
-`salesforce`, and `hubspot`.
+Bundled providers: `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`,
+`salesforce`, `hubspot`, and `sendgrid`.

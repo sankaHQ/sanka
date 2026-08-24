@@ -10,8 +10,8 @@ gate.
 - Production PyPI: the live [`sanka-migrate`](https://pypi.org/project/sanka-migrate/)
   and [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) project
   pages are the publication authority.
-- Source candidate: both package `pyproject.toml` files define `0.1.0a4`; the
-  matching `v0.1.0a4` tag is the source release authority after the reviewed
+- Source candidate: both package `pyproject.toml` files define `0.1.0a5`; the
+  matching `v0.1.0a5` tag is the source release authority after the reviewed
   commit is merged and tagged.
 - Hosted API: `https://api.sanka.com/v2/migrate`; the live
   `/research/datasets` response is the availability authority.
@@ -38,7 +38,7 @@ runtime namespace.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a4 tag
+uv run python scripts/check_release_tag.py v0.1.0a5 tag
 ```
 
 `make build-release` creates wheels and sdists, checks licenses, project URLs,

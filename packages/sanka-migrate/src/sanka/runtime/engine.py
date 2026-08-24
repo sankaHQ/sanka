@@ -29,11 +29,17 @@ import asyncio
 import json
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast, runtime_checkable
 
-from sanka.connector import ConflictPolicy, ConnectorError, Credentials, SupportsRecordCounts
+from sanka.connector import (
+    ConflictPolicy,
+    ConnectorError,
+    CredentialProvider,
+    Credentials,
+    SupportsRecordCounts,
+)
 from sanka.connector.protocols import DestinationConnector, SourceConnector
 from sanka.runtime.execution import (
     DEFAULT_VALIDATION_SAMPLE_SIZE,
@@ -159,12 +165,14 @@ class MigrationEngine:
         *,
         store: StateStore,
         registry: ConnectorRegistry,
+        credential_provider: CredentialProvider | None = None,
         batch_size: int = 100,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         env: dict[str, str] | None = None,
     ) -> None:
         self._store = store
         self._registry = registry
+        self._credential_provider = credential_provider
         self._batch_size = batch_size
         self._sleep = sleep
         self._env = env
@@ -194,8 +202,8 @@ class MigrationEngine:
 
     async def inspect(self, run_id: str) -> InspectionResult:
         spec = self._spec(run_id)
-        source, source_credentials = self._source(spec)
-        destination, destination_credentials = self._destination(spec)
+        source, source_credentials = await self._source(spec)
+        destination, destination_credentials = await self._destination(spec)
 
         source_objects = await source.discover_objects(source_credentials)
         inventory = await source.inventory(source_credentials)
@@ -274,7 +282,7 @@ class MigrationEngine:
             raise ExecutionError(f"run {run_id!r} has no plan; run plan first")
         plan = MigrationPlan.from_payload(json.loads(run.plan_json))
         spec = self._spec(run_id)
-        source, source_credentials = self._source(spec)
+        source, source_credentials = await self._source(spec)
         try:
             return await validate_routes(
                 routes=[_execution_route(route) for route in plan.routes],
@@ -302,8 +310,8 @@ class MigrationEngine:
             )
         plan = MigrationPlan.from_payload(json.loads(run.plan_json))
         spec = self._spec(run_id)
-        source, source_credentials = self._source(spec)
-        destination, destination_credentials = self._destination(spec)
+        source, source_credentials = await self._source(spec)
+        destination, destination_credentials = await self._destination(spec)
         policies = WritePolicies(conflict_policy=_conflict_policy(spec))
 
         state = self._execution_state(run_id)
@@ -350,8 +358,8 @@ class MigrationEngine:
             raise ExecutionError(f"run {run_id!r} has no plan; nothing to verify")
         plan = MigrationPlan.from_payload(json.loads(run.plan_json))
         spec = self._spec(run_id)
-        source, source_credentials = self._source(spec)
-        destination, destination_credentials = self._destination(spec)
+        source, source_credentials = await self._source(spec)
+        destination, destination_credentials = await self._destination(spec)
         summary = await self._ledger_route_summary(run_id)
 
         destination_counts: dict[str, int] = {}
@@ -599,11 +607,34 @@ class MigrationEngine:
         spec = MigrationSpec.from_dict(json.loads(run.spec_json))
         return resolve_env(spec, env=self._env) if self._env is not None else resolve_env(spec)
 
-    def _source(self, spec: MigrationSpec) -> tuple[SourceConnector, Credentials]:
-        return self._registry.source(spec.source.type), _credentials(spec.source)
+    async def _source(self, spec: MigrationSpec) -> tuple[SourceConnector, Credentials]:
+        return self._registry.source(spec.source.type), await self._credentials(spec.source)
 
-    def _destination(self, spec: MigrationSpec) -> tuple[DestinationConnector, Credentials]:
-        return self._registry.destination(spec.target.type), _credentials(spec.target)
+    async def _destination(
+        self,
+        spec: MigrationSpec,
+    ) -> tuple[DestinationConnector, Credentials]:
+        return self._registry.destination(spec.target.type), await self._credentials(spec.target)
+
+    async def _credentials(self, endpoint: EndpointSpec) -> Credentials:
+        if self._credential_provider is None:
+            return _credentials(endpoint)
+        connection = str(endpoint.connection or "").strip()
+        if not connection:
+            raise ExecutionError(
+                f"{endpoint.type!r} needs a named connection when a credential provider is used"
+            )
+        resolved = await self._credential_provider.resolve(connection)
+        if resolved.provider != endpoint.type:
+            raise ExecutionError(
+                f"connection {connection!r} resolved provider {resolved.provider!r}, "
+                f"expected {endpoint.type!r}"
+            )
+        return replace(
+            resolved,
+            connection_id=resolved.connection_id or connection,
+            settings={**resolved.settings, **endpoint.options},
+        )
 
 
 def _utc_now() -> str:

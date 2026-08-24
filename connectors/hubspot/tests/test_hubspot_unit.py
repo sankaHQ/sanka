@@ -17,6 +17,7 @@ import pytest
 from sanka.connector import (
     AuthenticationError,
     BatchWriteInput,
+    ConfigurationError,
     ConflictError,
     Credentials,
     CustomObjectDefinition,
@@ -150,6 +151,32 @@ def test_registration_shape() -> None:
     assert CONNECTOR.source.provider == "hubspot"
     assert CONNECTOR.destination.provider == "hubspot"
     assert CONNECTOR.source.binding_kind == "channel"
+
+
+async def test_gateway_accepts_a_connection_scoped_api_base_url() -> None:
+    recorder = Recorder(lambda request: httpx.Response(200, json={"results": []}))
+    configured = Credentials(
+        provider="hubspot",
+        connection_id="demo",
+        access_token="unit-test-token",
+        settings={"api_base_url": "https://demo.local/hubspot"},
+    )
+
+    await HubSpotSource(gateway=gateway(recorder)).discover_objects(configured)
+
+    assert recorder.requests[0].url == "https://demo.local/hubspot/crm/v3/schemas?archived=false"
+
+
+async def test_gateway_rejects_a_relative_api_base_url() -> None:
+    configured = Credentials(
+        provider="hubspot",
+        access_token="unit-test-token",
+        settings={"api_base_url": "/hubspot"},
+    )
+    with pytest.raises(ConfigurationError, match="absolute"):
+        await HubSpotSource(gateway=gateway(lambda request: httpx.Response(200))).discover_objects(
+            configured
+        )
 
 
 # --------------------------------------------------------------------------

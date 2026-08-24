@@ -11,7 +11,7 @@ scaffold encodes.
 |---|---|---|---|
 | Runtime | `sanka` (public facade); `sanka.runtime`, `sanka.cli` | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner, execution engine, state store, verification, CLI |
 | Connector interface | `sanka.connector` | Apache-2.0 | Source/destination protocols, records, schemas, credentials, capabilities, and error taxonomy |
-| First-party connectors | `sanka_connector_*` | Apache-2.0 | ClickHouse, CSV, HubSpot, Markdown, PostgreSQL, Salesforce, and SQLite providers |
+| First-party connectors | `sanka_connector_*` | Apache-2.0 | ClickHouse, CSV, HubSpot, Markdown, PostgreSQL, Salesforce, SendGrid, and SQLite providers |
 | Standalone MCP | `sanka_migrate_mcp` | Apache-2.0 | Credential-free research and assessment tools |
 
 License-dependency direction is one-way: Apache code never imports AGPL code.
@@ -89,5 +89,8 @@ they bind every later phase:
   verification, CLI lifecycle commands, production mapping stack, and the
   `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`, `salesforce`, and
   `hubspot` connectors.
+- **Phase 2a (done)** — named-connection credential-provider resolution and a
+  SendGrid Marketing Contacts source whose immutable export job is the run's
+  high-water mark.
 - **Later** — managed OAuth connections, hosted execution, and AI-assisted
   planning/remediation through Sanka's hosted product.

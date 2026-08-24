@@ -114,6 +114,7 @@ def main() -> int:
                 "sanka_connector_markdown/__init__.py",
                 "sanka_connector_postgres/__init__.py",
                 "sanka_connector_salesforce/__init__.py",
+                "sanka_connector_sendgrid/__init__.py",
                 "sanka_connector_sqlite/__init__.py",
             }
             missing_imports = sorted(required_imports - wheel_members)

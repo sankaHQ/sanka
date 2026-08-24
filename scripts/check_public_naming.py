@@ -35,6 +35,7 @@ BUNDLED_CONNECTOR_PACKAGES = {
     "src/sanka_connector_markdown",
     "src/sanka_connector_postgres",
     "src/sanka_connector_salesforce",
+    "src/sanka_connector_sendgrid",
     "src/sanka_connector_sqlite",
 }
 
