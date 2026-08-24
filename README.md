@@ -22,14 +22,14 @@ sanka verify
 ```
 
 The package also includes the existing data-migration runtime and bundled
-connectors for databases, warehouses, files, Salesforce, and HubSpot.
+connectors for databases, warehouses, files, Salesforce, HubSpot, and SendGrid.
 
 ## Current release status
 
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| DRF → FastAPI recipe | Included in source candidate `v0.1.0a4`; the live PyPI project remains the publication authority. Compatibility mode provides resolved-route scan, a hashed plan, separate FastAPI output, manifest verification, and safe read-only differential probes |
+| DRF → FastAPI recipe | Included in source candidate `v0.1.0a5`; the live PyPI project remains the publication authority. Compatibility mode provides resolved-route scan, a hashed plan, separate FastAPI output, manifest verification, and safe read-only differential probes |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
@@ -199,8 +199,9 @@ computed over the unresolved spec.
 | `clickhouse` | — | ✅ | `ReplacingMergeTree` + identity `ORDER BY`; batch inserts; `FINAL`-guarded count verification |
 | `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
 | `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
+| `sendgrid` | ✅ | — | Marketing Contacts export, export-job snapshot bounds, resumable paging without forwarding signed-download credentials |
 
-All seven first-party connectors and the Apache-2.0 connector interface ship
+All eight first-party connectors and the Apache-2.0 connector interface ship
 inside `sanka-migrate`; users never install a provider plugin. The source files
 retain their Apache-2.0 headers and never import the AGPL runtime, so the
 license boundary stays machine-enforced inside the single distribution.
@@ -268,6 +269,7 @@ spec = MigrationSpec(
 engine = MigrationEngine(
     store=SqliteStateStore(".sanka/migrate/state.db"),
     registry=ConnectorRegistry.discover(),
+    credential_provider=my_credential_provider,
 )
 
 run_id = engine.create(spec)
@@ -276,9 +278,11 @@ await engine.apply(run_id, plan_hash=plan.plan_hash)
 report = await engine.verify(run_id)
 ```
 
-Hosted control planes swap in their own `StateStore` and
-`CredentialProvider` implementations — the SQLite store is the local
-default, not a requirement.
+Hosted control planes and isolated embedders may supply their own `StateStore`
+and `CredentialProvider` implementations. A provider resolves the named
+`EndpointSpec.connection` immediately before a connector call, overlays the
+reviewed non-secret endpoint options, and rejects provider mismatches. The
+SQLite store and direct endpoint credentials remain the local defaults.
 
 ## For AI agents
 

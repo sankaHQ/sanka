@@ -1,6 +1,6 @@
 [project]
 name = "sanka-migrate"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "Sanka — inspect, plan, execute, and verify migrations across applications and data systems"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -33,6 +33,7 @@ hubspot = "sanka_connector_hubspot:CONNECTOR"
 markdown = "sanka_connector_markdown:CONNECTOR"
 postgres = "sanka_connector_postgres:CONNECTOR"
 salesforce = "sanka_connector_salesforce:CONNECTOR"
+sendgrid = "sanka_connector_sendgrid:CONNECTOR"
 sqlite = "sanka_connector_sqlite:CONNECTOR"
 
 [project.urls]
@@ -52,5 +53,6 @@ packages = [
   "src/sanka_connector_markdown",
   "src/sanka_connector_postgres",
   "src/sanka_connector_salesforce",
+  "src/sanka_connector_sendgrid",
   "src/sanka_connector_sqlite",
 ]

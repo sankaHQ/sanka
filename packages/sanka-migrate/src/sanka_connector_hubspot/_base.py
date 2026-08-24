@@ -27,6 +27,7 @@ import httpx
 
 from sanka.connector import (
     AuthenticationError,
+    ConfigurationError,
     ConflictError,
     ConnectorError,
     Credentials,
@@ -76,6 +77,29 @@ PROPERTY_DEFAULT_GROUPS: Final[dict[str, str]] = {
     "deals": "dealinformation",
     "tickets": "ticketinformation",
 }
+
+
+def hubspot_api_base_url(credentials: Credentials) -> str:
+    """Return the configured API origin, defaulting to HubSpot production.
+
+    Embedders may point the connector at a contract-compatible isolated
+    environment through ``settings['api_base_url']``. The override is kept in
+    credentials rather than module state so concurrent tenants never share a
+    mutable target.
+    """
+
+    raw = str(credentials.settings.get("api_base_url") or HUBSPOT_API_BASE_URL).strip()
+    try:
+        parsed = httpx.URL(raw)
+    except ValueError as exc:
+        raise ConfigurationError("HubSpot api_base_url is not a valid URL") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.host:
+        raise ConfigurationError("HubSpot api_base_url must be an absolute HTTP(S) URL")
+    return raw.rstrip("/")
+
+
+def _hubspot_url(credentials: Credentials, path: str) -> str:
+    return f"{hubspot_api_base_url(credentials)}/{path.lstrip('/')}"
 
 
 class HubSpotRequestError(RuntimeError):
@@ -217,7 +241,8 @@ class HubSpotGateway:
     ) -> list[dict[str, Any]]:
         access_token = require_access_token(credentials)
         owners: list[dict[str, Any]] = []
-        next_url: str | None = HUBSPOT_OWNERS_URL
+        owners_url = _hubspot_url(credentials, "/crm/v3/owners/")
+        next_url: str | None = owners_url
         hop = 0
         async with httpx.AsyncClient(
             timeout=self._timeout_seconds,
@@ -234,7 +259,7 @@ class HubSpotGateway:
                         },
                         params=(
                             {"limit": max(1, min(int(limit or 100), 100)), "archived": "false"}
-                            if next_url == HUBSPOT_OWNERS_URL
+                            if next_url == owners_url
                             else None
                         ),
                     )
@@ -264,7 +289,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            HUBSPOT_CRM_OBJECT_SEARCH_URL.format(object_type=object_type),
+            _hubspot_url(credentials, f"/crm/v3/objects/{object_type}/search"),
             json=payload,
         )
 
@@ -278,7 +303,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            HUBSPOT_CRM_OBJECTS_URL.format(object_type=object_type),
+            _hubspot_url(credentials, f"/crm/v3/objects/{object_type}"),
             json={"properties": properties},
         )
 
@@ -293,7 +318,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "PATCH",
-            f"{HUBSPOT_CRM_OBJECTS_URL.format(object_type=object_type)}/{record_id}",
+            _hubspot_url(credentials, f"/crm/v3/objects/{object_type}/{record_id}"),
             json={"properties": properties},
         )
 
@@ -307,7 +332,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            f"{HUBSPOT_CRM_OBJECTS_URL.format(object_type=object_type)}/batch/create",
+            _hubspot_url(credentials, f"/crm/v3/objects/{object_type}/batch/create"),
             json={"inputs": inputs},
         )
 
@@ -321,7 +346,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            f"{HUBSPOT_CRM_OBJECTS_URL.format(object_type=object_type)}/batch/update",
+            _hubspot_url(credentials, f"/crm/v3/objects/{object_type}/batch/update"),
             json={"inputs": updates},
         )
 
@@ -335,7 +360,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            f"{HUBSPOT_CRM_OBJECTS_URL.format(object_type=object_type)}/batch/upsert",
+            _hubspot_url(credentials, f"/crm/v3/objects/{object_type}/batch/upsert"),
             json={"inputs": inputs},
         )
 
@@ -352,7 +377,10 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            f"{HUBSPOT_API_BASE_URL}/crm/v4/associations/{from_object}/{to_object}/{suffix}",
+            _hubspot_url(
+                credentials,
+                f"/crm/v4/associations/{from_object}/{to_object}/{suffix}",
+            ),
             json={"inputs": inputs},
         )
 
@@ -382,8 +410,11 @@ class HubSpotGateway:
                 try:
                     response = await client.post(
                         (
-                            f"{HUBSPOT_API_BASE_URL}/crm/v4/associations/"
-                            f"{normalized_from_object}/{normalized_to_object}/batch/read"
+                            _hubspot_url(
+                                credentials,
+                                f"/crm/v4/associations/{normalized_from_object}/"
+                                f"{normalized_to_object}/batch/read",
+                            )
                         ),
                         headers=_json_headers(access_token),
                         json={"inputs": [{"id": record_id} for record_id in chunk]},
@@ -409,7 +440,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "GET",
-            HUBSPOT_CRM_PROPERTIES_URL.format(object_type=object_type),
+            _hubspot_url(credentials, f"/crm/v3/properties/{object_type}"),
             params={"archived": "false"},
         )
 
@@ -423,7 +454,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            HUBSPOT_CRM_PROPERTIES_URL.format(object_type=object_type),
+            _hubspot_url(credentials, f"/crm/v3/properties/{object_type}"),
             json=payload,
         )
 
@@ -434,7 +465,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "GET",
-            HUBSPOT_CRM_SCHEMAS_URL,
+            _hubspot_url(credentials, "/crm/v3/schemas"),
             params={"archived": "false"},
         )
 
@@ -448,7 +479,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "GET",
-            f"{HUBSPOT_CRM_SCHEMAS_URL}/{encoded_object_type}",
+            _hubspot_url(credentials, f"/crm/v3/schemas/{encoded_object_type}"),
         )
 
     async def create_crm_schema(
@@ -460,7 +491,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            HUBSPOT_CRM_SCHEMAS_URL,
+            _hubspot_url(credentials, "/crm/v3/schemas"),
             json=payload,
         )
 
@@ -473,7 +504,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "GET",
-            HUBSPOT_CRM_PIPELINES_URL.format(object_type=object_type),
+            _hubspot_url(credentials, f"/crm/v3/pipelines/{object_type}"),
             params={"archived": "false"},
         )
 
@@ -487,7 +518,7 @@ class HubSpotGateway:
         return await self._request_json(
             credentials,
             "POST",
-            HUBSPOT_CRM_PIPELINES_URL.format(object_type=object_type),
+            _hubspot_url(credentials, f"/crm/v3/pipelines/{object_type}"),
             json=payload,
         )
 

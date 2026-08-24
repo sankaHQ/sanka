@@ -30,6 +30,7 @@ RESTRICTED_ZONES: tuple[tuple[str, str | None], ...] = (
     ("packages/sanka-migrate/src/sanka_connector_markdown", CONNECTOR_PREFIX),
     ("packages/sanka-migrate/src/sanka_connector_postgres", CONNECTOR_PREFIX),
     ("packages/sanka-migrate/src/sanka_connector_salesforce", CONNECTOR_PREFIX),
+    ("packages/sanka-migrate/src/sanka_connector_sendgrid", CONNECTOR_PREFIX),
     ("packages/sanka-migrate/src/sanka_connector_sqlite", CONNECTOR_PREFIX),
     ("packages/sanka-migrate/tests/connector_sdk", CONNECTOR_PREFIX),
     ("connectors", CONNECTOR_PREFIX),

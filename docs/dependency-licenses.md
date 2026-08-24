@@ -11,7 +11,7 @@ AGPL dependency outside this repository's own AGPL runtime.
 |---|---|---|---|
 | Bundled `sanka.connector` interface | Apache-2.0 | runtime and every connector | Sanka-owned permissive source component inside `sanka-migrate` |
 | PyYAML | MIT | runtime and bundled Markdown connector | permissive |
-| httpx, httpcore, idna | BSD-3-Clause | bundled HubSpot and Salesforce connectors | permissive |
+| httpx, httpcore, idna | BSD-3-Clause | bundled HubSpot, Salesforce, and SendGrid connectors | permissive |
 | mcp, pydantic, pydantic-core, pydantic-settings | MIT | standalone MCP server | permissive; Pydantic Settings is temporarily constrained below 2.15 to avoid its unresolved FastMCP lifespan warning |
 | cryptography | Apache-2.0 OR BSD-3-Clause | MCP authentication framework transitive dependency | permissive; the stdio server does not configure authentication |
 | cffi, pycparser | MIT-0, BSD-3-Clause | cryptography transitive dependencies | permissive |
