@@ -30,7 +30,7 @@ sanka apply
 sanka verify
 ```
 
-This recipe is included in source candidate `v0.1.0a5`; the live
+This recipe is included in source candidate `v0.1.0a6`; the live
 [PyPI project](https://pypi.org/project/sanka-migrate/) remains the publication authority.
 Sanka resolves the live Django URL graph, including DRF router routes and custom actions.
 Apply creates a separate FastAPI compatibility application in
@@ -73,6 +73,14 @@ sanka connect hubspot
 ```
 
 Advanced integrations can use the typed `sanka.runtime` modules directly.
+
+## Destination date transforms
+
+The `hubspot_date_ms` mapping transform converts a source date to UTC-midnight
+epoch milliseconds for HubSpot date properties. It accepts ISO dates and
+datetimes, Unix timestamps, and Japanese year-month period labels such as
+`2026年04月期`. A year-month period resolves to the first day of that month;
+invalid months are rejected as mapping-value errors instead of being coerced.
 
 ## Public research and assessment
 

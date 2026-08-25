@@ -44,6 +44,39 @@ def test_hubspot_date_ms_transform(value: object, expected: int) -> None:
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2023年04月期", 1680307200000),
+        ("2026年10月期", 1790812800000),
+        (" 2026年4月期 ", 1775001600000),
+    ],
+)
+def test_hubspot_date_ms_transform_accepts_japanese_year_month_period(
+    value: object,
+    expected: int,
+) -> None:
+    assert apply_transform(value, "hubspot_date_ms") == expected
+
+
+def test_hubspot_date_ms_transform_rejects_invalid_japanese_year_month_period() -> None:
+    field = MigrationMappingField(
+        source_field="Registration_course__c.endDate__c",
+        target_object="2-410",
+        target_field="registration_enddate__c",
+        transform_rule="hubspot_date_ms",
+    )
+
+    with pytest.raises(MappingError) as exc_info:
+        destination_properties({"endDate__c": "2026年13月期"}, [field])
+
+    assert exc_info.value.code == "SANKA_MIGRATE_MAPPING_VALUE_INVALID"
+    assert exc_info.value.details == {
+        "sourceField": "Registration_course__c.endDate__c",
+        "targetField": "registration_enddate__c",
+    }
+
+
+@pytest.mark.parametrize(
     ("value", "rule", "expected"),
     [
         ("  Acme Inc  ", "trim", "Acme Inc"),
