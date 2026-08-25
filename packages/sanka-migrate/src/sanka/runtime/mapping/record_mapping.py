@@ -16,6 +16,7 @@ milliseconds), not Sanka coupling.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Any
@@ -27,6 +28,7 @@ from sanka.runtime.mapping.model import MigrationMappingField
 MappingGroup = tuple[str, str, SourceFilter | None, list[MigrationMappingField]]
 MappingRouteManifest = list[dict[str, Any]]
 _OMIT_MAPPED_VALUE = object()
+_JAPANESE_YEAR_MONTH_PERIOD = re.compile(r"(?P<year>\d{4})年(?P<month>\d{1,2})月期")
 
 
 def _source_filter_key(source_filter: SourceFilter | None) -> tuple[str, str, bool] | None:
@@ -316,6 +318,12 @@ def _date_value(value: Any) -> date:
         raise ValueError("date value is empty")
     if text.lstrip("+-").isdigit():
         return _datetime_value(int(text)).date()
+    if period_match := _JAPANESE_YEAR_MONTH_PERIOD.fullmatch(text):
+        return date(
+            int(period_match.group("year")),
+            int(period_match.group("month")),
+            1,
+        )
     try:
         return date.fromisoformat(text)
     except ValueError:
