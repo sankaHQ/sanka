@@ -40,6 +40,28 @@ class RouteIR:
 
 
 @dataclass(frozen=True, slots=True)
+class DatabaseIR:
+    """Connection identity captured at scan time. Passwords are never stored."""
+
+    vendor: str
+    name: str
+    host: str = ""
+    port: str = ""
+    user: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> DatabaseIR:
+        data = payload or {}
+        return cls(
+            vendor=str(data.get("vendor") or "other"),
+            name=str(data.get("name") or ""),
+            host=str(data.get("host") or ""),
+            port=str(data.get("port") or ""),
+            user=str(data.get("user") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SerializerFieldIR:
     """One serializer field with enough captured semantics to regenerate its
     validation natively, including the exact rendered DRF error strings."""
@@ -86,6 +108,8 @@ class SerializerIR:
     model_module: str
     model_class: str
     object_name: str
+    db_table: str = ""
+    pk_attname: str = "id"
     ordering: tuple[str, ...] = ()
     lookup: str = "pk"
     fields: tuple[SerializerFieldIR, ...] = ()
@@ -98,6 +122,8 @@ class SerializerIR:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SerializerIR:
         data = dict(payload)
+        data.setdefault("db_table", "")
+        data.setdefault("pk_attname", "id")
         data["ordering"] = tuple(payload.get("ordering", ()))
         data["fields"] = tuple(
             SerializerFieldIR.from_dict(item) for item in payload.get("fields", ())
@@ -192,6 +218,7 @@ class FrameworkScan:
     view_details: tuple[ViewIR, ...] = ()
     middleware: tuple[str, ...] = ()
     generic_messages: tuple[tuple[str, str], ...] = ()
+    database: DatabaseIR = field(default_factory=lambda: DatabaseIR(vendor="other", name=""))
     scan_hash: str = field(default="")
 
     def hash_payload(self) -> dict[str, Any]:
@@ -233,6 +260,7 @@ class FrameworkScan:
             generic_messages=tuple(
                 (str(key), str(value)) for key, value in payload.get("generic_messages", ())
             ),
+            database=DatabaseIR.from_dict(payload.get("database")),
             scan_hash=str(payload.get("scan_hash", "")),
         )
 
@@ -263,6 +291,7 @@ class FrameworkPlan:
     risks: tuple[FrameworkRisk, ...]
     retained: tuple[str, ...]
     default_output: str
+    sql_engine: str = "tortoise"
     plan_hash: str = field(default="")
 
     @property
@@ -302,5 +331,6 @@ class FrameworkPlan:
             risks=tuple(FrameworkRisk(**item) for item in payload.get("risks", [])),
             retained=tuple(payload.get("retained", [])),
             default_output=str(payload["default_output"]),
+            sql_engine=str(payload.get("sql_engine") or "tortoise"),
             plan_hash=str(payload.get("plan_hash", "")),
         )

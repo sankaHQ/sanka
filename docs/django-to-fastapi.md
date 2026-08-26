@@ -4,10 +4,12 @@
 Sanka's first application-migration recipe creates a verified transition from
 Django REST Framework (DRF) to FastAPI. Two strategies share one scan:
 
-- **`native` (default)** generates a genuinely native FastAPI request layer
-  for the supported envelope. The generated serving process keeps Django for
-  the ORM only — DRF never loads into it. Routes outside the envelope are
-  reported as needing manual adaptation, never silently bridged.
+- **`native` (default)** generates a genuinely native **async** FastAPI
+  request layer for the supported envelope. Persistence is async SQL against
+  the existing Django tables (Tortoise ORM by default — closest to Django;
+  SQLAlchemy 2.0 or psycopg3 on request). Django is not imported at serve
+  time. Routes outside the envelope are reported as needing manual
+  adaptation, never silently bridged.
 - **`compatibility`** generates the strangler bridge: a real FastAPI route
   graph that dispatches every route into the existing Django application
   in-process. It preserves behavior for the whole surface but still serves
@@ -23,7 +25,7 @@ python -m pip install --pre sanka-migrate
 
 sanka scan
 sanka plan --to fastapi
-sanka apply
+sanka apply            # prompts for Tortoise / SQLAlchemy / psycopg when interactive
 sanka verify
 ```
 
@@ -47,6 +49,7 @@ side-effect-free.
 The scan records:
 
 - Python, Django, and DRF versions;
+- database vendor and name (never a password);
 - HTTP methods and normalized paths;
 - view classes and actions;
 - serializer, model, authentication, and permission classes when declared;
@@ -60,9 +63,10 @@ same machine-readable application IR for agents and other tools.
 
 The plan classifies every discovered route, records the selected strategy
 (`--strategy native` is the default; `--strategy compatibility` selects the
-bridge), lists retained components and manual adaptations, and binds the
-result to the exact scan hash. The canonical artifact is
-`.sanka/plan-fastapi.json`.
+bridge), records the async SQL engine (`--orm tortoise` is the default and
+recommended; `sqlalchemy` and `psycopg` are the other choices), lists
+retained components and manual adaptations, and binds the result to the
+exact scan hash. The canonical artifact is `.sanka/plan-fastapi.json`.
 
 In native mode every route receives one of four dispositions:
 
@@ -73,8 +77,9 @@ In native mode every route receives one of four dispositions:
   owner-or-read-only object permission, and the
   `serializer.save(field=self.request.user)` perform_create idiom; writable
   `many=True` nested child serializers are supported when the author's
-  `create()` can be carried over (below) and `update()` matches the
-  drop-children idiom;
+  `create()` is the recognized nested-write shape (the generated app inserts
+  the parent row and children through async SQL on the existing tables) and
+  `update()` matches the drop-children idiom;
 - `native-fastapi-api-root` — the router API root, regenerated from the
   captured link table;
 - `dropped-format-suffix-alias` — DRF's `.{format}` alias routes are dropped
@@ -102,15 +107,21 @@ The generated native application contains:
 
 | File | Purpose |
 |---|---|
-| `app.py` | FastAPI ASGI entrypoint |
-| `sanka_native.py` | Native request layer: FastAPI routes, DRF-parity validation, Django ORM access |
-| `sanka_settings.py` | Serving settings — the original settings with the DRF request layer removed |
-| `sanka-manifest.json` | Exact scan hash, plan hash, routes, captured field semantics, dropped aliases |
-| `requirements.txt` | Target server dependencies |
+| `app.py` | Async FastAPI ASGI entrypoint with `@app.get` / `@app.post` routes |
+| `sanka_native.py` | DRF-parity validation used by those routes |
+| `sanka_store.py` | Async SQL (Tortoise, SQLAlchemy, or psycopg) over the existing tables |
+| `models.py` | Tortoise or SQLAlchemy models mapped onto Django `db_table` names (not emitted for psycopg) |
+| `sanka-manifest.json` | Exact scan hash, plan hash, routes, captured field semantics, database vendor, SQL engine, dropped aliases |
+| `requirements.txt` | Target server dependencies (FastAPI + the chosen SQL engine) |
 | `README.md` | Run guidance |
 
-In compatibility mode `sanka_native.py` and `sanka_settings.py` are replaced
-by `sanka_compat.py`, the in-process Django dispatcher.
+`sanka apply` prompts for the SQL engine when stdin is a TTY and `--orm` was
+not passed. Non-interactive runs use the engine recorded in the plan
+(Tortoise unless `sanka plan --to fastapi --orm …` chose otherwise).
+`psycopg` is refused unless scan captured a PostgreSQL database.
+
+In compatibility mode the native SQL files are replaced by `sanka_compat.py`,
+the in-process Django dispatcher.
 
 Source files are never overwritten. `sanka apply --bench-candidate <dir>`
 additionally emits a Sanka Migration Bench candidate (overlay plus
@@ -124,8 +135,9 @@ The default verifier checks four layers:
 1. the scan artifact still matches its canonical hash;
 2. the plan still matches the scan and its reviewed hash;
 3. the generated manifest contains exactly the automatically planned routes;
-4. generated Python compiles, and parameter-free GET/HEAD routes return the
-same status, content type, and body through DRF and FastAPI.
+4. generated Python compiles and native output does not import Django; parameter-free GET/HEAD routes return the
+same status, content type, and body through DRF and FastAPI. The generated
+app must be able to import its SQL engine (`pip install -r requirements.txt`).
 
 Add concrete parameterized read cases in `.sanka/verify-cases.json`:
 
@@ -155,11 +167,12 @@ only.
 
 ### Retained deliberately (both strategies)
 
-- Django models and migrations;
-- Django ORM;
-- synchronous `transaction.atomic` handlers (Django does not currently support
-  transactions in async mode);
+- Django **tables** produced by the source project's models and migrations
+  (native serving reuses them; it does not rewrite schema);
 - Celery and other existing background workers.
+
+Compatibility mode additionally retains the Django ORM, authentication,
+permissions, and DRF handlers behind the bridge.
 
 ### Generated natively (native strategy)
 
@@ -170,16 +183,13 @@ only.
   choices, defaults, and the exact rendered DRF error strings — including
   DRF's index-keyed nested error format, validation, 404, JSON parse, and
   `Allow` header behavior);
-- **carried-over write logic**: an overridden `create()` is re-emitted
-  verbatim into the generated serving layer when every free name it uses
-  resolves to the application's own models, `django.db.transaction`, or
-  `serializers.ValidationError` (swapped for a native shim). The author's
-  transaction boundaries and business rules — including rollback behavior —
-  run unchanged against the retained ORM. Anything else (request state,
-  helpers, other DRF machinery) is never guessed: the route set stays
-  needs-manual-adaptation. Overridden `update()` must match the
-  drop-children idiom (`validated_data.pop("<child>")` then
-  `super().update(...)`);
+- **async handlers** and an async SQL store (Tortoise recommended, or
+  SQLAlchemy / psycopg) mapped onto captured `db_table` / column names;
+- **nested writes** regenerated as parent-plus-children SQL when the author's
+  `create()` only names the application's models, `django.db.transaction`, or
+  `serializers.ValidationError`. Extra business rules inside `create()` are
+  not translated. Overridden `update()` must match the drop-children idiom
+  (`validated_data.pop("<child>")` then `super().update(...)`);
 - DRF `TokenAuthentication` with `IsAuthenticated`: the serving process reads
   the retained token table directly (raw quoted-identifier lookup, no DRF
   import), reproducing the 401 variants, `WWW-Authenticate`, and
@@ -189,13 +199,11 @@ only.
   ownership comparison) — arbitrary permission logic is never guessed;
 - `perform_create` author injection matched from the
   `serializer.save(field=self.request.user)` idiom;
-- the router API root;
-- generated handlers are synchronous so the retained ORM runs in FastAPI's
-  worker threads, never on the event loop.
+- the router API root.
 
 The source DRF application and its test suite stay intact in the repository;
-only the serving process stops loading DRF. Routes outside the envelope fail
-verification until a human adapts them.
+only the serving process stops loading Django and DRF. Routes outside the
+envelope fail verification until a human adapts them.
 
 ### Detected and bridged automatically (compatibility strategy)
 
@@ -212,7 +220,8 @@ verification until a human adapts them.
   write logic whose free names reach beyond models/transaction/ValidationError,
   or writable non-nested relation fields;
 - automatic conversion of arbitrary serializer/business logic to Pydantic;
-- Django templates, Admin, Channels, GraphQL, or ORM replacement;
+- Django templates, Admin, Channels, GraphQL, or translating arbitrary
+  `create()` business rules beyond nested parent/child inserts;
 - semantic verification of mutating or parameterized requests without
   fixtures;
 - compatibility for arbitrary custom regex URL patterns.

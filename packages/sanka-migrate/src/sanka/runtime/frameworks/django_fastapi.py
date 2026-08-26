@@ -3,12 +3,14 @@
 
 Two strategies share one scan artifact:
 
-- ``native`` (default): generate a genuinely native FastAPI request layer for
-  the supported DRF envelope (ModelViewSet CRUD over ModelSerializer fields
-  whose semantics the scan captured, plus the router API root). The generated
-  serving process keeps Django only for the ORM; DRF never loads into it.
-  Format-suffix alias routes are dropped as a disclosed contract change, and
-  routes outside the envelope are reported as needing manual adaptation.
+- ``native`` (default): generate a genuinely native async FastAPI request
+  layer for the supported DRF envelope (ModelViewSet CRUD over
+  ModelSerializer fields whose semantics the scan captured, plus the router
+  API root). Persistence is async SQL (Tortoise by default; SQLAlchemy or
+  psycopg on request) against the existing Django tables. Django is not
+  imported at serve time. Format-suffix alias routes are dropped as a
+  disclosed contract change, and routes outside the envelope are reported
+  as needing manual adaptation.
 - ``compatibility``: the strangler bridge from v0.1. It creates a real FastAPI
   route graph while dispatching each route into the existing Django
   application in-process, preserving observable behavior for the whole route
@@ -33,10 +35,11 @@ from collections.abc import Iterable
 from dataclasses import replace as replace_dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any
 
 from sanka.runtime.frameworks.model import (
     ApiRootIR,
+    DatabaseIR,
     FrameworkPlan,
     FrameworkRisk,
     FrameworkScan,
@@ -46,6 +49,11 @@ from sanka.runtime.frameworks.model import (
     SerializerIR,
     ViewAuthIR,
     ViewIR,
+)
+from sanka.runtime.frameworks.native_async import (
+    SQL_ENGINE_LABELS,
+    render_async_sql_files,
+    resolve_sql_engine,
 )
 
 DEFAULT_ARTIFACT_DIR = ".sanka"
@@ -125,6 +133,7 @@ def scan_django(
         view_details=tuple(walk.view_details[name] for name in sorted(walk.view_details)),
         middleware=middleware,
         generic_messages=_generic_messages(),
+        database=_capture_database(root_path),
     ).with_hash()
     _write_json(_artifact_path(root_path, artifact_dir, SCAN_FILE), scan.to_dict())
     return scan
@@ -150,17 +159,27 @@ def plan_fastapi(
     artifact_dir: str | Path = DEFAULT_ARTIFACT_DIR,
     output: str = DEFAULT_FASTAPI_OUTPUT,
     strategy: str = NATIVE_STRATEGY,
+    sql_engine: str | None = None,
 ) -> FrameworkPlan:
     if strategy not in (NATIVE_STRATEGY, COMPATIBILITY_STRATEGY):
         raise FrameworkMigrationError(f"unknown plan strategy: {strategy}")
+    try:
+        engine = resolve_sql_engine(sql_engine)
+    except ValueError as error:
+        raise FrameworkMigrationError(str(error)) from error
     root_path = Path(root).resolve()
     scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
     if strategy == NATIVE_STRATEGY:
+        if engine == "psycopg" and scan.database.vendor != "postgresql":
+            raise FrameworkMigrationError(
+                "psycopg requires PostgreSQL; this project's database is "
+                + (scan.database.vendor or "unknown")
+            )
         routes = tuple(_plan_native_route(route) for route in scan.routes)
         retained = (
-            "Django models and migrations",
-            "Django ORM and synchronous transactions",
-            "DRF removed from the serving path; native FastAPI request layer",
+            "Existing Django tables (schema reused, not rewritten)",
+            f"Async SQL via {SQL_ENGINE_LABELS[engine]}",
+            "DRF removed; FastAPI async request layer (Django is not imported at serve time)",
             "Format-suffix alias routes dropped (disclosed contract change)",
         )
     else:
@@ -192,6 +211,7 @@ def plan_fastapi(
         risks=scan.risks,
         retained=retained,
         default_output=output,
+        sql_engine=engine,
     ).with_hash()
     _write_json(_artifact_path(root_path, artifact_dir, PLAN_FILE), plan.to_dict())
     return plan
@@ -247,6 +267,7 @@ def apply_fastapi_plan(
     output: str | Path | None = None,
     plan_hash: str | None = None,
     force: bool = False,
+    sql_engine: str | None = None,
 ) -> tuple[Path, int]:
     root_path = Path(root).resolve()
     plan = load_fastapi_plan(root_path, artifact_dir=artifact_dir)
@@ -254,6 +275,10 @@ def apply_fastapi_plan(
         raise FrameworkMigrationError(
             f"reviewed plan hash {plan_hash!r} does not match current plan {plan.plan_hash!r}"
         )
+    try:
+        engine = resolve_sql_engine(sql_engine or plan.sql_engine)
+    except ValueError as error:
+        raise FrameworkMigrationError(str(error)) from error
     output_value = str(output) if output is not None else plan.default_output
     output_path = Path(output_value)
     if not output_path.is_absolute():
@@ -275,6 +300,7 @@ def apply_fastapi_plan(
             output_path,
             entrypoint="app.py",
             source_root=relative_source,
+            sql_engine=engine,
         )
     else:
         count = _render_bridge_output(plan, output_path, source_root=relative_source)
@@ -307,7 +333,14 @@ def write_bench_candidate(
     if destination_path == root_path:
         raise FrameworkMigrationError("benchmark candidate cannot overwrite the source root")
     overlay = destination_path / "overlay"
-    _render_native_output(plan, scan, overlay, entrypoint="target_app.py", source_root=".")
+    _render_native_output(
+        plan,
+        scan,
+        overlay,
+        entrypoint="target_app.py",
+        source_root=".",
+        sql_engine=resolve_sql_engine(plan.sql_engine),
+    )
     _write_text(
         destination_path / "candidate.yaml",
         (
@@ -352,122 +385,19 @@ def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
         payload["child"] = {
             "model_module": field.child.model_module,
             "model_class": field.child.model_class,
+            "object_name": field.child.object_name,
+            "db_table": field.child.db_table,
+            "pk_attname": field.child.pk_attname,
             "ordering": list(field.child.ordering),
             "fields": [_field_payload(item) for item in field.child.fields],
         }
     return payload
 
 
-def _carryover_function_name(ir: SerializerIR) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", ir.name.lower()).strip("_")
-    return f"create_{slug}"
-
-
 def _create_payload(ir: SerializerIR) -> dict[str, Any]:
     if ir.create_style == "carryover":
-        return {"style": "carryover", "function": _carryover_function_name(ir)}
+        return {"style": "nested"}
     return {"style": "default"}
-
-
-# fmt: off
-_USER_LOGIC_HEADER = """\
-# Generated by Sanka under the license selected for this generated application.
-\"\"\"Author-owned write logic carried over verbatim from the source serializers.
-
-Each function below is the application's own ``create()`` method, re-emitted
-with its DRF exception type swapped for the native shim. The logic — including
-transaction boundaries and business rules — runs unchanged against the
-retained Django ORM.
-\"\"\"
-
-from __future__ import annotations
-
-
-def _normalize_detail(detail):
-    if isinstance(detail, str):
-        return [detail]
-    return detail
-
-
-class ValidationError(Exception):
-    def __init__(self, detail):
-        self.detail = _normalize_detail(detail)
-        super().__init__(self.detail)
-
-
-class _SerializersShim:
-    ValidationError = ValidationError
-
-
-_SERIALIZERS_SHIM = _SerializersShim()
-"""
-# fmt: on
-
-
-def _render_user_logic(resources: dict[str, dict[str, Any]], scan: FrameworkScan) -> str | None:
-    serializer_by_name = {item.name: item for item in scan.serializer_details}
-    sections: list[tuple[str, str]] = []
-    for resource in resources.values():
-        create = resource.get("create") or {}
-        if create.get("style") != "carryover":
-            continue
-        ir = serializer_by_name[cast(str, resource["serializer"])]
-        if ir.create_source is None:
-            raise FrameworkMigrationError(
-                f"serializer {ir.name} lost its carried create() source; run `sanka scan`"
-            )
-        sections.append(
-            (cast(str, create["function"]), _transform_carryover(ir, cast(str, create["function"])))
-        )
-    if not sections:
-        return None
-    body = "\n\n".join(code for _, code in sorted(sections))
-    return f"{_USER_LOGIC_HEADER}\n\n{body}\n"
-
-
-def _transform_carryover(ir: SerializerIR, function_name: str) -> str:
-    tree = ast.parse(cast(str, ir.create_source))
-    func = tree.body[0]
-    if not isinstance(func, ast.FunctionDef):
-        raise FrameworkMigrationError(f"carried create() for {ir.name} is not a function")
-    func.name = function_name
-    func.args.args = func.args.args[1:]
-    preamble: list[ast.stmt] = []
-    for alias, module, attr in ir.create_imports:
-        if module == "__sanka_shim__":
-            target = "_SERIALIZERS_SHIM" if attr == "serializers" else "ValidationError"
-            preamble.append(
-                ast.Assign(
-                    targets=[ast.Name(id=alias, ctx=ast.Store())],
-                    value=ast.Name(id=target, ctx=ast.Load()),
-                )
-            )
-        elif attr is None and module == "django.db.transaction":
-            preamble.append(
-                ast.ImportFrom(
-                    module="django.db",
-                    names=[
-                        ast.alias(
-                            name="transaction",
-                            asname=None if alias == "transaction" else alias,
-                        )
-                    ],
-                    level=0,
-                )
-            )
-        else:
-            preamble.append(
-                ast.ImportFrom(
-                    module=module,
-                    names=[
-                        ast.alias(name=cast(str, attr), asname=None if alias == attr else alias)
-                    ],
-                    level=0,
-                )
-            )
-    func.body = preamble + func.body
-    ast.fix_missing_locations(tree)
-    return ast.unparse(ast.Module(body=[func], type_ignores=[]))
 
 
 def _allow_headers(generated: list[PlannedRoute]) -> dict[str, str]:
@@ -525,6 +455,7 @@ def _render_native_output(
     *,
     entrypoint: str,
     source_root: str,
+    sql_engine: str,
 ) -> int:
     generated = [
         route
@@ -574,6 +505,8 @@ def _render_native_output(
                 "model_module": ir.model_module,
                 "model_class": ir.model_class,
                 "object_name": ir.object_name,
+                "db_table": ir.db_table,
+                "pk_attname": ir.pk_attname,
                 "ordering": list(ir.ordering),
                 "lookup": ir.lookup,
                 "fields": [_field_payload(field) for field in ir.fields],
@@ -592,12 +525,18 @@ def _render_native_output(
         "source_scan_hash": plan.source_scan_hash,
         "plan_hash": plan.plan_hash,
         "settings_module": plan.settings_module,
-        "serving_settings": "sanka_settings",
+        "sql_engine": sql_engine,
+        "database": {
+            "vendor": scan.database.vendor,
+            "name": scan.database.name,
+            "host": scan.database.host,
+            "port": scan.database.port,
+            "user": scan.database.user,
+        },
         "entrypoint": entrypoint,
         "allow": _allow_headers(generated),
         "generic_messages": dict(scan.generic_messages),
-        "has_user_logic": False,
-        "generated_files": [entrypoint, "sanka_native.py", "sanka_settings.py"],
+        "generated_files": [entrypoint],
         "resources": [resources[name] for name in sorted(resources)],
         "api_roots": [
             {"path": root.path, "links": [list(link) for link in root.links]}
@@ -620,21 +559,18 @@ def _render_native_output(
         ],
         "source_root": source_root,
     }
-    user_logic = _render_user_logic(resources, scan)
-    if user_logic is not None:
-        manifest["has_user_logic"] = True
-        generated_files = cast(list[str], manifest["generated_files"])
-        generated_files.append("sanka_user_logic.py")
-        _write_text(output_path / "sanka_user_logic.py", user_logic)
-    _write_text(output_path / entrypoint, _render_native_app())
-    _write_text(output_path / "sanka_native.py", _render_native_runtime())
-    _write_text(output_path / "sanka_settings.py", _render_native_settings(plan.settings_module))
-    _write_text(output_path / "README.md", _render_native_readme(plan))
-    _write_text(
-        output_path / "requirements.txt",
-        "# Django is provided by the source application's own environment.\n"
-        "fastapi>=0.115,<1\nuvicorn[standard]>=0.30,<1\n",
-    )
+    try:
+        generated_names = render_async_sql_files(
+            lambda name, text: _write_text(output_path / name, text),
+            entrypoint=entrypoint,
+            manifest=manifest,
+            sql_engine=sql_engine,
+        )
+    except ValueError as error:
+        raise FrameworkMigrationError(str(error)) from error
+    manifest["generated_files"] = [entrypoint, *generated_names]
+    _write_text(output_path / entrypoint, _render_native_app(manifest))
+    _write_text(output_path / "README.md", _render_native_readme(plan, sql_engine))
     _write_json(output_path / GENERATED_MANIFEST, manifest)
     return len(generated)
 
@@ -729,6 +665,35 @@ def _infer_settings_module(root: Path) -> str:
                 return str(values[-1])
     raise FrameworkMigrationError(
         "could not infer DJANGO_SETTINGS_MODULE; pass `sanka scan --settings your_project.settings`"
+    )
+
+
+def _capture_database(root: Path) -> DatabaseIR:
+    django_conf = importlib.import_module("django.conf")
+    db = django_conf.settings.DATABASES.get("default") or {}
+    engine = str(db.get("ENGINE") or "")
+    if "sqlite" in engine:
+        vendor = "sqlite"
+    elif "postgresql" in engine or "postgis" in engine:
+        vendor = "postgresql"
+    elif "mysql" in engine:
+        vendor = "mysql"
+    else:
+        vendor = "other"
+    name = str(db.get("NAME") or "")
+    if vendor == "sqlite" and name:
+        path = Path(name)
+        path = path.resolve() if path.is_absolute() else (root / path).resolve()
+        try:
+            name = str(path.relative_to(root.resolve()))
+        except ValueError:
+            name = str(path)
+    return DatabaseIR(
+        vendor=vendor,
+        name=name,
+        host=str(db.get("HOST") or ""),
+        port=str(db.get("PORT") or ""),
+        user=str(db.get("USER") or ""),
     )
 
 
@@ -1192,14 +1157,12 @@ def _match_perform_create(view_class: type[Any]) -> str | None:
 def _analyze_create_carryover(
     serializer_class: type[Any],
 ) -> tuple[str, tuple[tuple[str, str, str | None], ...]] | None:
-    """Verify an overridden ``create()`` can be carried over verbatim.
+    """Admit an overridden ``create()`` into the native envelope.
 
-    The method is re-emitted into the generated serving layer, so every free
-    name it uses must resolve to something the DRF-free process can provide:
-    the application's own Django models, ``django.db.transaction``, or
-    ``serializers.ValidationError`` (swapped for a native shim). Anything
-    else — request state, helpers, other DRF machinery — cannot be carried
-    honestly and keeps the serializer outside the envelope.
+    Nested writes are regenerated as async SQL (parent row plus children),
+    not re-emitted as Django. The author's ``create()`` still has to resolve
+    only to the application's models, ``django.db.transaction``, or
+    ``serializers.ValidationError`` — anything else stays outside the envelope.
     """
     import builtins
     import textwrap
@@ -1462,6 +1425,8 @@ def _build_serializer_ir(
         model_module=str(model.__module__),
         model_class=str(model.__qualname__),
         object_name=str(model._meta.object_name),
+        db_table=str(model._meta.db_table),
+        pk_attname=str(model._meta.pk.attname),
         ordering=ordering,
         lookup=lookup,
         fields=tuple(fields),
@@ -1499,7 +1464,7 @@ def _nested_many_field_ir(name: str, field: Any, parent_model: Any) -> Serialize
         ordering=tuple(str(item) for item in (child_model_type._meta.ordering or ())),
         analyze_writes=False,
     )
-    parent_fk = relation.field.name if hasattr(relation, "field") else None
+    parent_fk = relation.field.attname if hasattr(relation, "field") else None
     if parent_fk is None:
         return SerializerFieldIR(name=name, kind="unsupported", supported=False)
     messages = {
@@ -1589,6 +1554,11 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
             unique_message = str(item.message)
     default = getattr(field, "default", fields_module.empty)
     has_default = default is not fields_module.empty
+    if not has_default:
+        model_default = _django_field_default(model, name)
+        if model_default is not fields_module.empty:
+            default = model_default
+            has_default = True
     if has_default and not isinstance(default, str | int | float | bool | type(None)):
         supported = False
         default = None
@@ -1614,6 +1584,20 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         messages=_field_messages(field, kind),
         supported=supported,
     )
+
+
+def _django_field_default(model: Any, name: str) -> Any:
+    fields_module = importlib.import_module("rest_framework.fields")
+    if model is None:
+        return fields_module.empty
+    exceptions_module = importlib.import_module("django.core.exceptions")
+    try:
+        field = model._meta.get_field(name)
+    except exceptions_module.FieldDoesNotExist:
+        return fields_module.empty
+    if not field.has_default() or callable(field.default):
+        return fields_module.empty
+    return field.default
 
 
 def _related_attname(model: Any, field_name: str) -> str | None:
@@ -1793,12 +1777,17 @@ def _compile_generated_files(output: Path, manifest: dict[str, Any]) -> None:
         path = output / name
         if not path.is_file():
             raise FrameworkMigrationError(f"generated file is missing: {path}")
+        text = path.read_text(encoding="utf-8")
         try:
-            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+            compile(text, str(path), "exec")
         except SyntaxError as error:
             raise FrameworkMigrationError(
                 f"generated Python is invalid: {path}: {error}"
             ) from error
+        if manifest.get("mode") == NATIVE_STRATEGY and (
+            "django.setup" in text or "import django" in text
+        ):
+            raise FrameworkMigrationError(f"native output still imports Django: {path}")
 
 
 def _load_generated_app(output: Path) -> Any:
@@ -1809,8 +1798,23 @@ def _load_generated_app(output: Path) -> Any:
     if str(output) not in sys.path:
         sys.path.insert(0, str(output))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as error:
+        raise FrameworkMigrationError(
+            f"generated app is missing a dependency ({error.name}); "
+            f"install {output / 'requirements.txt'}"
+        ) from error
     return module.app
+
+
+def _bind_source_database() -> None:
+    django_conf = importlib.import_module("django.conf")
+    name = django_conf.settings.DATABASES.get("default", {}).get("NAME")
+    if name and not os.environ.get("SANKA_DATABASE_URL") and not os.environ.get("SANKA_TEST_DB"):
+        os.environ["SANKA_TEST_DB"] = str(name)
+    connections = importlib.import_module("django.db").connections
+    connections.close_all()
 
 
 def _probe_read_only_routes(
@@ -1821,6 +1825,7 @@ def _probe_read_only_routes(
     cases: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     _bootstrap_django(root, str(manifest["settings_module"]))
+    _bind_source_database()
     try:
         django_test = importlib.import_module("django.test")
         fastapi_testclient = importlib.import_module("fastapi.testclient")
@@ -1829,7 +1834,6 @@ def _probe_read_only_routes(
             "FastAPI must be installed to run HTTP verification (`pip install sanka-migrate`)"
         ) from error
     source = django_test.Client()
-    target = fastapi_testclient.TestClient(_load_generated_app(output))
     results: list[dict[str, Any]] = []
     automatic = [
         {"method": route.get("method"), "path": route.get("path"), "headers": {}}
@@ -1838,49 +1842,53 @@ def _probe_read_only_routes(
     ]
     probes = automatic + cases
     seen: set[tuple[str, str, str]] = set()
-    for case in probes:
-        method = str(case.get("method", "GET")).upper()
-        path = str(case.get("path", ""))
-        headers = {str(key): str(value) for key, value in dict(case.get("headers", {})).items()}
-        identity = (method, path, json.dumps(headers, sort_keys=True))
-        if identity in seen:
-            continue
-        seen.add(identity)
-        django_headers = {
-            "HTTP_" + key.upper().replace("-", "_"): value
-            for key, value in headers.items()
-            if key.lower() not in {"content-type", "content-length"}
-        }
-        source_response = source.generic(method, path, **django_headers)
-        target_response = target.request(method, path, headers=headers)
-        source_type = str(source_response.get("Content-Type", "")).split(";", 1)[0]
-        target_type = str(target_response.headers.get("content-type", "")).split(";", 1)[0]
-        source_body = bytes(source_response.content)
-        target_body = target_response.content
-        bodies_match = _response_bodies_match(source_body, target_body, source_type, target_type)
-        compared_headers = ("allow", "location", "www-authenticate")
-        headers_match = all(
-            str(source_response.get(header, "")) == str(target_response.headers.get(header, ""))
-            for header in compared_headers
-        )
-        ok = (
-            source_response.status_code == target_response.status_code
-            and source_type == target_type
-            and bodies_match
-            and headers_match
-        )
-        results.append(
-            {
-                "method": method,
-                "path": path,
-                "ok": ok,
-                "source_status": source_response.status_code,
-                "target_status": target_response.status_code,
-                "source_content_type": source_type,
-                "target_content_type": target_type,
-                "headers_match": headers_match,
+    with fastapi_testclient.TestClient(_load_generated_app(output)) as target:
+        for case in probes:
+            method = str(case.get("method", "GET")).upper()
+            path = str(case.get("path", ""))
+            headers = {str(key): str(value) for key, value in dict(case.get("headers", {})).items()}
+            identity = (method, path, json.dumps(headers, sort_keys=True))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            django_headers = {
+                "HTTP_" + key.upper().replace("-", "_"): value
+                for key, value in headers.items()
+                if key.lower() not in {"content-type", "content-length"}
             }
-        )
+            source_response = source.generic(method, path, **django_headers)
+            importlib.import_module("django.db").connections.close_all()
+            target_response = target.request(method, path, headers=headers)
+            source_type = str(source_response.get("Content-Type", "")).split(";", 1)[0]
+            target_type = str(target_response.headers.get("content-type", "")).split(";", 1)[0]
+            source_body = bytes(source_response.content)
+            target_body = target_response.content
+            bodies_match = _response_bodies_match(
+                source_body, target_body, source_type, target_type
+            )
+            compared_headers = ("allow", "location", "www-authenticate")
+            headers_match = all(
+                str(source_response.get(header, "")) == str(target_response.headers.get(header, ""))
+                for header in compared_headers
+            )
+            ok = (
+                source_response.status_code == target_response.status_code
+                and source_type == target_type
+                and bodies_match
+                and headers_match
+            )
+            results.append(
+                {
+                    "method": method,
+                    "path": path,
+                    "ok": ok,
+                    "source_status": source_response.status_code,
+                    "target_status": target_response.status_code,
+                    "source_content_type": source_type,
+                    "target_content_type": target_type,
+                    "headers_match": headers_match,
+                }
+            )
     return results
 
 
@@ -1935,548 +1943,156 @@ app = create_app()
 """
 
 
-def _render_native_app() -> str:
-    return """# Generated by Sanka. Native FastAPI request layer over the retained Django ORM.
-from sanka_native import create_app
+_FASTAPI_DECORATOR = {
+    "GET": "get",
+    "POST": "post",
+    "PUT": "put",
+    "PATCH": "patch",
+    "DELETE": "delete",
+}
 
-app = create_app()
-"""
-
-
-def _render_native_settings(settings_module: str) -> str:
-    return f'''# Generated by Sanka under the license selected for this generated application.
-"""Serving settings: the original settings without the DRF request layer."""
-
-from {settings_module} import *  # noqa: F401,F403
-
-INSTALLED_APPS = [
-    app
-    for app in INSTALLED_APPS  # noqa: F405
-    if not app.startswith("rest_framework")
-]
-'''
-
-
-def _render_native_runtime() -> str:
-    return '''# Generated by Sanka under the license selected for this generated application.
-"""Native FastAPI request layer generated from a reviewed Sanka plan.
-
-HTTP is served by FastAPI alone. Django is configured with generated DRF-free
-settings and retained for the ORM only. Validation below is a native
-reimplementation of the serializer semantics captured at scan time, using the
-exact error strings the source application produced.
-"""
-from __future__ import annotations
-
-import json
-import os
-import re
-import sys
-from decimal import Decimal, InvalidOperation
-from importlib import import_module
-from pathlib import Path
-from typing import Any
-
-HERE = Path(__file__).resolve().parent
-MANIFEST = json.loads((HERE / "sanka-manifest.json").read_text(encoding="utf-8"))
-SOURCE_ROOT = (HERE / MANIFEST["source_root"]).resolve()
-for _entry in (str(HERE), str(SOURCE_ROOT)):
-    if _entry not in sys.path:
-        sys.path.insert(0, _entry)
-os.environ["DJANGO_SETTINGS_MODULE"] = MANIFEST["serving_settings"]
-
-import django
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, Response
-
-django.setup()
-
-_USER_LOGIC = import_module("sanka_user_logic") if MANIFEST.get("has_user_logic") else None
-
-# Handlers are synchronous on purpose: FastAPI runs them in a worker thread,
-# which keeps the retained Django ORM outside the event loop.
-_DECIMAL_TAIL = re.compile(r"\\.0*\\s*$")
-_MAX_STRING_LENGTH = 1000
-_MODEL_CACHE: dict[tuple[str, str], Any] = {}
-
-
-def _model(resource: dict[str, Any]) -> Any:
-    key = (resource["model_module"], resource["model_class"])
-    if key not in _MODEL_CACHE:
-        module = import_module(resource["model_module"])
-        _MODEL_CACHE[key] = getattr(module, resource["model_class"])
-    return _MODEL_CACHE[key]
-
-
-def _represent(spec: dict[str, Any], value: Any) -> Any:
-    if spec["kind"] == "decimal" and value is not None:
-        places = spec.get("decimal_places") or 0
-        quantum = Decimal(1).scaleb(-places)
-        return str(Decimal(value).quantize(quantum))
-    return value
-
-
-def _serialize_fields(fields: list[dict[str, Any]], instance: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    for spec in fields:
-        if spec["kind"] == "nested_many":
-            child = spec["child"]
-            related = getattr(instance, spec["name"]).all()
-            if child["ordering"]:
-                related = related.order_by(*child["ordering"])
-            payload[spec["name"]] = [
-                _serialize_fields(child["fields"], row) for row in related
-            ]
-        else:
-            raw = getattr(instance, spec.get("attname") or spec["name"])
-            payload[spec["name"]] = _represent(spec, raw)
-    return payload
-
-
-def _serialize(resource: dict[str, Any], instance: Any) -> dict[str, Any]:
-    return _serialize_fields(resource["fields"], instance)
-
-
-def _clean_integer(spec: dict[str, Any], value: Any) -> tuple[Any, list[str]]:
-    messages = spec["messages"]
-    if isinstance(value, str) and len(value) > _MAX_STRING_LENGTH:
-        return None, [messages["max_string_length"]]
-    try:
-        cleaned = int(_DECIMAL_TAIL.sub("", str(value).strip()))
-    except (TypeError, ValueError):
-        return None, [messages["invalid"]]
-    errors = []
-    if spec.get("min_value") is not None and cleaned < spec["min_value"]:
-        errors.append(messages["min_value"])
-    if spec.get("max_value") is not None and cleaned > spec["max_value"]:
-        errors.append(messages["max_value"])
-    return cleaned, errors
-
-
-def _clean_char(spec: dict[str, Any], value: Any) -> tuple[Any, list[str]]:
-    messages = spec["messages"]
-    if value == "" or (spec["trim_whitespace"] and isinstance(value, str) and not value.strip()):
-        if spec["allow_blank"]:
-            return "", []
-        return None, [messages["blank"]]
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-        return None, [messages["invalid"]]
-    cleaned = str(value)
-    if spec["trim_whitespace"]:
-        cleaned = cleaned.strip()
-    errors = []
-    if spec.get("max_length") is not None and len(cleaned) > spec["max_length"]:
-        errors.append(messages["max_length"])
-    if spec.get("min_length") is not None and len(cleaned) < spec["min_length"]:
-        errors.append(messages["min_length"])
-    if "\\x00" in cleaned and messages.get("null_characters"):
-        errors.append(messages["null_characters"])
-    if messages.get("surrogate_characters") and any(
-        0xD800 <= ord(char) <= 0xDFFF for char in cleaned
-    ):
-        errors.append(messages["surrogate_characters"])
-    return cleaned, errors
-
-
-def _clean_decimal(spec: dict[str, Any], value: Any) -> tuple[Any, list[str]]:
-    messages = spec["messages"]
-    if isinstance(value, bool):
-        return None, [messages["invalid"]]
-    if isinstance(value, str) and len(value) > _MAX_STRING_LENGTH:
-        return None, [messages["max_string_length"]]
-    try:
-        cleaned = Decimal(str(value).strip())
-    except (InvalidOperation, ValueError, TypeError):
-        return None, [messages["invalid"]]
-    if cleaned.is_nan() or cleaned.is_infinite():
-        return None, [messages["invalid"]]
-    _sign, digittuple, exponent = cleaned.as_tuple()
-    if not isinstance(exponent, int):
-        return None, [messages["invalid"]]
-    if exponent >= 0:
-        digits = len(digittuple) + exponent
-        decimals = 0
-    elif abs(exponent) > len(digittuple):
-        digits = decimals = abs(exponent)
-    else:
-        digits = len(digittuple)
-        decimals = abs(exponent)
-    whole_digits = digits - decimals
-    max_digits = spec.get("max_digits")
-    decimal_places = spec.get("decimal_places")
-    if max_digits is not None and digits > max_digits:
-        return None, [messages["max_digits"]]
-    if decimal_places is not None and decimals > decimal_places:
-        return None, [messages["max_decimal_places"]]
-    if max_digits is not None and decimal_places is not None:
-        if whole_digits > max_digits - decimal_places:
-            return None, [messages["max_whole_digits"]]
-    return cleaned, []
-
-
-def _clean_choice(spec: dict[str, Any], value: Any) -> tuple[Any, list[str]]:
-    if value not in spec["choices"]:
-        return None, [spec["messages"]["invalid_choice"].format(input=value)]
-    return value, []
-
-
-_CLEANERS = {
-    "integer": _clean_integer,
-    "char": _clean_char,
-    "decimal": _clean_decimal,
-    "choice": _clean_choice,
+_OPERATION_FUNCS = {
+    "list": "list",
+    "create": "create",
+    "retrieve": "get",
+    "update": "replace",
+    "partial_update": "update",
+    "destroy": "delete",
 }
 
 
-def _validate_scalar_fields(
-    fields: list[dict[str, Any]], payload: Any, *, partial: bool
-) -> tuple[dict[str, Any], dict[str, list[str]]]:
-    if not isinstance(payload, dict):
-        message = f"Invalid data. Expected a dictionary, but got {type(payload).__name__}."
-        return {}, {"non_field_errors": [message]}
-    errors: dict[str, list[str]] = {}
-    validated: dict[str, Any] = {}
-    for spec in fields:
-        if spec["read_only"] or spec["kind"] == "nested_many":
-            continue
-        name = spec["name"]
-        if name not in payload:
-            if partial:
-                continue
-            if spec["has_default"]:
-                validated[name] = spec["default"]
-            elif spec["required"]:
-                errors[name] = [spec["messages"]["required"]]
-            continue
-        raw = payload[name]
-        if raw is None:
-            if spec["allow_null"]:
-                validated[name] = None
-            else:
-                errors[name] = [spec["messages"]["null"]]
-            continue
-        cleaned, field_errors = _CLEANERS[spec["kind"]](spec, raw)
-        if field_errors:
-            errors[name] = field_errors
-        else:
-            validated[name] = cleaned
-    return validated, errors
+def _python_ident(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return slug or "item"
 
 
-def _validate(
-    resource: dict[str, Any], payload: Any, *, partial: bool, instance: Any
-) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]], dict[str, Any]]:
-    validated, scalar_errors = _validate_scalar_fields(resource["fields"], payload, partial=partial)
-    errors: dict[str, Any] = dict(scalar_errors)
-    nested: dict[str, list[dict[str, Any]]] = {}
-    if not isinstance(payload, dict):
-        return validated, nested, errors
-    for spec in resource["fields"]:
-        name = spec["name"]
-        if spec["kind"] == "nested_many" and not spec["read_only"]:
-            if name not in payload:
-                if not partial and spec["required"]:
-                    errors[name] = [spec["messages"]["required"]]
-                continue
-            raw = payload[name]
-            if raw is None:
-                errors[name] = [spec["messages"]["null"]]
-                continue
-            if not isinstance(raw, list):
-                template = spec["messages"]["not_a_list"]
-                errors[name] = {
-                    "non_field_errors": [template.format(input_type=type(raw).__name__)]
-                }
-                continue
-            item_errors: dict[str, Any] = {}
-            items: list[dict[str, Any]] = []
-            for index, raw_item in enumerate(raw):
-                child_validated, child_errors = _validate_scalar_fields(
-                    spec["child"]["fields"], raw_item, partial=False
-                )
-                if child_errors:
-                    item_errors[str(index)] = child_errors
-                else:
-                    items.append(child_validated)
-            if item_errors:
-                errors[name] = item_errors
-            else:
-                nested[name] = items
-        elif spec.get("unique") and name in validated and validated[name] is not None:
-            queryset = _model(resource).objects.filter(**{name: validated[name]})
-            if instance is not None:
-                queryset = queryset.exclude(pk=instance.pk)
-            if queryset.exists():
-                errors[name] = [spec["unique_message"]]
-                validated.pop(name, None)
-    return validated, nested, errors
+def _py_str(value: str) -> str:
+    return json.dumps(value)
 
 
-async def _read_raw_body(request: Request) -> bytes:
-    return await request.body()
-
-
-def _parse_json(raw: bytes) -> tuple[Any, Response | None]:
-    try:
-        return json.loads(raw), None
-    except json.JSONDecodeError as exc:
-        return None, JSONResponse({"detail": f"JSON parse error - {exc}"}, status_code=400)
-
-
-def _not_found(resource: dict[str, Any], allow: str, cause: str) -> Response:
-    # DRF distinguishes a real miss (Http404 carries the model's message) from
-    # an invalid lookup value (bare Http404 -> the generic NotFound detail).
-    if cause == "missing":
-        detail = f"No {resource['object_name']} matches the given query."
-    else:
-        detail = MANIFEST["generic_messages"]["not_found"]
-    return JSONResponse({"detail": detail}, status_code=404, headers={"Allow": allow})
-
-
-def _get_instance(resource: dict[str, Any], request: Request) -> tuple[Any, str]:
-    model = _model(resource)
-    raw = request.path_params.get(resource["lookup"])
-    try:
-        return model.objects.get(pk=raw), ""
-    except model.DoesNotExist:
-        return None, "missing"
-    except (ValueError, TypeError, OverflowError):
-        return None, "invalid"
-
-
-def _token_user_id(auth: dict[str, Any], key: str) -> Any:
-    from django.db import connection
-
-    quote = connection.ops.quote_name
-    query = (
-        f"SELECT {quote(auth['token_user_column'])} "
-        f"FROM {quote(auth['token_db_table'])} "
-        f"WHERE {quote(auth['token_key_column'])} = %s"
-    )
-    with connection.cursor() as cursor:
-        cursor.execute(query, [key])
-        row = cursor.fetchone()
-    return None if row is None else row[0]
-
-
-def _auth_error(message: str, auth: dict[str, Any], allow: str) -> Response:
-    return JSONResponse(
-        {"detail": message},
-        status_code=401,
-        headers={"Allow": allow, "WWW-Authenticate": auth["messages"]["www_authenticate"]},
-    )
-
-
-def _authenticate(request: Request, auth: dict[str, Any], allow: str) -> tuple[Any, Any]:
-    messages = auth["messages"]
-    header = request.headers.get("authorization", "")
-    parts = header.split()
-    if not parts or parts[0].lower() != auth["token_keyword"].lower():
-        return None, None
-    if len(parts) == 1:
-        return None, _auth_error(messages["empty_header"], auth, allow)
-    if len(parts) > 2:
-        return None, _auth_error(messages["spaced_header"], auth, allow)
-    user_id = _token_user_id(auth, parts[1])
-    if user_id is None:
-        return None, _auth_error(messages["invalid_token"], auth, allow)
-    from django.contrib.auth import get_user_model
-
-    is_active = (
-        get_user_model().objects.filter(pk=user_id).values_list("is_active", flat=True).first()
-    )
-    if is_active is None:
-        return None, _auth_error(messages["invalid_token"], auth, allow)
-    if not is_active:
-        return None, _auth_error(messages["inactive_user"], auth, allow)
-    return user_id, None
-
-
-def _require_user(request: Request, auth: dict[str, Any], allow: str) -> tuple[Any, Any]:
-    user_id, error = _authenticate(request, auth, allow)
-    if error is not None:
-        return None, error
-    if user_id is None:
-        return None, _auth_error(auth["messages"]["no_credentials"], auth, allow)
-    return user_id, None
-
-
-def _forbidden(auth: dict[str, Any], allow: str) -> Response:
-    return JSONResponse(
-        {"detail": auth["messages"]["forbidden"]}, status_code=403, headers={"Allow": allow}
-    )
-
-
-def _crud_handler(resource: dict[str, Any], operation: str, allow: str) -> Any:
-    auth = resource.get("auth")
-
-    def _gate(request: Request) -> tuple[Any, Any]:
-        if auth is None:
-            return None, None
-        return _require_user(request, auth, allow)
-
-    if operation == "list":
-
-        def handler(request: Request) -> Response:
-            _, gate_error = _gate(request)
-            if gate_error is not None:
-                return gate_error
-            queryset = _model(resource).objects.all()
-            if resource["ordering"]:
-                queryset = queryset.order_by(*resource["ordering"])
-            payload = [_serialize(resource, item) for item in queryset]
-            return JSONResponse(payload, headers={"Allow": allow})
-
-    elif operation == "create":
-
-        def handler(request: Request, raw_body: bytes = Depends(_read_raw_body)) -> Response:
-            user_id, gate_error = _gate(request)
-            if gate_error is not None:
-                return gate_error
-            payload, parse_error = _parse_json(raw_body)
-            if parse_error is not None:
-                parse_error.headers["Allow"] = allow
-                return parse_error
-            validated, nested, errors = _validate(
-                resource, payload, partial=False, instance=None
-            )
-            if errors:
-                return JSONResponse(errors, status_code=400, headers={"Allow": allow})
-            create_kwargs = dict(validated)
-            if auth is not None and auth.get("inject_owner_attname"):
-                create_kwargs[auth["inject_owner_attname"]] = user_id
-            create_spec = resource.get("create") or {"style": "default"}
-            if create_spec["style"] == "carryover":
-                create_kwargs.update(nested)
-                user_create = getattr(_USER_LOGIC, create_spec["function"])
-                try:
-                    instance = user_create(create_kwargs)
-                except _USER_LOGIC.ValidationError as error:
-                    return JSONResponse(
-                        error.detail, status_code=400, headers={"Allow": allow}
-                    )
-            else:
-                instance = _model(resource).objects.create(**create_kwargs)
-            return JSONResponse(
-                _serialize(resource, instance), status_code=201, headers={"Allow": allow}
-            )
-
-    elif operation == "retrieve":
-
-        def handler(request: Request) -> Response:
-            _, gate_error = _gate(request)
-            if gate_error is not None:
-                return gate_error
-            instance, miss = _get_instance(resource, request)
-            if instance is None:
-                return _not_found(resource, allow, miss)
-            return JSONResponse(_serialize(resource, instance), headers={"Allow": allow})
-
-    elif operation in ("update", "partial_update"):
-        partial = operation == "partial_update"
-
-        def handler(request: Request, raw_body: bytes = Depends(_read_raw_body)) -> Response:
-            user_id, gate_error = _gate(request)
-            if gate_error is not None:
-                return gate_error
-            instance, miss = _get_instance(resource, request)
-            if instance is None:
-                return _not_found(resource, allow, miss)
-            if (
-                auth is not None
-                and auth.get("owner_attname")
-                and getattr(instance, auth["owner_attname"]) != user_id
-            ):
-                return _forbidden(auth, allow)
-            payload, parse_error = _parse_json(raw_body)
-            if parse_error is not None:
-                parse_error.headers["Allow"] = allow
-                return parse_error
-            validated, _nested, errors = _validate(
-                resource, payload, partial=partial, instance=instance
-            )
-            if errors:
-                return JSONResponse(errors, status_code=400, headers={"Allow": allow})
-            for name, value in validated.items():
-                setattr(instance, name, value)
-            instance.save()
-            return JSONResponse(_serialize(resource, instance), headers={"Allow": allow})
-
-    elif operation == "destroy":
-
-        def handler(request: Request) -> Response:
-            user_id, gate_error = _gate(request)
-            if gate_error is not None:
-                return gate_error
-            instance, miss = _get_instance(resource, request)
-            if instance is None:
-                return _not_found(resource, allow, miss)
-            if (
-                auth is not None
-                and auth.get("owner_attname")
-                and getattr(instance, auth["owner_attname"]) != user_id
-            ):
-                return _forbidden(auth, allow)
-            instance.delete()
-            return Response(status_code=204, headers={"Allow": allow})
-
-    else:
-        raise RuntimeError(f"unsupported generated operation: {operation}")
-    return handler
-
-
-def _api_root_handler(links: list[list[str]], allow: str) -> Any:
-    def handler(request: Request) -> Response:
-        base = str(request.base_url).rstrip("/")
-        payload = {key: f"{base}{path}" for key, path in links}
-        return JSONResponse(payload, headers={"Allow": allow})
-
-    return handler
-
-
-def create_app() -> FastAPI:
-    app = FastAPI(title="Sanka native FastAPI application")
-    index = 0
-    for resource in MANIFEST["resources"]:
-        for route in resource["routes"]:
-            allow = MANIFEST["allow"][route["path"]]
-            handler = _crud_handler(resource, route["operation"], allow)
-            handler.__name__ = f"sanka_native_{route['operation']}_{index}"
-            app.add_api_route(
-                route["path"],
-                handler,
-                methods=[route["method"]],
-                operation_id=handler.__name__,
-            )
-            index += 1
-    for root in MANIFEST["api_roots"]:
-        handler = _api_root_handler(root["links"], MANIFEST["allow"][root["path"]])
-        handler.__name__ = f"sanka_native_api_root_{index}"
-        app.add_api_route(root["path"], handler, methods=["GET"], operation_id=handler.__name__)
+def _unique_ident(base: str, used: set[str]) -> str:
+    name = base
+    index = 2
+    while name in used:
+        name = f"{base}_{index}"
         index += 1
-    return app
-'''
+    used.add(name)
+    return name
 
 
-def _render_native_readme(plan: FrameworkPlan) -> str:
+def _render_native_app(manifest: dict[str, Any]) -> str:
+    """Emit decorator-style async FastAPI routes that call the shared native helpers."""
+    lines = [
+        "# Generated by Sanka. Async FastAPI over the existing SQL tables.",
+        "from contextlib import asynccontextmanager",
+        "",
+        "from fastapi import Depends, FastAPI, Request",
+        "from fastapi.responses import Response",
+        "",
+        "import sanka_native as native",
+        "import sanka_store as store",
+        "",
+        "",
+        "@asynccontextmanager",
+        "async def lifespan(_app: FastAPI):",
+        "    await store.init_db()",
+        "    yield",
+        "    await store.close_db()",
+        "",
+        "",
+        'app = FastAPI(title="Sanka native FastAPI application", lifespan=lifespan)',
+        "",
+    ]
+    used_vars: set[str] = set()
+    used_funcs: set[str] = set()
+    resource_var: dict[str, str] = {}
+    object_names: dict[str, str] = {}
+    write_ops = {"create", "update", "partial_update"}
+    for resource in manifest["resources"]:
+        view = str(resource["view"])
+        ident = _python_ident(str(resource["object_name"]))
+        var = _unique_ident(f"_{ident.upper()}", used_vars)
+        resource_var[view] = var
+        object_names[view] = ident
+        lines.append(f"{var} = native.resource({_py_str(view)})")
+    if resource_var:
+        lines.append("")
+    for route in manifest["routes"]:
+        method = str(route["method"]).upper()
+        path = str(route["path"])
+        operation = str(route["operation"])
+        decorator = _FASTAPI_DECORATOR.get(method)
+        if decorator is None:
+            raise FrameworkMigrationError(f"unsupported native HTTP method: {method}")
+        if str(route.get("strategy")) == ROUTE_STRATEGY_NATIVE_API_ROOT:
+            func = _unique_ident("api_root", used_funcs)
+            lines.extend(
+                [
+                    f"@app.{decorator}({_py_str(path)})",
+                    f"async def {func}(request: Request) -> Response:",
+                    f"    return await native.api_root(request, {_py_str(path)})",
+                    "",
+                ]
+            )
+            continue
+        view = str(route["source_view"])
+        var = resource_var[view]
+        func = _unique_ident(
+            f"{_OPERATION_FUNCS.get(operation, operation)}_{object_names[view]}",
+            used_funcs,
+        )
+        if operation in write_ops and "{pk}" in path:
+            signature = "request: Request, pk: str, raw_body: bytes = Depends(native.read_raw_body)"
+            call = f"    return await native.handle({var}, {_py_str(operation)}, request, raw_body)"
+        elif operation in write_ops:
+            signature = "request: Request, raw_body: bytes = Depends(native.read_raw_body)"
+            call = f"    return await native.handle({var}, {_py_str(operation)}, request, raw_body)"
+        elif "{pk}" in path:
+            signature = "request: Request, pk: str"
+            call = f"    return await native.handle({var}, {_py_str(operation)}, request)"
+        else:
+            signature = "request: Request"
+            call = f"    return await native.handle({var}, {_py_str(operation)}, request)"
+        lines.extend(
+            [
+                f"@app.{decorator}({_py_str(path)})",
+                f"async def {func}({signature}) -> Response:",
+                call,
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            'if __name__ == "__main__":',
+            "    import uvicorn",
+            '    uvicorn.run(app, host="127.0.0.1", port=8000)',
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_native_readme(plan: FrameworkPlan, sql_engine: str = "tortoise") -> str:
+    engine = sql_engine or "tortoise"
     return f"""# Generated native FastAPI application
 
 Sanka generated this application from plan `{plan.plan_hash}`.
 
-FastAPI owns the request layer. Django is configured through the generated
-`sanka_settings` module, which removes the DRF request layer and keeps the
-original models, migrations, ORM, and synchronous transactions. Validation is
-a native reimplementation of the serializer semantics captured at scan time,
-including the exact error strings.
+Routes are declared with FastAPI decorators in `app.py` (`@app.get`, `@app.post`,
+...). Shared DRF-parity validation lives in `sanka_native.py`. Persistence is
+async SQL (`{engine}`) in `sanka_store.py`, mapped onto the existing Django
+tables. Django is not imported at serve time.
+
+Set `SANKA_DATABASE_URL` for PostgreSQL (the scan never stores a password).
+SQLite uses the captured database path, overridable with `SANKA_DATABASE_URL`
+or `SANKA_TEST_DB`.
 
 Format-suffix alias routes from the source router are dropped as a disclosed
 contract change; clients negotiate content types with headers instead.
 
-Run locally from the Django repository root:
-
 ```bash
-python -m pip install -r {plan.default_output}/requirements.txt
-uvicorn --app-dir {plan.default_output} app:app --reload
+python -m pip install -r requirements.txt
+python app.py
 ```
 """
 

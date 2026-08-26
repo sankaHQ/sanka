@@ -33,10 +33,10 @@ sanka verify
 This recipe is included in source candidate `v0.1.0a6`; the live
 [PyPI project](https://pypi.org/project/sanka-migrate/) remains the publication authority.
 Sanka resolves the live Django URL graph, including DRF router routes and custom actions.
-Apply creates a separate FastAPI compatibility application in
-`.sanka/output/fastapi`; it does not overwrite the Django source. The generated
-route graph forwards to the current DRF handlers in-process so teams can prove
-parity first and replace handlers incrementally.
+Apply creates a separate FastAPI application in `.sanka/output/fastapi`; it
+does not overwrite the Django source. Native mode serves async FastAPI over
+the existing SQL tables. Compatibility mode forwards to the current DRF
+handlers in-process.
 
 ## Python quick start
 

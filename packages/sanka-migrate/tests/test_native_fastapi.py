@@ -127,21 +127,40 @@ def _generate(project: Path) -> Path:
 
 def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> None:
     output = _generate(crud_project)
-    for name in ("app.py", "sanka_native.py", "sanka_settings.py", "sanka-manifest.json"):
+    for name in ("app.py", "sanka_native.py", "sanka_store.py", "models.py", "sanka-manifest.json"):
         assert (output / name).is_file()
+    assert not (output / "sanka_settings.py").exists()
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
     assert manifest["mode"] == "native"
-    assert manifest["serving_settings"] == "sanka_settings"
+    assert manifest["sql_engine"] == "tortoise"
     generated_keys = {f"{route['method']} {route['path']}" for route in manifest["routes"]}
     assert "GET /api/gadgets/" in generated_keys
     assert "GET /api/" in generated_keys
     assert all("{format}" not in key for key in generated_keys)
     assert manifest["dropped_routes"]
-    settings_text = (output / "sanka_settings.py").read_text(encoding="utf-8")
-    assert 'startswith("rest_framework")' in settings_text
     runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
-    for forbidden in ("rest_framework", "get_asgi_application", "django.core.asgi", "_dispatch"):
+    for forbidden in (
+        "rest_framework",
+        "get_asgi_application",
+        "django.core.asgi",
+        "_dispatch",
+        "django.setup",
+        "import django",
+    ):
         assert forbidden not in runtime_text
+    store_text = (output / "sanka_store.py").read_text(encoding="utf-8")
+    assert "Tortoise" in store_text
+    assert "import django" not in store_text
+    app_text = (output / "app.py").read_text(encoding="utf-8")
+    assert '@app.get("/api/gadgets/")' in app_text
+    assert '@app.post("/api/gadgets/")' in app_text
+    assert '@app.get("/api/gadgets/{pk}/")' in app_text
+    assert "add_api_route" not in app_text
+    assert "add_api_route" not in runtime_text
+    assert "async def list_gadget(" in app_text
+    assert "async def create_gadget(" in app_text
+    assert "await native.handle" in app_text
+    assert "lifespan" in app_text
 
     # A real project has a migrated database before verification; the fixture
     # starts from a fresh copy, so create its schema first.
@@ -214,3 +233,23 @@ def test_native_plan_refuses_routes_outside_the_envelope(tmp_path: Path) -> None
     # the native envelope: nothing may be silently bridged.
     assert payload["automatic_routes"] == 0
     assert all(route["strategy"] == "needs-manual-adaptation" for route in payload["routes"])
+
+
+def test_apply_sqlalchemy_and_rejects_psycopg_on_sqlite(crud_project: Path) -> None:
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(
+        ["plan", str(crud_project), "--to", "fastapi", "--orm", "sqlalchemy"], crud_project
+    )
+    assert plan.returncode == 0, plan.stderr
+    applied = _run_cli(["apply", "--root", str(crud_project), "--orm", "sqlalchemy"], crud_project)
+    assert applied.returncode == 0, applied.stderr
+    output = crud_project / ".sanka" / "output" / "fastapi"
+    store = (output / "sanka_store.py").read_text(encoding="utf-8")
+    assert "sqlalchemy" in store
+    assert "Tortoise" not in store
+    refused = _run_cli(
+        ["apply", "--root", str(crud_project), "--force", "--orm", "psycopg"], crud_project
+    )
+    assert refused.returncode == 1, refused.stdout
+    assert "PostgreSQL" in refused.stderr
