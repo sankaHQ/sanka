@@ -229,7 +229,10 @@ def test_create_with_unknown_helper_is_rejected(nested_project: Path) -> None:
     text = serializers.read_text(encoding="utf-8")
     text = text.replace(
         "listing = Listing.objects.create(**validated_data)",
-        "listing = Listing.objects.create(**validated_data)\n            total = compute_total(listing)",
+        (
+            "listing = Listing.objects.create(**validated_data)\n"
+            "            total = compute_total(listing)"
+        ),
     )
     serializers.write_text(text, encoding="utf-8")
     assert _plan_strategies(nested_project) == {"needs-manual-adaptation"}
