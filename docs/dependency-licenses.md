@@ -26,8 +26,8 @@ AGPL dependency outside this repository's own AGPL runtime.
 | typing-extensions | PSF-2.0 | HTTP/PostgreSQL transitive dependency | permissive |
 
 Development-only dependencies resolve to MIT, Apache-2.0, BSD, MPL-2.0,
-PSF-2.0, or dual Apache/BSD terms. They are not included in published runtime
-metadata.
+PSF-2.0, dual MIT/PSF terms (SQLAlchemy's `greenlet`), or dual Apache/BSD
+terms. They are not included in published runtime metadata.
 
 ## Review boundary
 

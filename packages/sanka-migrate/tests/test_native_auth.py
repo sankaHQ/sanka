@@ -146,8 +146,9 @@ def test_auth_fixture_generates_native_output(auth_project: Path) -> None:
     assert author_field["attname"] == "author_id"
     runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
     assert "rest_framework" not in runtime_text
-    settings_text = (output / "sanka_settings.py").read_text(encoding="utf-8")
-    assert 'startswith("rest_framework")' in settings_text
+    assert "django.setup" not in runtime_text
+    assert "import django" not in runtime_text
+    assert not (output / "sanka_settings.py").exists()
 
 
 def test_auth_native_output_matches_drf(auth_project: Path, tmp_path: Path) -> None:

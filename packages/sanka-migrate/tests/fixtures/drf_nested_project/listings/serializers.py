@@ -28,9 +28,6 @@ class ListingSerializer(serializers.ModelSerializer):
             listing = Listing.objects.create(**validated_data)
             for entry_data in entries_data:
                 ListingItem.objects.create(listing=listing, **entry_data)
-            total = sum(entry.quantity for entry in listing.entries.all())
-            if total > 50:
-                raise serializers.ValidationError({"entries": ["Listing exceeds 50 total units."]})
         return listing
 
     def update(self, instance, validated_data):

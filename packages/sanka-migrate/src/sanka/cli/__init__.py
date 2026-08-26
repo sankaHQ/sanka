@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The ``sanka`` CLI: scan / plan / validate / apply / verify / status.
+"""The ``sanka`` CLI: scan / plan / validate / apply / test / verify / status.
 
 Spec-driven flow (migration-as-code)::
 
@@ -22,6 +22,7 @@ Django REST Framework to FastAPI compatibility flow::
     sanka scan
     sanka plan --to fastapi
     sanka apply
+    sanka test
     sanka verify
 
 Run state lives in a local SQLite file (default ``.sanka/migrate/state.db``), so
@@ -57,10 +58,16 @@ from sanka.runtime.frameworks import (
     load_fastapi_plan,
     plan_fastapi,
     scan_django,
+    test_fastapi_app,
     verify_fastapi_migration,
     write_bench_candidate,
 )
 from sanka.runtime.frameworks.model import FrameworkPlan, FrameworkScan
+from sanka.runtime.frameworks.native_async import (
+    DEFAULT_SQL_ENGINE,
+    SQL_ENGINE_LABELS,
+    SQL_ENGINES,
+)
 from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
@@ -127,6 +134,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     plan.add_argument("--output", default=DEFAULT_FASTAPI_OUTPUT)
+    plan.add_argument(
+        "--orm",
+        choices=SQL_ENGINES,
+        default=None,
+        help="async SQL engine for native FastAPI (default: tortoise, closest to Django)",
+    )
     plan.add_argument("--json", action="store_true", help="print the framework plan as JSON")
     plan.set_defaults(handler=_cmd_plan)
 
@@ -159,11 +172,28 @@ def _build_parser() -> argparse.ArgumentParser:
     apply_.add_argument("--output", default=None, help="generated FastAPI output directory")
     apply_.add_argument("--force", action="store_true", help="replace existing generated files")
     apply_.add_argument(
+        "--orm",
+        choices=SQL_ENGINES,
+        default=None,
+        help="async SQL engine (prompts when interactive; tortoise is recommended)",
+    )
+    apply_.add_argument(
         "--bench-candidate",
         default=None,
         help="also emit a Sanka Migration Bench candidate (overlay + candidate.yaml) here",
     )
     apply_.set_defaults(handler=_cmd_apply)
+
+    test = commands.add_parser(
+        "test", help="generate and run unit tests for the created FastAPI app"
+    )
+    common(test)
+    test.add_argument("--root", default=".", help="application repository root")
+    test.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    test.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    test.add_argument("--output", default=None, help="generated FastAPI output directory")
+    test.add_argument("--json", action="store_true", help="print the test report as JSON")
+    test.set_defaults(handler=_cmd_test)
 
     verify = commands.add_parser("verify", help="verify the target against the source and ledger")
     common(verify)
@@ -287,6 +317,7 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
             artifact_dir=args.artifact_dir,
             output=args.output,
             strategy=args.strategy,
+            sql_engine=args.orm,
         )
         if args.json:
             print(json.dumps(framework_plan.to_dict(), ensure_ascii=False, indent=2))
@@ -318,16 +349,22 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
 
 async def _cmd_apply(args: argparse.Namespace) -> int:
     if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
+        sql_engine = args.orm
+        plan = load_fastapi_plan(args.root, artifact_dir=args.artifact_dir)
+        if plan.mode == NATIVE_STRATEGY and sql_engine is None and sys.stdin.isatty():
+            sql_engine = _prompt_sql_engine(plan.sql_engine)
         output, routes = apply_fastapi_plan(
             args.root,
             artifact_dir=args.artifact_dir,
             output=args.output,
             plan_hash=args.plan_hash,
             force=args.force,
+            sql_engine=sql_engine,
         )
-        plan = load_fastapi_plan(args.root, artifact_dir=args.artifact_dir)
         if plan.mode == NATIVE_STRATEGY:
+            engine = sql_engine or plan.sql_engine
             print(f"generated {routes} native FastAPI routes in {output}")
+            print(f"SQL engine: {engine}")
         else:
             print(f"generated {routes} FastAPI routes in {output}")
         print(f"applied plan: {plan.plan_hash}")
@@ -338,7 +375,7 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
                 artifact_dir=args.artifact_dir,
             )
             print(f"benchmark candidate written to {candidate}")
-        print("next: sanka verify")
+        print("next: sanka test")
         return 0
     spec = _load_spec(args.file)
     engine = _engine(args.state)
@@ -351,11 +388,29 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cmd_test(args: argparse.Namespace) -> int:
+    if not _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
+        raise FrameworkMigrationError(
+            "`sanka test` runs unit tests for a FastAPI apply; run `sanka apply` first"
+        )
+    report = await asyncio.to_thread(
+        lambda: test_fastapi_app(
+            args.root,
+            artifact_dir=args.artifact_dir,
+            output=args.output,
+        )
+    )
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        _print_framework_test(report)
+    return 0 if report["ok"] else 1
+
+
 async def _cmd_verify(args: argparse.Namespace) -> int:
     if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
-        # The framework verifier drives the Django ORM synchronously; run it in
-        # a worker thread so the CLI's event loop does not trip Django's
-        # async-context guard.
+        # The framework verifier still boots Django for the source Client;
+        # run it off the CLI event loop so Django's async-context guard stays quiet.
         framework_report = await asyncio.to_thread(
             lambda: verify_fastapi_migration(
                 args.root,
@@ -582,6 +637,22 @@ def _use_framework_lifecycle(
     return (artifact / "plan-fastapi.json").is_file()
 
 
+def _prompt_sql_engine(default: str | None) -> str:
+    chosen = default if default in SQL_ENGINES else DEFAULT_SQL_ENGINE
+    print("SQL engine for the generated FastAPI app:")
+    for index, name in enumerate(SQL_ENGINES, start=1):
+        marker = " [default]" if name == chosen else ""
+        print(f"  {index}) {SQL_ENGINE_LABELS[name]}{marker}")
+    raw = input(f"Choice [{SQL_ENGINES.index(chosen) + 1}]: ").strip().lower()
+    if not raw:
+        return chosen
+    if raw in SQL_ENGINES:
+        return raw
+    if raw.isdigit() and 1 <= int(raw) <= len(SQL_ENGINES):
+        return SQL_ENGINES[int(raw) - 1]
+    raise FrameworkMigrationError(f"unknown SQL engine: {raw}; choose {', '.join(SQL_ENGINES)}")
+
+
 def _print_framework_scan(scan: FrameworkScan) -> None:
     custom_actions = {
         route.operation
@@ -609,6 +680,9 @@ def _print_framework_scan(scan: FrameworkScan) -> None:
     print(f"  Python       {scan.python_version}")
     print(f"  Django       {scan.django_version}")
     print(f"  DRF          {scan.drf_version}")
+    db = scan.database
+    db_label = db.vendor if not db.name else f"{db.vendor} ({db.name})"
+    print(f"  Database     {db_label}")
     print()
     print("Application")
     print(f"  {len(scan.routes)} endpoints")
@@ -619,7 +693,7 @@ def _print_framework_scan(scan: FrameworkScan) -> None:
     print(f"  {scan.test_files} test files")
     print()
     print("Migration candidates")
-    print("  → FastAPI     Supported (native + compatibility strategies)")
+    print("  → FastAPI     Supported (native async SQL + compatibility strategies)")
     if scan.risks:
         print()
         print(f"Risks: {len(scan.risks)} route(s) need adaptation")
@@ -655,6 +729,11 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
     print("Retained in native mode" if native else "Retained in compatibility mode")
     for item in plan.retained:
         print(f"  - {item}")
+    if native:
+        print()
+        print("SQL engine")
+        print(f"  {plan.sql_engine} — {SQL_ENGINE_LABELS.get(plan.sql_engine, plan.sql_engine)}")
+        print("  change with `sanka plan --to fastapi --orm tortoise|sqlalchemy|psycopg`")
     if plan.risks:
         print()
         print("Potential issues")
@@ -669,6 +748,22 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
         print(f"Bridge generation readiness: {plan.readiness:.0%}")
     print(f"plan hash: {plan.plan_hash}")
     print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
+
+
+def _print_framework_test(report: dict[str, Any]) -> None:
+    verdict = "OK" if report["ok"] else "FAILED"
+    print("Testing the generated FastAPI app...")
+    print()
+    print(f"Wrote {report['file']}")
+    print(f"Ran {report['tests']} tests")
+    if report.get("allow_writes"):
+        print("Writes ran against an isolated SQLite copy")
+    print(f"Generated API tests: {verdict}")
+    if not report["ok"] and report.get("log"):
+        print()
+        print(report["log"])
+    print()
+    print("next: sanka verify")
 
 
 def _print_framework_verify(report: dict[str, Any]) -> None:

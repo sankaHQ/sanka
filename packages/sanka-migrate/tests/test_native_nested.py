@@ -179,25 +179,27 @@ def _generate(project: Path) -> Path:
     return project / ".sanka" / "output" / "fastapi"
 
 
-def test_nested_fixture_generates_carryover_output(nested_project: Path) -> None:
+def test_nested_fixture_generates_sql_nested_output(nested_project: Path) -> None:
     output = _generate(nested_project)
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["has_user_logic"] is True
+    assert not manifest.get("has_user_logic")
     resource = manifest["resources"][0]
-    assert resource["create"]["style"] == "carryover"
+    assert resource["create"]["style"] == "nested"
     assert resource["update_drops"] == ["entries"]
+    assert resource["db_table"]
     entries_field = next(f for f in resource["fields"] if f["name"] == "entries")
     assert entries_field["kind"] == "nested_many"
     assert entries_field["child"]["model_class"] == "ListingItem"
+    assert entries_field["attname"] == "listing_id"
+    assert entries_field["child"]["db_table"]
     code_field = next(f for f in resource["fields"] if f["name"] == "code")
     assert code_field["unique"] is True
     assert "already exists" in code_field["unique_message"]
-    user_logic = (output / "sanka_user_logic.py").read_text(encoding="utf-8")
-    assert "Listing exceeds 50 total units." in user_logic
-    assert "transaction.atomic" in user_logic
-    assert "rest_framework" not in user_logic
+    assert not (output / "sanka_user_logic.py").exists()
     runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
     assert "rest_framework" not in runtime_text
+    assert "django.setup" not in runtime_text
+    assert (output / "models.py").is_file()
 
 
 def test_nested_native_output_matches_drf(nested_project: Path, tmp_path: Path) -> None:
@@ -226,8 +228,11 @@ def test_create_with_unknown_helper_is_rejected(nested_project: Path) -> None:
     serializers = nested_project / "listings" / "serializers.py"
     text = serializers.read_text(encoding="utf-8")
     text = text.replace(
-        "total = sum(entry.quantity for entry in listing.entries.all())",
-        "total = compute_total(listing)",
+        "listing = Listing.objects.create(**validated_data)",
+        (
+            "listing = Listing.objects.create(**validated_data)\n"
+            "            total = compute_total(listing)"
+        ),
     )
     serializers.write_text(text, encoding="utf-8")
     assert _plan_strategies(nested_project) == {"needs-manual-adaptation"}

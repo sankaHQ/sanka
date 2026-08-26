@@ -34,6 +34,7 @@ def main() -> int:
 
     django.setup()
     from django.core.management import call_command  # type: ignore[import-untyped]
+    from django.db import connection  # type: ignore[import-untyped]
 
     call_command("migrate", interactive=False, verbosity=0, run_syncdb=True)
     from inventory.models import Gadget  # type: ignore[import-not-found]
@@ -47,9 +48,8 @@ def main() -> int:
     else:
         if not args.output:
             raise SystemExit("--output is required in native mode")
+        connection.close()
         results = _run_native(Path(args.output).resolve(), scenarios)
-
-    from django.db import connection  # type: ignore[import-untyped]
 
     connection.close()
     payload = {
@@ -84,17 +84,17 @@ def _run_native(output: Path, scenarios: list[dict[str, Any]]) -> list[dict[str,
     from fastapi.testclient import TestClient
 
     app = import_module("app").app
-    client = TestClient(app, follow_redirects=False)
-    results = []
-    for scenario in scenarios:
-        response = client.request(
-            str(scenario["method"]),
-            str(scenario["path"]),
-            content=_raw_body(scenario),
-            headers={"content-type": "application/json"},
-        )
-        results.append({"status": response.status_code, "body": _body(response.content)})
-    return results
+    with TestClient(app, follow_redirects=False) as client:
+        results = []
+        for scenario in scenarios:
+            response = client.request(
+                str(scenario["method"]),
+                str(scenario["path"]),
+                content=_raw_body(scenario),
+                headers={"content-type": "application/json"},
+            )
+            results.append({"status": response.status_code, "body": _body(response.content)})
+        return results
 
 
 def _raw_body(scenario: dict[str, Any]) -> str:
