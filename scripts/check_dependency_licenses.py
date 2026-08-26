@@ -16,6 +16,7 @@ ALLOWED_EXPRESSIONS = {
     "BSD-3-Clause",
     "LGPL-3.0-only",
     "MIT",
+    "MIT AND PSF-2.0",
     "MIT-0",
     "MPL-2.0",
     "PSF-2.0",

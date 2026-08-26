@@ -1,15 +1,15 @@
 # Sanka — Migrate Django REST Framework APIs to FastAPI
 
 > Inspect a DRF application, generate a reviewable FastAPI migration plan,
-> create a compatibility application, and verify route integrity plus selected
-> HTTP behavior.
+> apply a native async app (or a compatibility bridge), test the generated
+> API, and verify route integrity plus selected HTTP behavior.
 
 Sanka turns migration into a reusable developer primitive. Its first
-application recipe moves Django REST Framework APIs toward FastAPI through a
-verified compatibility bridge: FastAPI owns the generated route graph while
-the original Django/DRF handlers remain available in-process. Teams can replace
-one route at a time without a flag-day rewrite and keep verification green
-throughout the transition.
+application recipe moves Django REST Framework APIs toward FastAPI. Native
+mode (the default) generates async FastAPI handlers over the existing SQL
+tables and does not import Django at serve time. Compatibility mode keeps a
+verified strangler bridge: FastAPI owns the generated route graph while the
+original Django/DRF handlers remain available in-process.
 
 ```bash
 python -m pip install --pre sanka-migrate
@@ -18,6 +18,7 @@ cd my-django-app
 sanka scan
 sanka plan --to fastapi
 sanka apply
+sanka test
 sanka verify
 ```
 
@@ -29,7 +30,7 @@ connectors for databases, warehouses, files, Salesforce, HubSpot, and SendGrid.
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| DRF → FastAPI recipe | Included in source candidate `v0.1.0a6`; the live PyPI project remains the publication authority. Compatibility mode provides resolved-route scan, a hashed plan, separate FastAPI output, manifest verification, and safe read-only differential probes |
+| DRF → FastAPI recipe | Included in source candidate `v0.1.0a6`; the live PyPI project remains the publication authority. Native mode generates async FastAPI over existing SQL tables; compatibility mode is the strangler bridge. Both share scan, a hashed plan, separate FastAPI output, `sanka test` unit tests, and `sanka verify` integrity plus safe read-only probes |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
@@ -98,7 +99,7 @@ migrations actually need:
   transfer exited zero: Sanka reconciles source counts, the ledger, and
   destination readback before calling it done.
 
-## DRF → FastAPI compatibility quick start
+## DRF → FastAPI quick start
 
 Run Sanka inside the Django project's existing Python environment so it can
 load the real URL configuration, including routes created dynamically by DRF
@@ -107,16 +108,21 @@ routers and `@action` decorators:
 ```bash
 sanka scan                         # writes .sanka/scan.json
 sanka scan --json                  # also prints the application IR
-sanka plan --to fastapi            # writes a reviewable, hashed plan
+sanka plan --to fastapi            # native plan by default; --strategy compatibility for the bridge
 sanka apply                         # writes only to .sanka/output/fastapi
+sanka test                          # writes and runs test_generated.py against that app
 sanka verify                       # integrity + route parity + safe HTTP probes
 ```
 
-Compatibility mode intentionally retains Django models, migrations, ORM,
-authentication, permissions, DRF handlers, and synchronous transaction code.
-It creates a real FastAPI route graph that dispatches to those handlers
-in-process. This is a safe strangler starting point, not a claim that all DRF
-code has already been removed. See
+`sanka test` is a unit suite for the generated FastAPI app (OpenAPI, list,
+404, validation, and a SQLite-isolated write round-trip). It does not compare
+FastAPI to DRF; that is `sanka verify`. Write tests copy SQLite first so the
+source database is not mutated.
+
+Native mode serves async FastAPI over the existing tables (Tortoise by
+default). Compatibility mode retains Django models, migrations, ORM,
+authentication, permissions, DRF handlers, and synchronous transaction code
+behind a FastAPI route graph. See
 [the DRF → FastAPI guide](docs/django-to-fastapi.md) for the support boundary
 and verification levels.
 

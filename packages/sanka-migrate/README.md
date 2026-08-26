@@ -1,11 +1,12 @@
 # Sanka
 
 The [Sanka](https://github.com/sankaHQ/sanka) Runtime: the migration
-lifecycle (`create → inspect → plan → apply → verify`), planner, execution
-engine (batching, throttling, retries, checkpoints, resume, identity ledger),
-local state store, verification framework, and the `sanka` CLI. The installed
-distribution remains `sanka-migrate`; `sanka-migrate` is retained as a CLI
-compatibility alias.
+lifecycle (`create → inspect → plan → apply → verify`, plus `sanka test` for
+generated FastAPI apps), planner, execution engine (batching, throttling,
+retries, checkpoints, resume, identity ledger), local state store,
+verification framework, and the `sanka` CLI. The installed distribution
+remains `sanka-migrate`; `sanka-migrate` is retained as a CLI compatibility
+alias.
 
 The runtime is licensed **AGPL-3.0-only**; the connector interface and bundled
 first-party connectors retain **Apache-2.0** source licenses inside the same
@@ -38,6 +39,12 @@ Apply creates a separate FastAPI application in `.sanka/output/fastapi`; it
 does not overwrite the Django source. Native mode serves async FastAPI over
 the existing SQL tables. Compatibility mode forwards to the current DRF
 handlers in-process.
+
+`sanka test` then writes `test_generated.py` beside that app and runs it with
+`python -m unittest`. The suite checks OpenAPI, list/404/empty-create status
+codes, and (on SQLite) a create → retrieve → delete round-trip against an
+isolated database copy. `sanka verify` still compares read-only HTTP behavior
+to the source DRF application.
 
 ## Python quick start
 
