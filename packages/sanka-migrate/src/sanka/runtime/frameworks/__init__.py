@@ -15,6 +15,7 @@ from sanka.runtime.frameworks.django_fastapi import (
     verify_fastapi_migration,
     write_bench_candidate,
 )
+from sanka.runtime.frameworks.fastapi_tests import test_fastapi_app
 
 __all__ = [
     "COMPATIBILITY_STRATEGY",
@@ -27,6 +28,7 @@ __all__ = [
     "load_framework_scan",
     "plan_fastapi",
     "scan_django",
+    "test_fastapi_app",
     "verify_fastapi_migration",
     "write_bench_candidate",
 ]

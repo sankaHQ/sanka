@@ -15,7 +15,7 @@ Django REST Framework (DRF) to FastAPI. Two strategies share one scan:
   in-process. It preserves behavior for the whole surface but still serves
   through DRF, so it can never support the claim that DRF was replaced.
 
-## The four-command contract
+## The five-command contract
 
 Run these commands from the Django repository root and from the project's
 existing Python environment:
@@ -26,6 +26,7 @@ python -m pip install --pre sanka-migrate
 sanka scan
 sanka plan --to fastapi
 sanka apply            # prompts for Tortoise / SQLAlchemy / psycopg when interactive
+sanka test
 sanka verify
 ```
 
@@ -127,6 +128,22 @@ Source files are never overwritten. `sanka apply --bench-candidate <dir>`
 additionally emits a Sanka Migration Bench candidate (overlay plus
 `candidate.yaml`) from the reviewed native plan, so the tool-neutral benchmark
 can grade the exact generated output.
+
+### `sanka test`
+
+After apply, Sanka writes `test_generated.py` beside the FastAPI app and runs
+it with `python -m unittest`. The tests import the generated app through
+FastAPI's `TestClient` (lifespan included) and cover:
+
+- OpenAPI is served and lists every generated route;
+- native API roots return JSON objects;
+- native list / missing-pk / empty-create status codes (401 when the view
+  requires a token, otherwise 200 / 404 / 400);
+- a create → retrieve → delete round-trip when the source database is SQLite
+  (run against an isolated copy, so the developer's file is not mutated).
+
+`sanka test` is the generated API's unit suite. It does not compare FastAPI to
+DRF; that remains `sanka verify`.
 
 ### `sanka verify`
 

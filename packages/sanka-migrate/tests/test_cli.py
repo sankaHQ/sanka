@@ -45,7 +45,7 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
     # `validate` joined the subcommand set in F-6; argparse renders the choices
     # line from the full set, so this is the one pre-existing assertion the
     # additive subcommand forces to grow.
-    assert "{scan,plan,validate,apply,verify,status,migrate,connect,research,assess}" in output
+    assert "{scan,plan,validate,apply,test,verify,status,migrate,connect,research,assess}" in output
 
 
 def test_connect_reports_a_bundled_provider(capsys: pytest.CaptureFixture[str]) -> None:

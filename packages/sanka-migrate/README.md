@@ -21,12 +21,13 @@ APIs may still change before `1.0`.
 
 ## Django REST Framework → FastAPI
 
-Run the four-command compatibility migration from a Django repository root:
+Run the FastAPI migration from a Django repository root:
 
 ```bash
 sanka scan
 sanka plan --to fastapi
 sanka apply
+sanka test
 sanka verify
 ```
 

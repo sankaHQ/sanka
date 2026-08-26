@@ -37,6 +37,7 @@ def main() -> int:
 
     django.setup()
     from django.core.management import call_command  # type: ignore[import-untyped]
+    from django.db import connection  # type: ignore[import-untyped]
 
     call_command("migrate", interactive=False, verbosity=0, run_syncdb=True)
     from bulletins.models import Bulletin  # type: ignore[import-not-found]
@@ -61,12 +62,8 @@ def main() -> int:
     else:
         if not args.output:
             raise SystemExit("--output is required in native mode")
-        from django.db import connection  # type: ignore[import-untyped]
-
         connection.close()
         results = _run_native(Path(args.output).resolve(), scenarios)
-
-    from django.db import connection  # type: ignore[import-untyped]
 
     connection.close()
     payload = {

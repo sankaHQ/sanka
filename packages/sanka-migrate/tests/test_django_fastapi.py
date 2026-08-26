@@ -22,7 +22,7 @@ def drf_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return project
 
 
-def test_four_command_drf_to_fastapi_lifecycle(
+def test_five_command_drf_to_fastapi_lifecycle(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["scan", str(drf_project)]) == 0
@@ -65,11 +65,17 @@ def test_four_command_drf_to_fastapi_lifecycle(
     assert main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
     apply_output = capsys.readouterr().out
     assert "generated 10 FastAPI routes" in apply_output
+    assert "next: sanka test" in apply_output
 
     output = drf_project / ".sanka" / "output" / "fastapi"
     assert (output / "app.py").is_file()
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
     assert manifest["plan_hash"] == plan.plan_hash
+
+    assert main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 0
+    test_output = capsys.readouterr().out
+    assert "Generated API tests: OK" in test_output
+    assert (output / "test_generated.py").is_file()
 
     cases = drf_project / ".sanka" / "verify-cases.json"
     cases.write_text(

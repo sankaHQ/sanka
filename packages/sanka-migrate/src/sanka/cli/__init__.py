@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The ``sanka`` CLI: scan / plan / validate / apply / verify / status.
+"""The ``sanka`` CLI: scan / plan / validate / apply / test / verify / status.
 
 Spec-driven flow (migration-as-code)::
 
@@ -22,6 +22,7 @@ Django REST Framework to FastAPI compatibility flow::
     sanka scan
     sanka plan --to fastapi
     sanka apply
+    sanka test
     sanka verify
 
 Run state lives in a local SQLite file (default ``.sanka/migrate/state.db``), so
@@ -57,6 +58,7 @@ from sanka.runtime.frameworks import (
     load_fastapi_plan,
     plan_fastapi,
     scan_django,
+    test_fastapi_app,
     verify_fastapi_migration,
     write_bench_candidate,
 )
@@ -181,6 +183,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="also emit a Sanka Migration Bench candidate (overlay + candidate.yaml) here",
     )
     apply_.set_defaults(handler=_cmd_apply)
+
+    test = commands.add_parser(
+        "test", help="generate and run unit tests for the created FastAPI app"
+    )
+    common(test)
+    test.add_argument("--root", default=".", help="application repository root")
+    test.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    test.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    test.add_argument("--output", default=None, help="generated FastAPI output directory")
+    test.add_argument("--json", action="store_true", help="print the test report as JSON")
+    test.set_defaults(handler=_cmd_test)
 
     verify = commands.add_parser("verify", help="verify the target against the source and ledger")
     common(verify)
@@ -362,7 +375,7 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
                 artifact_dir=args.artifact_dir,
             )
             print(f"benchmark candidate written to {candidate}")
-        print("next: sanka verify")
+        print("next: sanka test")
         return 0
     spec = _load_spec(args.file)
     engine = _engine(args.state)
@@ -373,6 +386,25 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
     await engine.apply(run_id, plan_hash=args.plan_hash)
     print(f"run {run_id}: applied")
     return 0
+
+
+async def _cmd_test(args: argparse.Namespace) -> int:
+    if not _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
+        raise FrameworkMigrationError(
+            "`sanka test` runs unit tests for a FastAPI apply; run `sanka apply` first"
+        )
+    report = await asyncio.to_thread(
+        lambda: test_fastapi_app(
+            args.root,
+            artifact_dir=args.artifact_dir,
+            output=args.output,
+        )
+    )
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        _print_framework_test(report)
+    return 0 if report["ok"] else 1
 
 
 async def _cmd_verify(args: argparse.Namespace) -> int:
@@ -716,6 +748,22 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
         print(f"Bridge generation readiness: {plan.readiness:.0%}")
     print(f"plan hash: {plan.plan_hash}")
     print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
+
+
+def _print_framework_test(report: dict[str, Any]) -> None:
+    verdict = "OK" if report["ok"] else "FAILED"
+    print("Testing the generated FastAPI app...")
+    print()
+    print(f"Wrote {report['file']}")
+    print(f"Ran {report['tests']} tests")
+    if report.get("allow_writes"):
+        print("Writes ran against an isolated SQLite copy")
+    print(f"Generated API tests: {verdict}")
+    if not report["ok"] and report.get("log"):
+        print()
+        print(report["log"])
+    print()
+    print("next: sanka verify")
 
 
 def _print_framework_verify(report: dict[str, Any]) -> None:

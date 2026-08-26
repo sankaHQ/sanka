@@ -174,6 +174,13 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
         check=False,
     )
     assert migrated.returncode == 0, migrated.stderr
+    tested = _run_cli(["test", "--root", str(crud_project), "--to", "fastapi"], crud_project)
+    assert tested.returncode == 0, tested.stdout + tested.stderr
+    assert "Generated API tests: OK" in tested.stdout
+    assert (output / "test_generated.py").is_file()
+    generated_tests = (output / "test_generated.py").read_text(encoding="utf-8")
+    assert "test_gadgetviewset_create_roundtrip" in generated_tests
+    assert "import django" not in generated_tests
     verified = _run_cli(["verify", "--root", str(crud_project)], crud_project)
     assert verified.returncode == 0, verified.stdout + verified.stderr
     assert "Native migration verification: complete" in verified.stdout

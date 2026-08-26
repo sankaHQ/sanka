@@ -2087,6 +2087,9 @@ Set `SANKA_DATABASE_URL` for PostgreSQL (the scan never stores a password).
 SQLite uses the captured database path, overridable with `SANKA_DATABASE_URL`
 or `SANKA_TEST_DB`.
 
+`sanka test` writes `test_generated.py` here and runs it. SQLite write tests
+use an isolated copy of the database.
+
 Format-suffix alias routes from the source router are dropped as a disclosed
 contract change; clients negotiate content types with headers instead.
 
