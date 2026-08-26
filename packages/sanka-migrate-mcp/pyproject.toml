@@ -19,7 +19,7 @@ dependencies = [
   "mcp>=1.12,<2",
   "pydantic>=2.11,<3",
   # 2.15 emits an upstream unresolved FastMCP lifespan warning at startup.
-  "pydantic-settings>=2.5.2,<2.15",
+  "pydantic-settings>=2.5.2,<2.16",
 ]
 
 [project.urls]
