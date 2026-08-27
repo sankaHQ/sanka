@@ -33,6 +33,7 @@ BUNDLED_CONNECTOR_PACKAGES = {
     "src/sanka_connector_csv",
     "src/sanka_connector_hubspot",
     "src/sanka_connector_markdown",
+    "src/sanka_connector_netsuite",
     "src/sanka_connector_postgres",
     "src/sanka_connector_salesforce",
     "src/sanka_connector_sendgrid",

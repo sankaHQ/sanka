@@ -20,6 +20,7 @@ LICENSE_ZONES: list[tuple[str, str]] = [
     ("packages/sanka-migrate/src/sanka_connector_csv", "Apache-2.0"),
     ("packages/sanka-migrate/src/sanka_connector_hubspot", "Apache-2.0"),
     ("packages/sanka-migrate/src/sanka_connector_markdown", "Apache-2.0"),
+    ("packages/sanka-migrate/src/sanka_connector_netsuite", "Apache-2.0"),
     ("packages/sanka-migrate/src/sanka_connector_postgres", "Apache-2.0"),
     ("packages/sanka-migrate/src/sanka_connector_salesforce", "Apache-2.0"),
     ("packages/sanka-migrate/src/sanka_connector_sendgrid", "Apache-2.0"),

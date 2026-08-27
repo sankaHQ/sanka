@@ -15,4 +15,4 @@ Rules:
   runtime distribution owns all `sanka.connectors` entry points.
 
 Bundled providers: `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`,
-`salesforce`, `hubspot`, and `sendgrid`.
+`salesforce`, `hubspot`, `sendgrid`, and `netsuite`.

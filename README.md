@@ -23,7 +23,8 @@ sanka verify
 ```
 
 The package also includes the existing data-migration runtime and bundled
-connectors for databases, warehouses, files, Salesforce, HubSpot, and SendGrid.
+connectors for databases, warehouses, files, Salesforce, HubSpot, SendGrid, and
+NetSuite.
 
 ## Current release status
 
@@ -206,8 +207,9 @@ computed over the unresolved spec.
 | `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
 | `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
 | `sendgrid` | ✅ | — | Marketing Contacts export, export-job snapshot bounds, resumable paging without forwarding signed-download credentials |
+| `netsuite` | ✅ | — | SuiteQL reads over a fixed ERP object registry; keyset pagination + snapshot bounds on `id`; client-credentials token grant |
 
-All eight first-party connectors and the Apache-2.0 connector interface ship
+All nine first-party connectors and the Apache-2.0 connector interface ship
 inside `sanka-migrate`; users never install a provider plugin. The source files
 retain their Apache-2.0 headers and never import the AGPL runtime, so the
 license boundary stays machine-enforced inside the single distribution.
