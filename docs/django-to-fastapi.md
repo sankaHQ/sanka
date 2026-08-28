@@ -54,6 +54,8 @@ The scan records:
 - HTTP methods and normalized paths;
 - view classes and actions;
 - serializer, model, authentication, and permission classes when declared;
+- configured Django middleware and structured native-adaptation reasons per
+  route (code, feature, and explanation);
 - synchronous transaction markers visible on the view class;
 - source locations, test-file count, and unsupported dynamic route patterns.
 
@@ -88,8 +90,19 @@ In native mode every route receives one of four dispositions:
   headers instead;
 - `needs-manual-adaptation` — everything else (APIViews, custom actions,
   non-token authentication, permission logic beyond the recognized owner
-  idiom, pagination, filters, other overridden viewset methods).
-  Verification fails while these remain.
+  idiom, pagination, filters, other overridden viewset methods, or configured
+  Django middleware that native output does not reproduce). Every such route
+  includes `adaptation_reasons` in scan and plan JSON. The terminal groups the
+  most common reason codes instead of returning a silent zero. Verification
+  fails while these remain.
+
+Native migration readiness is the number of `native-fastapi-crud` and
+`native-fastapi-api-root` routes divided by scanned routes after excluding
+format-suffix aliases from the denominator. A
+`dropped-format-suffix-alias` is a disclosed removal, not generated code, so it
+does not receive native automation credit. Alias drops are reported separately
+as a count and share of scanned routes. Compatibility readiness continues to
+measure routes emitted by the bridge.
 
 `sanka apply` verifies the current scan and canonical plan hashes. For an
 approval workflow or CI gate, pass the exact reviewed hash explicitly with
@@ -239,6 +252,8 @@ envelope fail verification until a human adapts them.
 
 - native generation for session or custom authentication, permission logic
   beyond the recognized owner idiom, pagination, filters, custom actions,
+  configured Django middleware (security, session/CSRF, CORS, and other global
+  behavior is not silently discarded),
   write logic whose free names reach beyond models/transaction/ValidationError,
   or writable non-nested relation fields;
 - automatic conversion of arbitrary serializer/business logic to Pydantic;

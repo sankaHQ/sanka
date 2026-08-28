@@ -36,6 +36,7 @@ import asyncio
 import json
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -714,7 +715,7 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
     print()
     if native:
         print("Native FastAPI generation")
-        print(f"  {plan.automatic_routes - dropped} endpoints")
+        print(f"  {plan.native_routes} endpoints")
         if dropped:
             print()
             print("Dropped format-suffix aliases (disclosed contract change)")
@@ -724,7 +725,25 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
         print(f"  {plan.automatic_routes} endpoints")
     print()
     print("Needs adaptation")
-    print(f"  {len(plan.routes) - plan.automatic_routes} endpoints")
+    print(f"  {plan.needs_adaptation_routes} endpoints")
+    if native and plan.needs_adaptation_routes:
+        reason_counts = Counter(
+            (reason.code, reason.feature, reason.message)
+            for route in plan.routes
+            for reason in route.adaptation_reasons
+        )
+        if reason_counts:
+            print()
+            print("Why routes need adaptation")
+            for (code, feature, message), count in reason_counts.most_common(10):
+                print(f"  {count} endpoints — {code} ({feature})")
+                print(f"    {message}")
+            if len(reason_counts) > 10:
+                remaining = sum(count for _, count in reason_counts.most_common()[10:])
+                print(
+                    f"  {remaining} additional reason occurrences; "
+                    "run `sanka plan --to fastapi --json` for per-route details"
+                )
     print()
     print("Retained in native mode" if native else "Retained in compatibility mode")
     for item in plan.retained:
@@ -743,7 +762,15 @@ def _print_framework_plan(plan: FrameworkPlan) -> None:
             print(f"    {risk.message}")
     print()
     if native:
-        print(f"Native migration readiness: {plan.readiness:.0%}")
+        print(
+            f"Native migration readiness: {plan.readiness:.0%} "
+            f"({plan.native_routes}/{plan.native_eligible_routes} non-alias routes generated)"
+        )
+        if dropped:
+            print(
+                f"Format-suffix aliases dropped: {dropped} "
+                f"({plan.alias_drop_rate:.0%} of scanned routes)"
+            )
     else:
         print(f"Bridge generation readiness: {plan.readiness:.0%}")
     print(f"plan hash: {plan.plan_hash}")

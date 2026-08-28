@@ -121,6 +121,8 @@ def test_five_command_drf_to_fastapi_lifecycle(
         encoding="utf-8",
     )
     assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    unsupported_plan_output = capsys.readouterr().out
+    assert "Needs adaptation\n  1 endpoints" in unsupported_plan_output
     assert main(["apply", "--root", str(drf_project), "--force"]) == 0
     capsys.readouterr()
 
