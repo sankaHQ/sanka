@@ -26,9 +26,9 @@ jobs:
       - name: Skip (no SANKA_BENCH_TOKEN secret configured)
         if: steps.token.outputs.have != 'true'
         run: echo "SANKA_BENCH_TOKEN is not configured; the bench gate was skipped."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.token.outputs.have == 'true'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.token.outputs.have == 'true'
         with:
           repository: sankaHQ/sanka-bench
