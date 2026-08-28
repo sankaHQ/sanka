@@ -121,6 +121,11 @@ not passed. Non-interactive runs use the engine recorded in the plan
 (Tortoise unless `sanka plan --to fastapi --orm …` chose otherwise).
 `psycopg` is refused unless scan captured a PostgreSQL database.
 
+Generated Tortoise applications require Tortoise ORM 1.1 or later. Their
+lifespan initialization enables Tortoise's ASGI global-context fallback so
+request handlers keep the initialized context even when the ASGI server runs
+lifespan and requests in different tasks.
+
 In compatibility mode the native SQL files are replaced by `sanka_compat.py`,
 the in-process Django dispatcher.
 
