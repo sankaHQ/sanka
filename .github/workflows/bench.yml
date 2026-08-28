@@ -34,7 +34,7 @@ jobs:
           repository: sankaHQ/sanka-bench
           token: ${{ secrets.SANKA_BENCH_TOKEN }}
           path: .bench/sanka-bench
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         if: steps.token.outputs.have == 'true'
       - name: Sync
         if: steps.token.outputs.have == 'true'
