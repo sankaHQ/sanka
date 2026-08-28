@@ -22,7 +22,9 @@ APIs may still change before `1.0`.
 
 ## Django REST Framework → FastAPI
 
-Run the FastAPI migration from a Django repository root:
+Run the FastAPI migration from a Django repository root. The `sanka` command
+ships with the `sanka-cli` package, which bundles this engine; this package
+alone provides the same subcommands as `sanka-migrate <command>`:
 
 ```bash
 sanka scan
@@ -32,7 +34,7 @@ sanka test
 sanka verify
 ```
 
-This recipe is included in source candidate `v0.1.0a6`; the live
+This recipe is included in source candidate `v0.1.0a7`; the live
 [PyPI project](https://pypi.org/project/sanka-migrate/) remains the publication authority.
 Sanka resolves the live Django URL graph, including DRF router routes and custom actions.
 Apply creates a separate FastAPI application in `.sanka/output/fastapi`; it
