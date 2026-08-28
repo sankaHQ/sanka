@@ -80,6 +80,20 @@ _SUPPORTED_VIEWSET_ACTIONS = {
     "destroy",
 }
 
+_KNOWN_SAFE_MIDDLEWARE = frozenset(
+    {
+        "corsheaders.middleware.CorsMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "django.contrib.messages.middleware.MessageMiddleware",
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.middleware.clickjacking.XFrameOptionsMiddleware",
+        "django.middleware.common.CommonMiddleware",
+        "django.middleware.csrf.CsrfViewMiddleware",
+        "django.middleware.security.SecurityMiddleware",
+        "whitenoise.middleware.WhiteNoiseMiddleware",
+    }
+)
+
 
 class FrameworkMigrationError(RuntimeError):
     """Raised when a framework migration cannot proceed safely."""
@@ -260,8 +274,9 @@ def _legacy_adaptation_reasons(
                 "The route pattern cannot be represented safely as a FastAPI path.",
             ),
         )
-    if middleware:
-        return (_middleware_adaptation_reason(middleware),)
+    unsupported_middleware = _unsupported_middleware(middleware)
+    if unsupported_middleware:
+        return (_middleware_adaptation_reason(unsupported_middleware),)
     return (
         _adaptation_reason(
             "SANKA_DRF_NATIVE_DETAIL_RESCAN_REQUIRED",
@@ -863,9 +878,12 @@ def _middleware_adaptation_reason(
     return _adaptation_reason(
         "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
         "middleware",
-        f"{count} Django middleware {noun} configured; native output does not reproduce "
-        "middleware behavior.",
+        f"{count} Django middleware {noun} outside the native allowlist: " + ", ".join(middleware),
     )
+
+
+def _unsupported_middleware(middleware: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(item for item in middleware if item not in _KNOWN_SAFE_MIDDLEWARE)
 
 
 def _qualified_items(values: Iterable[Any]) -> str:
@@ -905,16 +923,22 @@ def _native_route_support(
             "route-pattern",
             "The route pattern cannot be represented safely as a FastAPI path.",
         )
-    if middleware:
-        # Do not continue into serializer/auth introspection: complex real
-        # applications may make those properties context- or DB-dependent.
-        return False, (_middleware_adaptation_reason(middleware),)
+    unsupported_middleware = _unsupported_middleware(middleware)
+    middleware_reasons = (
+        (_middleware_adaptation_reason(unsupported_middleware),) if unsupported_middleware else ()
+    )
+
+    def disqualify(
+        code: str, feature: str, message: str
+    ) -> tuple[bool, tuple[RouteAdaptationReason, ...]]:
+        return False, (*middleware_reasons, _adaptation_reason(code, feature, message))
+
     routers = importlib.import_module("rest_framework.routers")
     if inspect.isclass(view_class) and issubclass(view_class, routers.APIRootView):
         permissions_module = importlib.import_module("rest_framework.permissions")
         root_permissions = getattr(view_class, "permission_classes", ())
         if any(item is not permissions_module.AllowAny for item in root_permissions):
-            return _not_native(
+            return disqualify(
                 "SANKA_DRF_API_ROOT_PERMISSIONS_UNSUPPORTED",
                 "permissions",
                 "Router API root permissions are outside AllowAny: "
@@ -922,16 +946,18 @@ def _native_route_support(
             )
         links = _api_root_links(callback)
         if links is None:
-            return _not_native(
+            return disqualify(
                 "SANKA_DRF_API_ROOT_LINKS_UNRESOLVED",
                 "router-registration",
                 "Router API root links could not be resolved from the registered routes.",
             )
+        if middleware_reasons:
+            return False, middleware_reasons
         if all(root.path != path for root in result.api_roots):
             result.api_roots.append(ApiRootIR(path=path, links=links))
         return True, ()
     if actions is None:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_VIEW_KIND_UNSUPPORTED",
             "view-kind",
             f"{view_class.__module__}.{view_class.__qualname__} is not router-bound "
@@ -939,27 +965,27 @@ def _native_route_support(
         )
     unsupported_actions = sorted(set(actions.values()) - _SUPPORTED_VIEWSET_ACTIONS)
     if unsupported_actions:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_CUSTOM_ACTION_UNSUPPORTED",
             "viewset-actions",
             "Custom or unsupported viewset actions are present: " + ", ".join(unsupported_actions),
         )
     viewsets = importlib.import_module("rest_framework.viewsets")
     if not issubclass(view_class, viewsets.ModelViewSet):
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_VIEWSET_KIND_UNSUPPORTED",
             "view-kind",
             f"{view_class.__module__}.{view_class.__qualname__} is not a ModelViewSet.",
         )
     overrides = _viewset_overrides(view_class)
     if overrides:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
             "viewset-overrides",
             "Viewset overrides require manual carryover: " + ", ".join(overrides),
         )
     if getattr(view_class, "lookup_field", "pk") != "pk":
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_LOOKUP_FIELD_UNSUPPORTED",
             "lookup-field",
             f"Custom lookup_field is configured: {view_class.lookup_field}",
@@ -971,7 +997,7 @@ def _native_route_support(
         auth_ir = _view_auth_support(view_class, model)
         result.view_details[view_name] = ViewIR(name=view_name, auth=auth_ir)
     if result.view_details[view_name].auth is None:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_AUTH_PERMISSIONS_UNSUPPORTED",
             "authentication-permissions",
             "Authentication/permission classes are outside AllowAny or the supported "
@@ -981,7 +1007,7 @@ def _native_route_support(
             + _qualified_items(getattr(view_class, "permission_classes", ())),
         )
     if getattr(view_class, "pagination_class", None) is not None:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_PAGINATION_UNSUPPORTED",
             "pagination",
             "Pagination class requires manual adaptation: "
@@ -989,27 +1015,27 @@ def _native_route_support(
         )
     filter_backends = tuple(getattr(view_class, "filter_backends", ()))
     if filter_backends:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_FILTER_BACKENDS_UNSUPPORTED",
             "filter-backends",
             "Filter backends require manual adaptation: " + _qualified_items(filter_backends),
         )
     throttle_classes = tuple(getattr(view_class, "throttle_classes", ()))
     if throttle_classes:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_THROTTLING_UNSUPPORTED",
             "throttling",
             "Throttle classes require manual adaptation: " + _qualified_items(throttle_classes),
         )
     if getattr(view_class, "versioning_class", None) is not None:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_VERSIONING_UNSUPPORTED",
             "versioning",
             "Versioning class requires manual adaptation: "
             + _qualified_items((view_class.versioning_class,)),
         )
     if serializer_name is None:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_SERIALIZER_MISSING",
             "serializer",
             "No serializer_class was captured for this ModelViewSet.",
@@ -1018,19 +1044,21 @@ def _native_route_support(
     if ir is None:
         ir = _serializer_ir(view_class, serializer_name)
         if ir is None:
-            return _not_native(
+            return disqualify(
                 "SANKA_DRF_SERIALIZER_UNSUPPORTED",
                 "serializer",
                 f"Serializer cannot be captured as ModelSerializer CRUD: {serializer_name}",
             )
         result.serializer_details[serializer_name] = ir
     if not ir.supported:
-        return _not_native(
+        return disqualify(
             "SANKA_DRF_SERIALIZER_SEMANTICS_UNSUPPORTED",
             "serializer",
             f"Serializer fields, validation, queryset, or write overrides require manual "
             f"adaptation: {serializer_name}",
         )
+    if middleware_reasons:
+        return False, middleware_reasons
     return True, ()
 
 
