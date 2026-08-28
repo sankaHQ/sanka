@@ -191,7 +191,7 @@ def _sqlalchemy_column(column: dict[str, Any]) -> str:
 def _render_requirements(sql_engine: str, vendor: str) -> str:
     lines = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1"]
     if sql_engine == "tortoise":
-        lines.append("tortoise-orm>=0.21,<1")
+        lines.append("tortoise-orm>=1.1,<2")
         lines.append("asyncpg>=0.29,<1" if vendor == "postgresql" else "aiosqlite>=0.20,<1")
     elif sql_engine == "sqlalchemy":
         lines.append("sqlalchemy>=2.0,<3")
@@ -255,7 +255,12 @@ def _sqlite_url(path: str) -> str:
 
 
 async def init_db() -> None:
-    await Tortoise.init(db_url=database_url(), modules={"models": ["models"]})
+    await Tortoise.init(
+        db_url=database_url(),
+        modules={"models": ["models"]},
+        # FastAPI may run lifespan and request handlers in different tasks.
+        _enable_global_fallback=True,
+    )
 
 
 async def close_db() -> None:

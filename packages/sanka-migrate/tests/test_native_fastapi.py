@@ -150,7 +150,10 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
         assert forbidden not in runtime_text
     store_text = (output / "sanka_store.py").read_text(encoding="utf-8")
     assert "Tortoise" in store_text
+    assert "_enable_global_fallback=True" in store_text
     assert "import django" not in store_text
+    requirements = (output / "requirements.txt").read_text(encoding="utf-8")
+    assert "tortoise-orm>=1.1,<2" in requirements
     app_text = (output / "app.py").read_text(encoding="utf-8")
     assert '@app.get("/api/gadgets/")' in app_text
     assert '@app.post("/api/gadgets/")' in app_text
@@ -161,6 +164,7 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     assert "async def create_gadget(" in app_text
     assert "await native.handle" in app_text
     assert "lifespan" in app_text
+    assert "finally:" in app_text
 
     # A real project has a migrated database before verification; the fixture
     # starts from a fresh copy, so create its schema first.

@@ -23,7 +23,7 @@ dev = [
   "django>=5.2,<7",
   "djangorestframework>=3.16,<4",
   "types-pyyaml>=6",
-  "tortoise-orm>=0.21,<1",
+  "tortoise-orm>=1.1,<2",
   "aiosqlite>=0.20,<1",
   "sqlalchemy>=2.0,<3",
 ]
