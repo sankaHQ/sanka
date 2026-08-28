@@ -264,6 +264,15 @@ def test_bench_candidate_emission(crud_project: Path) -> None:
     )
     assert manifest["source_root"] == "."
     assert manifest["entrypoint"] == "target_app.py"
+    assert manifest["sql_engine"] == "django"
+    assert (candidate / "overlay" / "sanka_settings.py").is_file()
+    assert not (candidate / "overlay" / "models.py").exists()
+    store = (candidate / "overlay" / "sanka_store.py").read_text(encoding="utf-8")
+    assert "retained Django ORM" in store
+    assert "from tortoise" not in store
+    requirements = (candidate / "overlay" / "requirements.txt").read_text(encoding="utf-8")
+    assert "django" in requirements
+    assert "tortoise" not in requirements
     text = (candidate / "candidate.yaml").read_text(encoding="utf-8")
     assert "schema_version: sanka-bench/candidate/v0.1" in text
     assert "producer: sanka" in text

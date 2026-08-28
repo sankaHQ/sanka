@@ -152,8 +152,11 @@ the in-process Django dispatcher.
 
 Source files are never overwritten. `sanka apply --bench-candidate <dir>`
 additionally emits a Sanka Migration Bench candidate (overlay plus
-`candidate.yaml`) from the reviewed native plan, so the tool-neutral benchmark
-can grade the exact generated output.
+`candidate.yaml`) from the reviewed native plan. The benchmark contract keeps
+Django for ORM access, so this projection uses generated DRF-free Django
+settings and the retained Django ORM while normal `sanka apply` output keeps
+the selected async SQL engine. This lets the tool-neutral benchmark grade the
+same generated FastAPI route contract in its fixed fixture environment.
 
 ### `sanka test`
 
