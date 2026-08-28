@@ -17,10 +17,37 @@ from typing import Any
 
 import pytest
 
+from sanka.runtime.frameworks.django_fastapi import _unsupported_middleware
 from sanka.runtime.hashing import content_hash
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PROBE = Path(__file__).parent / "native_parity_probe.py"
+# Exact settings.MIDDLEWARE values captured by the 2026-08-28 nine-app OSS rescan.
+REAL_WORLD_MIDDLEWARE_STACKS: dict[str, list[str]] = json.loads(
+    (FIXTURES / "oss_drf_middleware_stacks.json").read_text(encoding="utf-8")
+)
+SAFE_MIDDLEWARE_STACK = (
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+)
+EXPECTED_UNSUPPORTED_MIDDLEWARE_COUNTS = {
+    "styleguide-example": 2,
+    "django-crm": 3,
+    "care": 4,
+    "djangoforapis": 1,
+    "readthedocs": 10,
+    "netbox": 7,
+    "defectdojo": 12,
+    "peering-manager": 3,
+    "kitsune": 28,
+}
 
 SCENARIOS: list[dict[str, Any]] = [
     {"method": "GET", "path": "/api/gadgets/"},
@@ -105,6 +132,15 @@ def _run_probe(
     payload = json.loads(lines[-1])
     assert isinstance(payload, dict)
     return payload
+
+
+def _set_middleware(settings: Path, middleware: list[str] | tuple[str, ...]) -> None:
+    source = settings.read_text(encoding="utf-8")
+    if "MIDDLEWARE: list[str] = []" in source:
+        source = source.replace("MIDDLEWARE: list[str] = []", f"MIDDLEWARE = {list(middleware)!r}")
+    else:
+        source = source.replace("MIDDLEWARE = []", f"MIDDLEWARE = {list(middleware)!r}")
+    settings.write_text(source, encoding="utf-8")
 
 
 @pytest.fixture
@@ -263,16 +299,94 @@ def test_native_plan_refuses_routes_outside_the_envelope(tmp_path: Path) -> None
     assert "SANKA_DRF_CUSTOM_ACTION_UNSUPPORTED" in reason_codes
 
 
-def test_native_plan_explains_middleware_and_separates_alias_drops(
+@pytest.mark.parametrize("app", sorted(EXPECTED_UNSUPPORTED_MIDDLEWARE_COUNTS))
+def test_real_world_middleware_stacks_only_reject_classes_outside_allowlist(app: str) -> None:
+    stack = tuple(REAL_WORLD_MIDDLEWARE_STACKS[app])
+    unsupported = _unsupported_middleware(stack)
+    assert len(unsupported) == EXPECTED_UNSUPPORTED_MIDDLEWARE_COUNTS[app]
+    assert tuple(item for item in stack if item not in unsupported) == tuple(
+        item for item in stack if item in SAFE_MIDDLEWARE_STACK
+    )
+
+
+def test_native_plan_allows_known_safe_middleware_stack(crud_project: Path) -> None:
+    _set_middleware(crud_project / "crud_config" / "settings.py", SAFE_MIDDLEWARE_STACK)
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    payload = json.loads(plan.stdout)
+    assert payload["native_routes"] == payload["native_eligible_routes"]
+    assert payload["readiness"] == 1.0
+    assert all(
+        reason["code"] != "SANKA_DRF_MIDDLEWARE_UNSUPPORTED"
+        for route in payload["routes"]
+        for reason in route["adaptation_reasons"]
+    )
+
+
+def test_native_plan_continues_past_unsupported_middleware(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    shutil.copytree(FIXTURES / "drf_project", project)
+    _set_middleware(
+        project / "config" / "settings.py", REAL_WORLD_MIDDLEWARE_STACKS["djangoforapis"]
+    )
+    scan = _run_cli(["scan", str(project)], project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(["plan", str(project), "--to", "fastapi", "--json"], project)
+    assert plan.returncode == 0, plan.stderr
+    payload = json.loads(plan.stdout)
+
+    def reason_codes(path: str) -> list[str]:
+        route = next(route for route in payload["routes"] if route["path"] == path)
+        return [reason["code"] for reason in route["adaptation_reasons"]]
+
+    assert reason_codes("/api/health/") == [
+        "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
+        "SANKA_DRF_VIEW_KIND_UNSUPPORTED",
+    ]
+    assert reason_codes("/api/projects/") == [
+        "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
+        "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
+    ]
+    assert reason_codes("/api/projects/featured/") == [
+        "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
+        "SANKA_DRF_CUSTOM_ACTION_UNSUPPORTED",
+    ]
+    manual = [
+        route for route in payload["routes"] if route["strategy"] == "needs-manual-adaptation"
+    ]
+    assert all(
+        any(reason["code"] != "SANKA_DRF_MIDDLEWARE_UNSUPPORTED" for reason in reasons)
+        for route in manual
+        if (reasons := route["adaptation_reasons"])
+    )
+
+    compatibility = _run_cli(
+        [
+            "plan",
+            str(project),
+            "--to",
+            "fastapi",
+            "--strategy",
+            "compatibility",
+            "--json",
+        ],
+        project,
+    )
+    assert compatibility.returncode == 0, compatibility.stderr
+    compatibility_payload = json.loads(compatibility.stdout)
+    assert compatibility_payload["automatic_routes"] == len(compatibility_payload["routes"])
+    assert compatibility_payload["readiness"] == 1.0
+
+
+def test_native_plan_explains_unsupported_middleware_and_separates_alias_drops(
     crud_project: Path,
 ) -> None:
     settings = crud_project / "crud_config" / "settings.py"
-    settings.write_text(
-        settings.read_text(encoding="utf-8").replace(
-            "MIDDLEWARE: list[str] = []",
-            'MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]',
-        ),
-        encoding="utf-8",
+    _set_middleware(
+        settings,
+        REAL_WORLD_MIDDLEWARE_STACKS["styleguide-example"],
     )
     scan = _run_cli(["scan", str(crud_project)], crud_project)
     assert scan.returncode == 0, scan.stderr
@@ -312,12 +426,9 @@ def test_native_plan_explains_middleware_and_separates_alias_drops(
 
 def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> None:
     settings = crud_project / "crud_config" / "settings.py"
-    settings.write_text(
-        settings.read_text(encoding="utf-8").replace(
-            "MIDDLEWARE: list[str] = []",
-            'MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]',
-        ),
-        encoding="utf-8",
+    _set_middleware(
+        settings,
+        REAL_WORLD_MIDDLEWARE_STACKS["djangoforapis"],
     )
     scan = _run_cli(["scan", str(crud_project)], crud_project)
     assert scan.returncode == 0, scan.stderr

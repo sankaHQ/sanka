@@ -90,11 +90,19 @@ In native mode every route receives one of four dispositions:
   headers instead;
 - `needs-manual-adaptation` — everything else (APIViews, custom actions,
   non-token authentication, permission logic beyond the recognized owner
-  idiom, pagination, filters, other overridden viewset methods, or configured
-  Django middleware that native output does not reproduce). Every such route
-  includes `adaptation_reasons` in scan and plan JSON. The terminal groups the
-  most common reason codes instead of returning a silent zero. Verification
-  fails while these remain.
+  idiom, pagination, filters, other overridden viewset methods, or middleware
+  outside the known-safe allowlist). Every such route includes
+  `adaptation_reasons` in scan and plan JSON. Unsupported middleware does not
+  mask the route-specific reason discovered by the rest of the native-envelope
+  checks. The terminal groups the most common reason codes instead of returning
+  a silent zero. Verification fails while these remain.
+
+The exact middleware allowlist covers Django's `SecurityMiddleware`,
+`SessionMiddleware`, `CommonMiddleware`, `CsrfViewMiddleware`,
+`AuthenticationMiddleware`, `MessageMiddleware`, and `XFrameOptionsMiddleware`,
+plus WhiteNoise's `WhiteNoiseMiddleware` and django-cors-headers'
+`CorsMiddleware`. Project-specific subclasses and similarly named middleware
+remain outside the allowlist; matching is by the full import path.
 
 Native migration readiness is the number of `native-fastapi-crud` and
 `native-fastapi-api-root` routes divided by scanned routes after excluding
@@ -255,7 +263,7 @@ envelope fail verification until a human adapts them.
 
 - native generation for session or custom authentication, permission logic
   beyond the recognized owner idiom, pagination, filters, custom actions,
-  configured Django middleware (security, session/CSRF, CORS, and other global
+  middleware outside the exact known-safe allowlist (project-specific global
   behavior is not silently discarded),
   write logic whose free names reach beyond models/transaction/ValidationError,
   or writable non-nested relation fields;
