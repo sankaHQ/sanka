@@ -39,8 +39,10 @@ This recipe is included in source candidate `v0.1.0a7`; the live
 Sanka resolves the live Django URL graph, including DRF router routes and custom actions.
 Apply creates a separate FastAPI application in `.sanka/output/fastapi`; it
 does not overwrite the Django source. Native mode serves async FastAPI over
-the existing SQL tables. Compatibility mode forwards to the current DRF
-handlers in-process.
+the existing SQL tables. Native readiness counts generated routes only,
+reports dropped format-suffix aliases separately, and includes structured
+per-route adaptation reasons in JSON plans. Compatibility mode forwards to
+the current DRF handlers in-process.
 
 `sanka test` then writes `test_generated.py` beside that app and runs it with
 `python -m unittest`. The suite checks OpenAPI, list/404/empty-create status

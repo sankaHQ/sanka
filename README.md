@@ -120,9 +120,11 @@ FastAPI to DRF; that is `sanka verify`. Write tests copy SQLite first so the
 source database is not mutated.
 
 Native mode serves async FastAPI over the existing tables (Tortoise by
-default). Compatibility mode retains Django models, migrations, ORM,
-authentication, permissions, DRF handlers, and synchronous transaction code
-behind a FastAPI route graph. See
+default). Native plans report a structured reason for every route that needs
+adaptation; readiness counts generated routes only and reports dropped
+format-suffix aliases separately. Compatibility mode retains Django models,
+migrations, ORM, authentication, permissions, DRF handlers, and synchronous
+transaction code behind a FastAPI route graph. See
 [the DRF → FastAPI guide](docs/django-to-fastapi.md) for the support boundary
 and verification levels.
 

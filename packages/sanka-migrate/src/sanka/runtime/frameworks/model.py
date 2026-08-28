@@ -19,6 +19,23 @@ class FrameworkRisk:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteAdaptationReason:
+    """One machine-readable reason a route is outside the native envelope."""
+
+    code: str
+    feature: str
+    message: str
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> RouteAdaptationReason:
+        return cls(
+            code=str(payload["code"]),
+            feature=str(payload["feature"]),
+            message=str(payload["message"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RouteIR:
     method: str
     path: str
@@ -33,10 +50,21 @@ class RouteIR:
     source_line: int | None = None
     supported: bool = True
     native: bool = False
+    adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
 
     @property
     def key(self) -> str:
         return f"{self.method} {self.path}"
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> RouteIR:
+        data = dict(payload)
+        data["authentication"] = tuple(payload.get("authentication", ()))
+        data["permissions"] = tuple(payload.get("permissions", ()))
+        data["adaptation_reasons"] = tuple(
+            RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
+        )
+        return cls(**data)
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +252,9 @@ class FrameworkScan:
     def hash_payload(self) -> dict[str, Any]:
         payload = asdict(self)
         payload.pop("scan_hash", None)
+        if self.schema_version < 3:
+            for route in payload["routes"]:
+                route.pop("adaptation_reasons", None)
         return payload
 
     def with_hash(self) -> FrameworkScan:
@@ -244,7 +275,7 @@ class FrameworkScan:
             drf_version=str(payload["drf_version"]),
             settings_module=str(payload["settings_module"]),
             root_urlconf=str(payload["root_urlconf"]),
-            routes=tuple(RouteIR(**item) for item in payload.get("routes", [])),
+            routes=tuple(RouteIR.from_dict(item) for item in payload.get("routes", [])),
             serializers=tuple(payload.get("serializers", [])),
             models=tuple(payload.get("models", [])),
             permissions=tuple(payload.get("permissions", [])),
@@ -273,10 +304,19 @@ class PlannedRoute:
     source_view: str
     strategy: str
     automatic: bool
+    adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
 
     @property
     def key(self) -> str:
         return f"{self.method} {self.path}"
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> PlannedRoute:
+        data = dict(payload)
+        data["adaptation_reasons"] = tuple(
+            RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
+        )
+        return cls(**data)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,17 +336,53 @@ class FrameworkPlan:
 
     @property
     def automatic_routes(self) -> int:
+        if self.mode == "native":
+            return self.native_routes
         return sum(route.automatic for route in self.routes)
+
+    @property
+    def native_routes(self) -> int:
+        return sum(
+            route.strategy in ("native-fastapi-crud", "native-fastapi-api-root")
+            for route in self.routes
+        )
+
+    @property
+    def dropped_alias_routes(self) -> int:
+        return sum(route.strategy == "dropped-format-suffix-alias" for route in self.routes)
+
+    @property
+    def native_eligible_routes(self) -> int:
+        return len(self.routes) - self.dropped_alias_routes
+
+    @property
+    def needs_adaptation_routes(self) -> int:
+        if self.mode != "native":
+            return len(self.routes) - self.automatic_routes
+        return sum(route.strategy == "needs-manual-adaptation" for route in self.routes)
+
+    @property
+    def alias_drop_rate(self) -> float:
+        if not self.routes:
+            return 0.0
+        return self.dropped_alias_routes / len(self.routes)
 
     @property
     def readiness(self) -> float:
         if not self.routes:
             return 0.0
+        if self.mode == "native":
+            if not self.native_eligible_routes:
+                return 0.0
+            return self.native_routes / self.native_eligible_routes
         return self.automatic_routes / len(self.routes)
 
     def hash_payload(self) -> dict[str, Any]:
         payload = asdict(self)
         payload.pop("plan_hash", None)
+        if self.schema_version < 2:
+            for route in payload["routes"]:
+                route.pop("adaptation_reasons", None)
         return payload
 
     def with_hash(self) -> FrameworkPlan:
@@ -315,6 +391,11 @@ class FrameworkPlan:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["automatic_routes"] = self.automatic_routes
+        payload["native_routes"] = self.native_routes
+        payload["dropped_alias_routes"] = self.dropped_alias_routes
+        payload["native_eligible_routes"] = self.native_eligible_routes
+        payload["needs_adaptation_routes"] = self.needs_adaptation_routes
+        payload["alias_drop_rate"] = self.alias_drop_rate
         payload["readiness"] = self.readiness
         return payload
 
@@ -327,7 +408,7 @@ class FrameworkPlan:
             mode=str(payload["mode"]),
             source_scan_hash=str(payload["source_scan_hash"]),
             settings_module=str(payload["settings_module"]),
-            routes=tuple(PlannedRoute(**item) for item in payload.get("routes", [])),
+            routes=tuple(PlannedRoute.from_dict(item) for item in payload.get("routes", [])),
             risks=tuple(FrameworkRisk(**item) for item in payload.get("risks", [])),
             retained=tuple(payload.get("retained", [])),
             default_output=str(payload["default_output"]),

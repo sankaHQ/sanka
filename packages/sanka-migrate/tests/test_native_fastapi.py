@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 
+from sanka.runtime.hashing import content_hash
+
 FIXTURES = Path(__file__).parent / "fixtures"
 PROBE = Path(__file__).parent / "native_parity_probe.py"
 
@@ -244,6 +246,93 @@ def test_native_plan_refuses_routes_outside_the_envelope(tmp_path: Path) -> None
     # the native envelope: nothing may be silently bridged.
     assert payload["automatic_routes"] == 0
     assert all(route["strategy"] == "needs-manual-adaptation" for route in payload["routes"])
+    assert all(route["adaptation_reasons"] for route in payload["routes"])
+    reason_codes = {
+        reason["code"] for route in payload["routes"] for reason in route["adaptation_reasons"]
+    }
+    assert "SANKA_DRF_VIEW_KIND_UNSUPPORTED" in reason_codes
+    assert "SANKA_DRF_CUSTOM_ACTION_UNSUPPORTED" in reason_codes
+
+
+def test_native_plan_explains_middleware_and_separates_alias_drops(
+    crud_project: Path,
+) -> None:
+    settings = crud_project / "crud_config" / "settings.py"
+    settings.write_text(
+        settings.read_text(encoding="utf-8").replace(
+            "MIDDLEWARE: list[str] = []",
+            'MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]',
+        ),
+        encoding="utf-8",
+    )
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan_json = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert plan_json.returncode == 0, plan_json.stderr
+    payload = json.loads(plan_json.stdout)
+    assert payload["automatic_routes"] == 0
+    assert payload["native_routes"] == 0
+    assert payload["native_eligible_routes"] > 0
+    assert payload["dropped_alias_routes"] > 0
+    assert payload["readiness"] == 0.0
+    assert payload["alias_drop_rate"] > 0.0
+    manual = [
+        route for route in payload["routes"] if route["strategy"] == "needs-manual-adaptation"
+    ]
+    assert manual
+    assert all(
+        any(
+            reason["code"] == "SANKA_DRF_MIDDLEWARE_UNSUPPORTED"
+            and reason["feature"] == "middleware"
+            for reason in route["adaptation_reasons"]
+        )
+        for route in manual
+    )
+    aliases = [
+        route for route in payload["routes"] if route["strategy"] == "dropped-format-suffix-alias"
+    ]
+    assert aliases
+    assert all(not route["adaptation_reasons"] for route in aliases)
+
+    plan_text = _run_cli(["plan", str(crud_project), "--to", "fastapi"], crud_project)
+    assert plan_text.returncode == 0, plan_text.stderr
+    assert "Native migration readiness: 0%" in plan_text.stdout
+    assert "Format-suffix aliases dropped:" in plan_text.stdout
+    assert "SANKA_DRF_MIDDLEWARE_UNSUPPORTED (middleware)" in plan_text.stdout
+
+
+def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> None:
+    settings = crud_project / "crud_config" / "settings.py"
+    settings.write_text(
+        settings.read_text(encoding="utf-8").replace(
+            "MIDDLEWARE: list[str] = []",
+            'MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]',
+        ),
+        encoding="utf-8",
+    )
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    scan_path = crud_project / ".sanka" / "scan.json"
+    payload = json.loads(scan_path.read_text(encoding="utf-8"))
+    payload["schema_version"] = 2
+    for route in payload["routes"]:
+        route.pop("adaptation_reasons", None)
+    hash_payload = dict(payload)
+    hash_payload.pop("scan_hash", None)
+    payload["scan_hash"] = content_hash(hash_payload)
+    scan_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    planned = json.loads(plan.stdout)
+    manual = [
+        route for route in planned["routes"] if route["strategy"] == "needs-manual-adaptation"
+    ]
+    assert manual
+    assert all(
+        route["adaptation_reasons"][0]["code"] == "SANKA_DRF_MIDDLEWARE_UNSUPPORTED"
+        for route in manual
+    )
 
 
 def test_apply_sqlalchemy_and_rejects_psycopg_on_sqlite(crud_project: Path) -> None:
