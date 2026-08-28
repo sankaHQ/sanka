@@ -202,6 +202,31 @@ def test_nested_fixture_generates_sql_nested_output(nested_project: Path) -> Non
     assert (output / "models.py").is_file()
 
 
+def test_bench_candidate_preserves_django_carryover(nested_project: Path) -> None:
+    _generate(nested_project)
+    applied = _run_cli(
+        [
+            "apply",
+            "--root",
+            str(nested_project),
+            "--force",
+            "--bench-candidate",
+            "candidate",
+        ],
+        nested_project,
+    )
+    assert applied.returncode == 0, applied.stderr
+    overlay = nested_project / "candidate" / "overlay"
+    manifest = json.loads((overlay / "sanka-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["sql_engine"] == "django"
+    assert manifest["has_user_logic"] is True
+    assert manifest["resources"][0]["create"]["style"] == "carryover"
+    user_logic = (overlay / "sanka_user_logic.py").read_text(encoding="utf-8")
+    assert "transaction.atomic" in user_logic
+    assert "ValidationError" in user_logic
+    assert (overlay / "sanka_settings.py").is_file()
+
+
 def test_nested_native_output_matches_drf(nested_project: Path, tmp_path: Path) -> None:
     output = _generate(nested_project)
     source = _run_probe("source", nested_project, tmp_path / "source.sqlite3")
