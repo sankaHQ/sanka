@@ -21,7 +21,7 @@ Run these commands from the Django repository root and from the project's
 existing Python environment:
 
 ```bash
-python -m pip install --pre sanka-migrate
+python -m pip install sanka-cli
 
 sanka scan
 sanka plan --to fastapi

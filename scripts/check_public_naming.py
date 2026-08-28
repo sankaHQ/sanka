@@ -124,7 +124,6 @@ def main() -> int:
     runtime = _load(ROOT / "packages/sanka-migrate/pyproject.toml")
     scripts = runtime["project"].get("scripts", {})
     expected_scripts = {
-        "sanka": "sanka.cli:main",
         "sanka-migrate": "sanka.cli:main",
     }
     if scripts != expected_scripts:
