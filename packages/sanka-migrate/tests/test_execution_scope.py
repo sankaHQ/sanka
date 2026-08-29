@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import Credentials, RecordPage, SourceFilter, SourceObject
 from sanka.runtime.execution import (
     ExecutionFault,
     ExecutionScope,
@@ -24,6 +23,7 @@ from sanka.runtime.execution import (
     frozen_route_totals,
 )
 from sanka.runtime.mapping import MigrationMappingField, mapping_groups, mapping_route_manifest
+from sanka_connector import Credentials, RecordPage, SourceFilter, SourceObject
 
 _CREDENTIALS = Credentials(provider="fake")
 

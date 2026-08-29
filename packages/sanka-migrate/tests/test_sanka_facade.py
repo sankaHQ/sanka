@@ -28,7 +28,7 @@ def test_public_facade_exports_runtime_types() -> None:
     assert sanka.ExecutionError.__module__ == "sanka.runtime.engine"
 
 
-def test_sanka_connect_selects_a_bundled_provider(tmp_path: Path) -> None:
+def test_sanka_connect_selects_an_installed_provider(tmp_path: Path) -> None:
     with Sanka(state=tmp_path / "state.db") as client:
         hubspot = client.connect("hubspot")
         postgres = client.connect("postgresql", "postgresql://localhost/example")

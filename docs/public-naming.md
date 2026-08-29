@@ -11,7 +11,10 @@ API identifiers keep their existing migration-specific names for stability.
 |---|---|
 | Project and product | Sanka |
 | GitHub repository | `sankaHQ/sanka` |
-| Runtime and built-in connector distribution | `sanka-migrate` |
+| Migration runtime distribution | `sanka-migrate` |
+| Connector repository | `sankaHQ/sanka-connectors` |
+| Connector interface distribution / import | `sanka-connector-sdk` / `sanka_connector` |
+| Provider distributions | `sanka-connector-<provider>` |
 | Preferred Python facade | `from sanka import Sanka` |
 | Built-in provider selection | `sanka.connect("<provider>")` |
 | CLI command | `sanka-migrate` |
@@ -22,10 +25,11 @@ The bare name `sanka` is used for the GitHub repository and Python import
 package. It is intentionally not used for the distribution or executable: the
 `sanka` Python distribution is owned by an unrelated publisher, and the
 `sanka` executable is already owned by `sanka-cli`. The retired V1 monolith is
-preserved separately as `sankaHQ/sanka-monolith`. The `sanka-migrate`
-distribution provides the `sanka` import package, its `Sanka` facade, connector
-interface, and built-in providers—Python distribution and import names are
-independent.
+preserved separately from the active repository. The `sanka-migrate`
+distribution provides the `sanka` import package and its `Sanka` facade. The
+separate `sanka-connector-sdk` distribution provides the zero-dependency
+connector contract, and provider distributions register themselves when
+installed. Python distribution and import names are independent.
 
 ## Python API contract
 
@@ -64,9 +68,11 @@ source facade does not expose an unused `api_key` parameter.
 The public source tree uses one naming system from its first release:
 
 - Python runtime imports live under `sanka.*`;
-- bundled connector modules use `sanka_connector_<provider>`;
-- built-in connector discovery uses the `sanka.connectors` entry-point group
-  owned by the `sanka-migrate` distribution;
+- the connector SDK imports as `sanka_connector`;
+- provider modules use `sanka_connector_<provider>` and are published as
+  `sanka-connector-<provider>`;
+- installed provider distributions register themselves through the
+  `sanka.connectors` entry-point group;
 - the CLI command is `sanka-migrate`;
 - the default spec is `sanka-migrate.yaml` and local state is stored under
   `.sanka/migrate/`;

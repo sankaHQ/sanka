@@ -16,16 +16,6 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import (
-    Credentials,
-    RecordPage,
-    RelationshipWrite,
-    RelationshipWriteResult,
-    SourceFilter,
-    SourceObject,
-    WriteOptions,
-    WriteResult,
-)
 from sanka.runtime.execution import (
     EXACT_CANDIDATE_HASH_MISMATCH_CODE,
     EXACT_SCOPE_COVERAGE_WARNING,
@@ -50,6 +40,16 @@ from sanka.runtime.execution.state import ClaimOutcome
 from sanka.runtime.mapping import MigrationMappingField, mapping_groups
 from sanka.runtime.mapping.record_mapping import MappingGroup
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
+from sanka_connector import (
+    Credentials,
+    RecordPage,
+    RelationshipWrite,
+    RelationshipWriteResult,
+    SourceFilter,
+    SourceObject,
+    WriteOptions,
+    WriteResult,
+)
 
 _CREDENTIALS = Credentials(provider="fake")
 

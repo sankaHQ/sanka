@@ -20,8 +20,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
-from sanka.connector import SourceFilter
-from sanka.connector.schema import Inventory, ObjectSchema, SourceObject
 from sanka.runtime.hashing import content_hash
 from sanka.runtime.mapping.mapping_candidates import generate_mapping_candidates
 from sanka.runtime.mapping.model import (
@@ -35,6 +33,8 @@ from sanka.runtime.mapping.record_mapping import (
     mapping_group_key,
     mapping_groups,
 )
+from sanka_connector import SourceFilter
+from sanka_connector.schema import Inventory, ObjectSchema, SourceObject
 
 MappingOrigin = Literal["auto", "identity"]
 

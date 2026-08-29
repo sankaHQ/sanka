@@ -2,11 +2,11 @@
 """Scope freeze: per-route high-water marks, frozen totals, route resolution.
 
 Faithful port of the production scope mechanics: the queue-time high-water
-mark freeze probes :class:`~sanka.connector.SupportsHighWaterMark` and
+mark freeze probes :class:`~sanka_connector.SupportsHighWaterMark` and
 freezes a mark for **every** reviewed route (not only the selected ones); the
-claim-time total count probes :class:`~sanka.connector.SupportsRecordCounts`
+claim-time total count probes :class:`~sanka_connector.SupportsRecordCounts`
 and counts **selected** routes only, bounded by the frozen marks through
-:class:`~sanka.connector.SupportsBoundedCounts`. A route whose frozen mark is
+:class:`~sanka_connector.SupportsBoundedCounts`. A route whose frozen mark is
 ``None`` (the source held no records at freeze time) counts as ``0`` and is
 completed without a read. Sources that cannot count report ``None`` totals —
 unknown, never zero.
@@ -30,13 +30,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sanka.connector import (
-    Credentials,
-    SourceConnector,
-    SupportsBoundedCounts,
-    SupportsHighWaterMark,
-    SupportsRecordCounts,
-)
 from sanka.runtime.execution.errors import ExecutionFault
 from sanka.runtime.execution.model import ExecutionRoute, ExecutionScope
 from sanka.runtime.execution.report_codec import (
@@ -52,6 +45,13 @@ from sanka.runtime.mapping.record_mapping import (
     MappingGroup,
     mapping_group_key,
     mapping_route_manifest,
+)
+from sanka_connector import (
+    Credentials,
+    SourceConnector,
+    SupportsBoundedCounts,
+    SupportsHighWaterMark,
+    SupportsRecordCounts,
 )
 
 EXACT_CANDIDATE_HASH_MISMATCH_CODE = "SANKA_MIGRATE_EXACT_SCOPE_CANDIDATE_HASH_MISMATCH"

@@ -6,16 +6,6 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import (
-    BatchRelationshipWriteResult,
-    Credentials,
-    Inventory,
-    RelationshipWrite,
-    RelationshipWriteResult,
-    WriteOptions,
-    WriteResult,
-)
-from sanka.connector.records import BatchRelationshipStatus
 from sanka.runtime.mapping import (
     MappingError,
     pending_relationship,
@@ -25,6 +15,16 @@ from sanka.runtime.mapping import (
     resolve_destination_record_ids,
     retry_pending_relationships,
 )
+from sanka_connector import (
+    BatchRelationshipWriteResult,
+    Credentials,
+    Inventory,
+    RelationshipWrite,
+    RelationshipWriteResult,
+    WriteOptions,
+    WriteResult,
+)
+from sanka_connector.records import BatchRelationshipStatus
 
 _CREDENTIALS = Credentials(provider="stub-crm")
 

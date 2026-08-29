@@ -16,20 +16,6 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import (
-    BatchRelationshipWriteResult,
-    BatchWriteInput,
-    BatchWriteResult,
-    Credentials,
-    OwnerProfile,
-    RecordPage,
-    RelationshipWrite,
-    RelationshipWriteResult,
-    SourceFilter,
-    SourceObject,
-    WriteOptions,
-    WriteResult,
-)
 from sanka.runtime.execution import (
     ExecutionFault,
     ExecutionHost,
@@ -54,6 +40,20 @@ from sanka.runtime.mapping import (
     pending_relationship_key,
 )
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
+from sanka_connector import (
+    BatchRelationshipWriteResult,
+    BatchWriteInput,
+    BatchWriteResult,
+    Credentials,
+    OwnerProfile,
+    RecordPage,
+    RelationshipWrite,
+    RelationshipWriteResult,
+    SourceFilter,
+    SourceObject,
+    WriteOptions,
+    WriteResult,
+)
 
 _CREDENTIALS = Credentials(provider="fake")
 

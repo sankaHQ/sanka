@@ -16,6 +16,7 @@ from sanka.runtime.frameworks.django_fastapi import (
     write_bench_candidate,
 )
 from sanka.runtime.frameworks.fastapi_tests import test_fastapi_app
+from sanka.runtime.frameworks.generated_environment import GeneratedEnvironmentError
 
 __all__ = [
     "COMPATIBILITY_STRATEGY",
@@ -23,6 +24,7 @@ __all__ = [
     "DEFAULT_FASTAPI_OUTPUT",
     "NATIVE_STRATEGY",
     "FrameworkMigrationError",
+    "GeneratedEnvironmentError",
     "apply_fastapi_plan",
     "load_fastapi_plan",
     "load_framework_scan",

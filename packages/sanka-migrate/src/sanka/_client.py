@@ -9,21 +9,21 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
-from sanka.connector import CredentialProvider
 from sanka.runtime.engine import InspectionResult, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
 from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import RunStatus, SqliteStateStore
+from sanka_connector import CredentialProvider
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Connection:
-    """A selected built-in provider and its non-secret endpoint configuration.
+    """A selected connector and its non-secret endpoint configuration.
 
-    Creating a connection is write-free. It verifies that the provider ships
-    with Sanka and returns a descriptor that can be passed directly to
+    Creating a connection is write-free. It verifies that the provider is
+    installed and returns a descriptor that can be passed directly to
     :meth:`Sanka.migrate`. Authentication and reachability are evaluated by the
     migration lifecycle, never while selecting the provider.
     """
@@ -123,7 +123,7 @@ class Sanka:
         *,
         options: Mapping[str, Any] | None = None,
     ) -> Connection:
-        """Select a built-in migration provider without installing a plugin.
+        """Select an installed migration connector.
 
         ``connection`` is a path, URL, or named connection reference. Secret
         values must stay in environment variables or a managed credential

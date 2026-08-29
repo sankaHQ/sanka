@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytest
 
-from sanka.connector import SourceFilter
 from sanka.runtime.mapping import (
     AssociationCategory,
     MappingError,
@@ -18,6 +17,7 @@ from sanka.runtime.mapping import (
     relationship_source_ids,
     source_field_keys,
 )
+from sanka_connector import SourceFilter
 
 
 @pytest.mark.parametrize(

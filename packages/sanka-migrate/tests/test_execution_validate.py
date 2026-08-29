@@ -18,8 +18,6 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import Credentials, RecordPage, SourceFilter, SourceObject
-from sanka.connector.protocols import DestinationConnector, SourceConnector
 from sanka.runtime.engine import ExecutionError, MigrationEngine
 from sanka.runtime.execution import (
     DEFAULT_VALIDATION_SAMPLE_SIZE,
@@ -37,6 +35,8 @@ from sanka.runtime.mapping import MappingError, MigrationMappingField, mapping_g
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
+from sanka_connector import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_connector.protocols import DestinationConnector, SourceConnector
 
 _CREDENTIALS = Credentials(provider="fake")
 

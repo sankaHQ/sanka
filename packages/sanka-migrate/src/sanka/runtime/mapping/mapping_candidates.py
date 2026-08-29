@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import re
 
-from sanka.connector import FieldSchema, Inventory
 from sanka.runtime.mapping.model import (
     MappingCandidateSet,
     MappingKind,
     MigrationMappingField,
 )
+from sanka_connector import FieldSchema, Inventory
 
 _TOKEN_RE = re.compile(r"[^a-z0-9]+")
 

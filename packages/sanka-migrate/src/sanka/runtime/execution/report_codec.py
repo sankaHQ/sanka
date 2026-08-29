@@ -52,7 +52,6 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast, get_args
 
-from sanka.connector import SourceFilter
 from sanka.runtime.execution.errors import ExecutionFault
 from sanka.runtime.execution.model import (
     BatchPage,
@@ -71,6 +70,7 @@ from sanka.runtime.mapping.record_mapping import (
     mapping_group_key,
     mapping_route_manifest,
 )
+from sanka_connector import SourceFilter
 
 HEARTBEAT_FRESHNESS = timedelta(minutes=5)
 """An execution job counts as active while its heartbeat is this recent."""

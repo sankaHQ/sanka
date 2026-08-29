@@ -29,9 +29,10 @@ under this Agreement, including eligible updates Sanka makes generally
 available during the Term. Runtime excludes third-party contributions that
 Sanka is authorized to use only under AGPL-3.0-only or another license that
 does not permit the grant in Section 2.
-(Components Sanka distributes under Apache-2.0 — including the bundled Sanka
-Migrate connector interface and first-party connectors — are licensed under
-their own terms and are not restricted by this Agreement.)
+(Components Sanka distributes separately under Apache-2.0 — including the
+Sanka Connector SDK and first-party provider packages from
+`sankaHQ/sanka-connectors` — are licensed under their own terms and are not
+restricted by this Agreement.)
 
 1.2 "**Licensee Products**" means Licensee's own software products and
 internal systems that incorporate or interoperate with the Runtime.

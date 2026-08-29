@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Connector discovery via the ``sanka.connectors`` entry-point group."""
+"""Connector discovery via the ``sanka_connectors`` entry-point group."""
 
 from __future__ import annotations
 
 from importlib.metadata import entry_points
 
-from sanka.connector import ENTRY_POINT_GROUP, ConnectorRegistration
-from sanka.connector.protocols import DestinationConnector, SourceConnector
+from sanka_connector import ENTRY_POINT_GROUP, ConnectorRegistration
+from sanka_connector.protocols import DestinationConnector, SourceConnector
 
 
 class UnknownConnectorError(ValueError):
-    """No available bundled provider exposes the requested type."""
+    """No installed connector exposes the requested type."""
 
 
 class ConnectorRegistry:
@@ -61,5 +61,6 @@ class ConnectorRegistry:
         except KeyError:
             available = ", ".join(self.names()) or "none"
             raise UnknownConnectorError(
-                f"no bundled provider for type {type_name!r} (available: {available})"
+                f"no installed connector for type {type_name!r} (available: {available}); "
+                f"install the provider package `sanka-connector-{type_name}`"
             ) from None

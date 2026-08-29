@@ -9,8 +9,11 @@ No Contributor License Agreement is required. A contribution is licensed under
 the license already applicable to the files it modifies:
 
 - runtime and CLI contributions are AGPL-3.0-only;
-- connector-interface, bundled-connector, MCP, test, script, and documentation
-  contributions are Apache-2.0.
+- MCP, test, script, and documentation contributions are Apache-2.0.
+
+Connector SDK and provider contributions belong in
+[`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors),
+where they are Apache-2.0.
 
 By submitting a contribution, you confirm that you have the right to submit it
 under that license. Accepting a contribution does not give Sanka a separate
@@ -26,14 +29,13 @@ header in every source file:
 
 | Zone | License | Import rule |
 |---|---|---|
-| `packages/sanka-migrate/src/sanka/connector/` | Apache-2.0 | may import `sanka.connector` only |
-| `packages/sanka-migrate/src/sanka_connector_*/` | Apache-2.0 | may import `sanka.connector` only |
-| `connectors/` tests and docs | Apache-2.0 | may import `sanka.connector` only |
 | `packages/sanka-migrate-mcp/`, `scripts/`, `tests/`, and `docs/` | Apache-2.0 | must not import proprietary hosted-product code |
 | remaining `packages/sanka-migrate/` runtime source | AGPL-3.0-only | may import anything |
 
-Apache code must never depend on the AGPL runtime. CI enforces both rules
-(`scripts/check_import_boundaries.py`, `scripts/check_license_headers.py`).
+The standalone MCP must never depend on the AGPL runtime. CI enforces the
+boundary and file headers (`scripts/check_import_boundaries.py`,
+`scripts/check_license_headers.py`). The connector repository independently
+enforces that its Apache SDK/providers never import this runtime.
 
 ## 3. Open-source and hosted-product boundary
 

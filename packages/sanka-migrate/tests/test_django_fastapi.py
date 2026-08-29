@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from sanka.cli import main
+from sanka.cli import _print_framework_test, main
 from sanka.runtime.frameworks import load_fastapi_plan, load_framework_scan
+from sanka.runtime.frameworks.fastapi_tests import _missing_generated_dependency
 
 FIXTURE = Path(__file__).parent / "fixtures" / "drf_project"
 
@@ -75,6 +76,7 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 0
     test_output = capsys.readouterr().out
     assert "Generated API tests: OK" in test_output
+    assert "next: sanka verify" in test_output
     assert (output / "test_generated.py").is_file()
 
     cases = drf_project / ".sanka" / "verify-cases.json"
@@ -101,8 +103,12 @@ def test_five_command_drf_to_fastapi_lifecycle(
 
     assert main(["verify", "--root", str(drf_project)]) == 0
     verify_output = capsys.readouterr().out
+    assert "Verified paths" in verify_output
+    assert f"Source app:    {drf_project}" in verify_output
+    assert f"Generated app: {output}" in verify_output
+    assert f"Manifest:      {output / 'sanka-manifest.json'}" in verify_output
     assert "10 / 10 generated" in verify_output
-    assert "8 / 8 read-only routes compatible" in verify_output
+    assert "8 / 8 source-vs-generated probes matched" in verify_output
     assert "Compatibility bridge verification: complete" in verify_output
 
     assert main(["apply", "--root", str(drf_project)]) == 1
@@ -129,5 +135,70 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert main(["verify", "--root", str(drf_project), "--no-http"]) == 1
     incomplete_output = capsys.readouterr().out
     assert "9 / 10 generated" in incomplete_output
+    assert "skipped with --no-http" in incomplete_output
     assert "Needs adaptation" in incomplete_output
     assert "Compatibility bridge verification: FAILED" in incomplete_output
+
+
+def test_failed_generated_test_reports_missing_dependency_without_verify_next_step(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    requirements = tmp_path / "requirements.txt"
+    _print_framework_test(
+        {
+            "ok": False,
+            "file": str(tmp_path / "test_generated.py"),
+            "tests": 1,
+            "allow_writes": False,
+            "log": "ModuleNotFoundError: No module named 'tortoise'",
+            "missing_dependency": {
+                "module": "tortoise",
+                "package": "tortoise-orm",
+                "requirements": str(requirements),
+            },
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "Generated API tests: FAILED" in output
+    assert "Generated app dependency is missing: tortoise" in output
+    assert "package `tortoise-orm`" in output
+    assert "sanka apply --force\n  sanka test" in output
+    assert "next: sanka verify" not in output
+
+
+def test_generated_test_extracts_actionable_missing_dependency(tmp_path: Path) -> None:
+    dependency = _missing_generated_dependency(
+        "ModuleNotFoundError: No module named 'tortoise.backends'", tmp_path
+    )
+
+    assert dependency == {
+        "module": "tortoise",
+        "package": "tortoise-orm",
+        "requirements": str(tmp_path / "requirements.txt"),
+    }
+    assert (
+        _missing_generated_dependency(
+            "ModuleNotFoundError: No module named 'project_source'", tmp_path
+        )
+        is None
+    )
+
+
+def test_failed_generated_test_without_missing_dependency_does_not_suggest_verify(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _print_framework_test(
+        {
+            "ok": False,
+            "file": str(tmp_path / "test_generated.py"),
+            "tests": 2,
+            "allow_writes": False,
+            "log": "AssertionError: response status differed",
+            "missing_dependency": None,
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "Fix the test failure above, then rerun:\n  sanka test" in output
+    assert "next: sanka verify" not in output

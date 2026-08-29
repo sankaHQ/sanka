@@ -14,11 +14,12 @@ active.
 
 ## Current contribution policy
 
-Contributions use the license applicable to the files they modify:
-AGPL-3.0-only for runtime and CLI code, and Apache-2.0 for the connector
-interface, bundled connectors, MCP package, scripts, tests, and documentation.
-Accepting an AGPL contribution does not give Sanka separate proprietary or
-commercial relicensing rights.
+Contributions use the license applicable to the repository and files they
+modify: AGPL-3.0-only for this repository's runtime and CLI code, and
+Apache-2.0 for its MCP package, scripts, tests, and documentation. The
+Connector SDK and provider packages are separately distributed under
+Apache-2.0 from `sankaHQ/sanka-connectors`. Accepting an AGPL contribution does
+not give Sanka separate proprietary or commercial relicensing rights.
 
 Commercial licenses therefore cover only code Sanka owns or otherwise has
 permission to relicense. If substantial third-party runtime contributions make

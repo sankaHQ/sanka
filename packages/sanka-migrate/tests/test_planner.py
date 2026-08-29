@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
-from sanka.connector import FieldSchema, Inventory, ObjectSchema, SourceFilter, SourceObject
 from sanka.runtime.mapping.model import MigrationMappingField, ValueMapEntry
 from sanka.runtime.planner import MigrationPlan, RoutePlan, build_plan
+from sanka_connector import FieldSchema, Inventory, ObjectSchema, SourceFilter, SourceObject
 
 SOURCE_OBJECTS = [
     SourceObject(key="contacts", label="Contacts", canonical_type="contacts", default_selected=True)

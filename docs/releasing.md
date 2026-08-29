@@ -10,8 +10,8 @@ gate.
 - Production PyPI: the live [`sanka-migrate`](https://pypi.org/project/sanka-migrate/)
   and [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) project
   pages are the publication authority.
-- Source candidate: both package `pyproject.toml` files define `0.1.0a8`; the
-  matching `v0.1.0a8` tag is the source release authority after the reviewed
+- Source candidate: both package `pyproject.toml` files define `0.1.0a9`; the
+  matching `v0.1.0a9` tag is the source release authority after the reviewed
   commit is merged and tagged.
 - Hosted API: `https://api.sanka.com/v2/migrate`; the live
   `/research/datasets` response is the availability authority.
@@ -26,11 +26,13 @@ release procedure; it does not override PyPI or live-service status.
 - `sanka-migrate`
 - `sanka-migrate-mcp`
 
-`sanka-migrate` contains the runtime, connector interface, and all first-party
-providers; users install no connector plugins. `sanka-migrate-mcp` is the
-standalone Apache-2.0 research and assessment MCP server. It is built and
-checked with the same pre-release artifact set while remaining outside the
-runtime namespace.
+`sanka-migrate` contains the runtime and depends on the zero-dependency
+`sanka-connector-sdk`; it does not contain provider implementations.
+First-party providers are released separately from `sankaHQ/sanka-connectors`
+before a runtime release that depends on a new SDK version.
+`sanka-migrate-mcp` is the standalone Apache-2.0 research and assessment MCP
+server. It is built and checked with the same pre-release artifact set while
+remaining outside the runtime namespace.
 
 ## Local, write-free preparation
 
@@ -38,7 +40,7 @@ runtime namespace.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a8 tag
+uv run python scripts/check_release_tag.py v0.1.0a9 tag
 ```
 
 `make build-release` creates wheels and sdists, checks licenses, project URLs,
@@ -122,8 +124,9 @@ and `pypi` targets.
    reviewer rules.
 5. Dispatch **Publish Python packages** while the workflow is checked out at
    that tag. Enter the exact confirmation phrase for TestPyPI first.
-6. Install every artifact from TestPyPI in a clean environment and run the CLI
-   and connector-discovery smoke tests.
+6. Install every artifact from TestPyPI in a clean environment, add one
+   provider package from the connector release, and run the CLI and
+   connector-discovery smoke tests.
 7. Confirm the same authorized tag and artifact hashes, then dispatch the PyPI
    target. PyPI releases are immutable; never overwrite or reuse a version.
 8. Remove `SANKA_MIGRATE_PUBLISH_ENABLED` immediately after the production

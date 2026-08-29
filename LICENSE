@@ -7,13 +7,13 @@ SPDX-License-Identifier header in each source file is authoritative.
   packages/sanka-migrate/src/sanka/runtime/       AGPL-3.0-only
   packages/sanka-migrate/src/sanka/cli/           AGPL-3.0-only
   packages/sanka-migrate/src/sanka/_client.py     AGPL-3.0-only
-  packages/sanka-migrate/src/sanka/connector/     Apache-2.0
-  packages/sanka-migrate/src/sanka_connector_*/   Apache-2.0
+  packages/sanka-migrate/src/sanka/connector/     AGPL-3.0-only compatibility shim
   packages/sanka-migrate-mcp/                      Apache-2.0
-  connectors/, scripts/, tests/, docs/             Apache-2.0
+  scripts/, tests/, docs/                          Apache-2.0
 
-The `sanka-migrate` wheel includes both full license texts and a NOTICE file.
-Source-file SPDX headers identify which license governs each component.
+The `sanka-migrate` wheel contains only AGPL runtime code and depends on the
+separately distributed Apache-2.0 `sanka-connector-sdk`. The SDK and first-party
+providers live at https://github.com/sankaHQ/sanka-connectors.
 
 Runtime code that Sanka owns or otherwise has permission to relicense is also
 available under a commercial license from Sanka, Inc. for use without
