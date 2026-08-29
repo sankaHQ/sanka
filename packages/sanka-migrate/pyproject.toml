@@ -30,6 +30,7 @@ clickhouse = "sanka_connector_clickhouse:CONNECTOR"
 csv = "sanka_connector_csv:CONNECTOR"
 hubspot = "sanka_connector_hubspot:CONNECTOR"
 markdown = "sanka_connector_markdown:CONNECTOR"
+netsuite = "sanka_connector_netsuite:CONNECTOR"
 postgres = "sanka_connector_postgres:CONNECTOR"
 salesforce = "sanka_connector_salesforce:CONNECTOR"
 sendgrid = "sanka_connector_sendgrid:CONNECTOR"
@@ -50,6 +51,7 @@ packages = [
   "src/sanka_connector_csv",
   "src/sanka_connector_hubspot",
   "src/sanka_connector_markdown",
+  "src/sanka_connector_netsuite",
   "src/sanka_connector_postgres",
   "src/sanka_connector_salesforce",
   "src/sanka_connector_sendgrid",

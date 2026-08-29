@@ -112,6 +112,7 @@ def main() -> int:
                 "sanka_connector_csv/__init__.py",
                 "sanka_connector_hubspot/__init__.py",
                 "sanka_connector_markdown/__init__.py",
+                "sanka_connector_netsuite/__init__.py",
                 "sanka_connector_postgres/__init__.py",
                 "sanka_connector_salesforce/__init__.py",
                 "sanka_connector_sendgrid/__init__.py",
