@@ -123,10 +123,16 @@ sanka verify                       # integrity + route parity + safe HTTP probes
 404, validation, and a SQLite-isolated write round-trip). It does not compare
 FastAPI to DRF; that is `sanka verify`. Write tests copy SQLite first so the
 source database is not mutated. Apply writes the generated app's own
-`pyproject.toml`; test and verify use `uv` to lock it and prepare
-`.sanka/output/fastapi/.venv`. FastAPI, Tortoise/SQLAlchemy/psycopg, and their
-drivers therefore stay with the destination app instead of leaking into the
-Sanka or Django environment.
+`pyproject.toml` and a machine-local integrity attestation over every generated
+file. Test and verify authenticate that bundle, copy its dependency metadata
+into a fresh disposable project, and use `uv` with a clean environment and a
+new lockfile. FastAPI, Tortoise/SQLAlchemy/psycopg, and their drivers therefore
+stay with the destination app instead of leaking into Sanka or Django.
+
+Dynamic Django startup and source HTTP probes run inside Sanka's OS sandbox on
+supported platforms. If no supported sandbox is available, Sanka fails closed;
+`--trust-source-code` is an explicit escape hatch only for a repository the
+operator has independently reviewed and trusts.
 
 Native mode serves async FastAPI over the existing tables (Tortoise by
 default). Native plans report a structured reason for every route that needs
@@ -373,11 +379,9 @@ boundary:
 The standalone Connector SDK and local/offline providers are Apache-2.0 in
 [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors).
 
-Runtime code that Sanka owns or otherwise has permission to relicense is also
-available under a [commercial license](docs/legal/commercial-license.md) from
-Sanka, Inc. for embedding without AGPL obligations. Third-party contributions
-remain under the license applicable to their files unless their rights holder
-separately grants additional rights. See [LICENSE](LICENSE) for the full map.
+Commercial licensing is available by
+[contacting Sanka](mailto:hey@sanka.com). See [LICENSE](LICENSE) for the full
+component license map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use

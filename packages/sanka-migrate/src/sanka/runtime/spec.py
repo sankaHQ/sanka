@@ -16,14 +16,26 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 from sanka.runtime.hashing import content_hash
 
-_SECRET_KEY_PATTERN = re.compile(r"password|secret|token|credential|api_key", re.IGNORECASE)
+_SECRET_KEY_TERMS = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "credential",
+    "apikey",
+    "accesskey",
+    "privatekey",
+    "clientsecret",
+    "authorization",
+    "bearer",
+)
 _LIBPQ_PASSWORD_PATTERN = re.compile(r"(?:^|\s)password\s*=", re.IGNORECASE)
 _ENV_REF_PATTERN = re.compile(
     r"^\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))$"
@@ -34,15 +46,65 @@ class SpecError(ValueError):
     """A migration spec is structurally invalid or unsafe."""
 
 
-def _reject_secret_keys(mapping: Mapping[str, Any], *, path: str) -> None:
-    for key, value in mapping.items():
-        if _SECRET_KEY_PATTERN.search(key):
-            raise SpecError(
-                f"{path}.{key} looks secret-bearing; specs must reference secrets "
-                "via $ENV_VAR values or named connections, never contain them"
-            )
-        if isinstance(value, Mapping):
-            _reject_secret_keys(value, path=f"{path}.{key}")
+_MAX_SPEC_DEPTH = 32
+_MAX_SPEC_NODES = 10_000
+_MAX_SPEC_STRING_BYTES = 1_048_576
+
+
+def _normalized_key(value: Any) -> str:
+    return "".join(character for character in str(value).casefold() if character.isalnum())
+
+
+def _looks_secret_bearing(value: Any) -> bool:
+    normalized = _normalized_key(value)
+    return normalized in {"auth", "pwd"} or any(term in normalized for term in _SECRET_KEY_TERMS)
+
+
+def _reject_secret_keys(value: Any, *, path: str) -> None:
+    """Reject secret-shaped keys in a bounded, cycle-safe nested value."""
+
+    seen: set[int] = set()
+    nodes = 0
+
+    def visit(item: Any, *, item_path: str, depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > _MAX_SPEC_NODES:
+            raise SpecError(f"{path} exceeds the {_MAX_SPEC_NODES}-node safety limit")
+        if depth > _MAX_SPEC_DEPTH:
+            raise SpecError(f"{item_path} exceeds the {_MAX_SPEC_DEPTH}-level safety limit")
+        if isinstance(item, str):
+            if len(item.encode("utf-8")) > _MAX_SPEC_STRING_BYTES:
+                raise SpecError(f"{item_path} exceeds the string-size safety limit")
+            return
+        if isinstance(item, Mapping):
+            identity = id(item)
+            if identity in seen:
+                raise SpecError(f"{item_path} contains a recursive mapping")
+            seen.add(identity)
+            try:
+                for key, nested in item.items():
+                    if _looks_secret_bearing(key):
+                        raise SpecError(
+                            f"{item_path}.{key} looks secret-bearing; specs must reference "
+                            "secrets via $ENV_VAR values or named connections, never contain them"
+                        )
+                    visit(nested, item_path=f"{item_path}.{key}", depth=depth + 1)
+            finally:
+                seen.remove(identity)
+            return
+        if isinstance(item, Sequence) and not isinstance(item, bytes | bytearray):
+            identity = id(item)
+            if identity in seen:
+                raise SpecError(f"{item_path} contains a recursive sequence")
+            seen.add(identity)
+            try:
+                for index, nested in enumerate(item):
+                    visit(nested, item_path=f"{item_path}[{index}]", depth=depth + 1)
+            finally:
+                seen.remove(identity)
+
+    visit(value, item_path=path, depth=0)
 
 
 def _reject_literal_connection_secret(connection: str | None, *, path: str) -> None:
@@ -63,7 +125,7 @@ def _reject_literal_connection_secret(connection: str | None, *, path: str) -> N
     secret_query_keys = [
         key
         for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
-        if _SECRET_KEY_PATTERN.search(key)
+        if _looks_secret_bearing(key)
     ]
     if password is not None or secret_query_keys:
         raise SpecError(

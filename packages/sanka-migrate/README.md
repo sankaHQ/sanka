@@ -49,12 +49,15 @@ per-route adaptation reasons in JSON plans. Compatibility mode forwards to
 the current DRF handlers in-process.
 
 `sanka test` then writes `test_generated.py` beside that app. The generated
-app owns a `pyproject.toml`; Sanka uses `uv` to lock it, prepares
-`.sanka/output/fastapi/.venv`, and runs the suite with the generated
-environment's Python. The suite checks OpenAPI, list/404/empty-create status
-codes, and (on SQLite) a create → retrieve → delete round-trip against an
-isolated database copy. `sanka verify` compares source behavior from the Django
-environment with target behavior from that isolated generated environment.
+app owns a `pyproject.toml`; Sanka authenticates the generated bundle, copies
+that metadata into a disposable project, uses `uv` to resolve a new lockfile,
+and runs the suite with the disposable environment's Python. The suite checks
+OpenAPI, list/404/empty-create status codes, and (on SQLite) a create →
+retrieve → delete round-trip against an isolated database copy. `sanka verify`
+compares source behavior with target behavior from that isolated environment.
+Dynamic Django startup and source probes use an OS-contained worker on
+supported platforms. Without that boundary, they fail closed unless the
+operator explicitly passes `--trust-source-code` for a trusted repository.
 
 ## Python quick start
 

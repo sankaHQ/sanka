@@ -28,6 +28,15 @@ Reviewed plan hashes, exact candidate sets, configured source scope, credential
 references, and local state permissions are security boundaries. Mutating
 operations must fail closed when those boundaries cannot be verified.
 
+Dynamic Django startup and source HTTP probes run in a separate OS-contained
+worker with no network, no ambient credentials, restricted filesystem reads,
+and writes limited to a disposable directory. On platforms where Sanka cannot
+establish that boundary, dynamic inspection fails closed unless the operator
+explicitly marks the source repository trusted. Generated code and dependency
+metadata are authenticated with a machine-local integrity key before test or
+verification, and generated dependencies run from a fresh disposable
+environment rather than a mutable environment inside the output directory.
+
 The hosted Sanka API and its private job runtime are maintained separately.
 Report suspected hosted-service vulnerabilities through the same private
 contact.

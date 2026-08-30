@@ -67,6 +67,22 @@ def test_secret_bearing_option_keys_are_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("key", ["api-key", "apiKey", "apikey", "aws_access_key_id", "pwd"])
+def test_secret_key_aliases_inside_sequences_are_rejected(key: str) -> None:
+    with pytest.raises(SpecError, match="secret-bearing"):
+        MigrationSpec(
+            source=EndpointSpec(type="a", options={"profiles": [{key: "literal"}]}),
+            target=EndpointSpec(type="b"),
+        )
+
+
+def test_recursive_spec_values_fail_closed() -> None:
+    recursive: dict[str, object] = {}
+    recursive["nested"] = recursive
+    with pytest.raises(SpecError, match="recursive"):
+        EndpointSpec(type="a", options=recursive)
+
+
 @pytest.mark.parametrize(
     "connection",
     [
@@ -74,6 +90,8 @@ def test_secret_bearing_option_keys_are_rejected() -> None:
         "host=db.example user=app password='secret value' dbname=app",
         "https://db.example/app?password=secret",
         "clickhouse://db.example/app?api_key=secret",
+        "https://db.example/app?api-key=secret",
+        "https://db.example/app?apiKey=secret",
     ],
 )
 def test_literal_connection_secrets_are_rejected(connection: str) -> None:

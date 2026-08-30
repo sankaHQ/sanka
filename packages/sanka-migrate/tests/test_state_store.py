@@ -51,6 +51,39 @@ def test_shared_state_directory_is_rejected_without_chmod(tmp_path: Path) -> Non
     assert stat.S_IMODE(shared.stat().st_mode) == 0o755
 
 
+def test_state_database_symlink_is_rejected_without_touching_target(tmp_path: Path) -> None:
+    target = tmp_path / "target.db"
+    target.write_text("sentinel", encoding="utf-8")
+    link = tmp_path / "state.db"
+    link.symlink_to(target)
+    with pytest.raises(OSError, match="symbolic link"):
+        SqliteStateStore(link)
+    assert target.read_text(encoding="utf-8") == "sentinel"
+
+
+@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
+def test_state_database_sidecar_symlink_is_rejected(suffix: str, tmp_path: Path) -> None:
+    target = tmp_path / "target.db"
+    target.write_text("sentinel", encoding="utf-8")
+    sidecar = Path(f"{tmp_path / 'state.db'}{suffix}")
+    sidecar.symlink_to(target)
+
+    with pytest.raises(OSError, match="symbolic link"):
+        SqliteStateStore(tmp_path / "state.db")
+
+    assert target.read_text(encoding="utf-8") == "sentinel"
+
+
+def test_state_directory_symlink_is_rejected(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    link = tmp_path / "state"
+    link.symlink_to(target, target_is_directory=True)
+    with pytest.raises(OSError, match="symbolic link"):
+        SqliteStateStore(link / "state.db")
+    assert not (target / "state.db").exists()
+
+
 def test_checkpoints_round_trip(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.create_run(run_id="r1", spec_json="{}", spec_hash="sha256:a", name=None)

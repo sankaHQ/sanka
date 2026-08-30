@@ -43,10 +43,12 @@ Sanka boots Django with the project's `DJANGO_SETTINGS_MODULE` and inspects the
 resolved URL graph. Runtime resolution matters because DRF routers and
 `@action` decorators create routes that a text search cannot reliably recover.
 Because Django startup imports installed applications and runs
-`AppConfig.ready()`, scan should be run in the same reviewed development or CI
-environment used for the project's ordinary management commands. Sanka itself
-writes only `.sanka/scan.json`, but it cannot make application startup hooks
-side-effect-free.
+`AppConfig.ready()`, Sanka executes it in a separate OS-contained worker. The
+worker receives no ambient credentials or network access, can read only the
+source and Python runtime, and can write only to a disposable directory. If a
+supported sandbox is unavailable, scan fails closed. `--trust-source-code`
+permits an unsandboxed fallback only when the operator has independently
+reviewed and trusts the repository.
 
 The scan records:
 
@@ -137,7 +139,7 @@ The generated native application contains:
 | `sanka_native.py` | DRF-parity validation used by those routes |
 | `sanka_store.py` | Async SQL (Tortoise, SQLAlchemy, or psycopg) over the existing tables |
 | `models.py` | Tortoise or SQLAlchemy models mapped onto Django `db_table` names (not emitted for psycopg) |
-| `sanka-manifest.json` | Exact scan hash, plan hash, routes, captured field semantics, database vendor, SQL engine, dropped aliases |
+| `sanka-manifest.json` | Exact scan hash, plan hash, routes, captured field semantics, database vendor, SQL engine, dropped aliases, and a machine-local integrity attestation for every generated file |
 | `requirements.txt` | Target server dependencies (FastAPI + the chosen SQL engine) |
 | `README.md` | Run guidance |
 
@@ -184,8 +186,10 @@ every route and hard gate.
 
 ### `sanka test`
 
-After apply, Sanka writes `test_generated.py` beside the FastAPI app and runs
-it with `python -m unittest`. The tests import the generated app through
+After apply, Sanka authenticates the generated bundle, creates a clean
+disposable `uv` project from the attested `pyproject.toml`, writes
+`test_generated.py` beside the FastAPI app, and runs it with isolated Python
+startup. The tests import the generated app through
 FastAPI's `TestClient` (lifespan included) and cover:
 
 - OpenAPI is served and lists every generated route;
@@ -200,14 +204,17 @@ DRF; that remains `sanka verify`.
 
 ### `sanka verify`
 
-The default verifier checks four layers:
+The default verifier checks five layers:
 
 1. the scan artifact still matches its canonical hash;
 2. the plan still matches the scan and its reviewed hash;
-3. the generated manifest contains exactly the automatically planned routes;
-4. generated Python compiles and native output does not import Django; parameter-free GET/HEAD routes return the
-same status, content type, and body through DRF and FastAPI. The generated
-app must be able to import its SQL engine (`pip install -r requirements.txt`).
+3. the machine-local attestation covers the manifest, generated code, and
+   dependency metadata with no unsigned startup files;
+4. the generated manifest contains exactly the automatically planned routes;
+5. generated Python compiles and native output does not import Django;
+   parameter-free GET/HEAD routes return the same status, content type, and
+   body through DRF and FastAPI. The disposable generated environment must be
+   able to import its SQL engine.
 
 Add concrete parameterized read cases in `.sanka/verify-cases.json`:
 
@@ -231,7 +238,8 @@ database.
 Automatic HTTP probes are deliberately read-only. Parameterized and mutating
 requests require project-specific fixtures before they can be claimed as
 behaviorally verified. `sanka verify --no-http` runs integrity and route checks
-only.
+only. Source probes use the same OS-contained worker as scan; on unsupported
+platforms, pass `--trust-source-code` only for an independently trusted source.
 
 ## Strategy boundaries
 

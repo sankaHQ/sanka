@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
@@ -22,6 +23,17 @@ from sanka.runtime.frameworks.django_fastapi import (
     load_framework_scan,
 )
 from sanka.runtime.frameworks.generated_environment import ensure_generated_environment
+from sanka.runtime.frameworks.generated_integrity import (
+    GeneratedIntegrityError,
+    read_generated_manifest,
+    verify_generated_bundle,
+)
+from sanka.runtime.safe_local_io import (
+    UnsafeLocalPathError,
+    absolute_path,
+    safe_copy_regular_file,
+    safe_write_text,
+)
 
 GENERATED_TEST_FILE = "test_generated.py"
 _GENERATED_DEPENDENCY_PACKAGES = {
@@ -46,11 +58,13 @@ def test_fastapi_app(
     output_path = Path(output_value)
     if not output_path.is_absolute():
         output_path = root_path / output_path
-    output_path = output_path.resolve()
+    output_path = absolute_path(output_path)
     manifest_path = output_path / GENERATED_MANIFEST
-    if not manifest_path.is_file():
-        raise FrameworkMigrationError("generated output is missing; run `sanka apply` first")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest = read_generated_manifest(manifest_path)
+        verify_generated_bundle(output_path, manifest)
+    except GeneratedIntegrityError as error:
+        raise FrameworkMigrationError(str(error)) from error
     if manifest.get("source_scan_hash") != scan.scan_hash:
         raise FrameworkMigrationError("generated output does not match the current scan")
     if manifest.get("plan_hash") != plan.plan_hash:
@@ -64,11 +78,39 @@ def test_fastapi_app(
     )
     source = _render_generated_tests(manifest, allow_writes=allow_writes)
     test_path = output_path / GENERATED_TEST_FILE
-    test_path.write_text(source, encoding="utf-8")
+    safe_write_text(test_path, source)
     compile(source, str(test_path), "exec")
+    execution_root = Path(
+        tempfile.mkdtemp(
+            prefix="sanka-generated-tests-",
+            dir=os.path.realpath(tempfile.gettempdir()),
+        )
+    )
+    atexit.register(shutil.rmtree, execution_root, ignore_errors=True)
+    execution_path = safe_write_text(execution_root / GENERATED_TEST_FILE, source)
+    runner = (
+        "import sys, unittest; "
+        "sys.path.insert(0, sys.argv[2]); "
+        "sys.path.insert(0, sys.argv[1]); "
+        "suite = unittest.defaultTestLoader.loadTestsFromName('test_generated'); "
+        "result = unittest.TextTestRunner(verbosity=2).run(suite); "
+        "raise SystemExit(0 if result.wasSuccessful() else 1)"
+    )
+    try:
+        verify_generated_bundle(output_path, read_generated_manifest(manifest_path))
+    except GeneratedIntegrityError as error:
+        raise FrameworkMigrationError(str(error)) from error
     result = subprocess.run(
-        [test_python, "-m", "unittest", "test_generated", "-v"],
-        cwd=output_path,
+        [
+            test_python,
+            "-I",
+            "-B",
+            "-c",
+            runner,
+            str(execution_root),
+            str(output_path),
+        ],
+        cwd=execution_root,
         env=env,
         capture_output=True,
         text=True,
@@ -82,6 +124,7 @@ def test_fastapi_app(
     return {
         "ok": ok,
         "file": str(test_path),
+        "execution_file": str(execution_path),
         "tests": ran,
         "allow_writes": allow_writes,
         "mode": plan.mode,
@@ -93,6 +136,9 @@ def test_fastapi_app(
         ),
         "python": test_python,
         "pyproject": (
+            str(output_path / "pyproject.toml") if generated_environment is not None else None
+        ),
+        "environment_pyproject": (
             str(generated_environment.pyproject) if generated_environment is not None else None
         ),
         "lockfile": (
@@ -104,21 +150,47 @@ def test_fastapi_app(
 
 
 def _isolated_env(output: Path, manifest: dict[str, Any]) -> tuple[dict[str, str], bool]:
-    env = dict(os.environ)
-    env.pop("DJANGO_SETTINGS_MODULE", None)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        in {
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "WINDIR",
+        }
+    }
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     database = manifest.get("database") or {}
     if str(database.get("vendor") or "") != "sqlite":
         return env, False
     name = str(database.get("name") or "")
     if not name or name == ":memory:":
         return env, False
-    source_root = (output / str(manifest.get("source_root") or ".")).resolve()
-    src = Path(name) if Path(name).is_absolute() else source_root / name
-    if not src.is_file():
+    source_root = absolute_path(output / str(manifest.get("source_root") or "."))
+    src = absolute_path(Path(name) if Path(name).is_absolute() else source_root / name)
+    if not src.is_relative_to(source_root):
+        raise FrameworkMigrationError(
+            "generated SQLite test database must remain inside the scanned source root"
+        )
+    if not src.exists():
         return env, False
-    tmp = Path(tempfile.mkdtemp(prefix="sanka-test-"))
+    tmp = Path(tempfile.mkdtemp(prefix="sanka-test-")).resolve()
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
     dest = tmp / src.name
-    shutil.copy2(src, dest)
+    try:
+        safe_copy_regular_file(src, dest)
+    except (OSError, UnsafeLocalPathError) as error:
+        raise FrameworkMigrationError(
+            f"could not isolate the generated SQLite test database: {src}"
+        ) from error
     env["SANKA_TEST_DB"] = str(dest)
     return env, True
 

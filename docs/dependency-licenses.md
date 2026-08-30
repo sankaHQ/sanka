@@ -23,14 +23,14 @@ unexpected GPL / AGPL dependency outside this repository's own AGPL runtime.
 First-party provider dependencies are reviewed and published from
 `sankaHQ/sanka-connectors`; they are not dependencies of `sanka-migrate`.
 Dependencies such as Tortoise ORM, SQLAlchemy, psycopg, and aiosqlite belong to
-the generated destination project and are recorded in its `pyproject.toml` and
-`uv.lock`, not in Sanka's own environment.
+the generated destination project and are recorded in its attested
+`pyproject.toml`. Test and verify resolve a fresh lockfile in a disposable
+environment; those packages are not dependencies of Sanka itself.
 
 Development-only dependencies are not included in published runtime metadata.
 
 ## Review boundary
 
-This is an engineering compatibility review, not legal advice. Counsel still
-owns adoption of the commercial license and any dataset license. Any future
+This is an engineering compatibility review, not legal advice. Any future
 vendoring, copying, static linking, or modification of third-party code
 requires a fresh review even if the dependency name already appears above.

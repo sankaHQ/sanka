@@ -283,6 +283,35 @@ def test_create_using_self_is_rejected(nested_project: Path) -> None:
     assert _plan_strategies(nested_project) == {"needs-manual-adaptation"}
 
 
+def test_create_with_extra_model_write_is_rejected(nested_project: Path) -> None:
+    serializers = nested_project / "listings" / "serializers.py"
+    text = serializers.read_text(encoding="utf-8")
+    text = text.replace(
+        "listing = Listing.objects.create(**validated_data)",
+        (
+            "listing = Listing.objects.create(**validated_data)\n"
+            "            Listing.objects.create(**validated_data)"
+        ),
+    )
+    serializers.write_text(text, encoding="utf-8")
+    assert _plan_strategies(nested_project) == {"needs-manual-adaptation"}
+
+
+def test_create_with_business_rule_is_rejected(nested_project: Path) -> None:
+    serializers = nested_project / "listings" / "serializers.py"
+    text = serializers.read_text(encoding="utf-8")
+    text = text.replace(
+        'entries_data = validated_data.pop("entries")',
+        (
+            'entries_data = validated_data.pop("entries")\n'
+            '        if validated_data.get("state") == "archived":\n'
+            '            raise serializers.ValidationError("blocked")'
+        ),
+    )
+    serializers.write_text(text, encoding="utf-8")
+    assert _plan_strategies(nested_project) == {"needs-manual-adaptation"}
+
+
 def test_non_idiom_update_is_rejected(nested_project: Path) -> None:
     serializers = nested_project / "listings" / "serializers.py"
     text = serializers.read_text(encoding="utf-8")

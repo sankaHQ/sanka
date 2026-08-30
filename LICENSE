@@ -15,9 +15,7 @@ The `sanka-migrate` wheel contains only AGPL runtime code and depends on the
 separately distributed Apache-2.0 `sanka-connector-sdk`. The SDK and first-party
 providers live at https://github.com/sankaHQ/sanka-connectors.
 
-Runtime code that Sanka owns or otherwise has permission to relicense is also
-available under a commercial license from Sanka, Inc. for use without
-AGPL-3.0 obligations — see docs/legal/commercial-license.md (draft).
+Commercial licensing is available by contacting Sanka at hey@sanka.com.
 
 Contributions use the license applicable to the files they modify. No
 Contributor License Agreement is required; see CONTRIBUTING.md.
