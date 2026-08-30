@@ -14,6 +14,7 @@ from sanka.runtime.frameworks.django_fastapi import (
     scan_django,
     verify_fastapi_migration,
     write_bench_candidate,
+    write_gap_report,
 )
 from sanka.runtime.frameworks.fastapi_tests import test_fastapi_app
 from sanka.runtime.frameworks.generated_environment import GeneratedEnvironmentError
@@ -33,4 +34,5 @@ __all__ = [
     "test_fastapi_app",
     "verify_fastapi_migration",
     "write_bench_candidate",
+    "write_gap_report",
 ]

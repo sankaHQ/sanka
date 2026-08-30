@@ -54,6 +54,7 @@ from sanka.runtime.frameworks.model import (
     RouteIR,
     SerializerFieldIR,
     SerializerIR,
+    SkippedRoute,
     ViewAuthIR,
     ViewIR,
 )
@@ -156,7 +157,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=3,
+        schema_version=4,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -181,6 +182,9 @@ def scan_django(
         http_security=_capture_http_security(django_conf.settings, middleware),
         generic_messages=_generic_messages(),
         database=_capture_database(root_path),
+        skipped_routes=tuple(
+            sorted(walk.skipped_routes, key=lambda item: (item.pattern, item.view))
+        ),
     ).with_hash()
     _write_json(_artifact_path(root_path, artifact_dir, SCAN_FILE), scan.to_dict())
     return scan
@@ -438,6 +442,65 @@ def write_bench_candidate(
             " --plan-hash <hash> --bench-candidate <dir>\n"
         ),
     )
+    # The candidate carries its own gap disclosure: the reviewed plan, a
+    # human-readable gap report, and a fast structural verify. Whoever holds
+    # the candidate directory sees exactly what was and was not generated
+    # without digging into the source checkout's .sanka/ artifacts.
+    _write_json(destination_path / "plan-fastapi.json", plan.to_dict())
+    _write_text(destination_path / "GAP-REPORT.md", _render_gap_report(plan, scan))
+    _write_json(destination_path / "gap-report.json", _gap_report_payload(plan, scan))
+    try:
+        verify_report = verify_fastapi_migration(
+            root_path, artifact_dir=artifact_dir, output=overlay, probe_http=False
+        )
+    except FrameworkMigrationError as error:
+        verify_report = {"ok": False, "error": str(error)}
+    _write_json(destination_path / "verify-report.json", verify_report)
+    return destination_path
+
+
+def write_gap_report(
+    root: str | Path = ".",
+    destination: str | Path = "gap-report",
+    *,
+    artifact_dir: str | Path = DEFAULT_ARTIFACT_DIR,
+) -> Path:
+    """Emit the unsupported-route inventory without generating an application.
+
+    This is the low-readiness deliverable: instead of a mostly-empty scaffold
+    that silently 404s, the caller gets the reviewed plan plus a structured
+    checklist of every route that still needs a hand-written handler."""
+    root_path = Path(root).resolve()
+    plan = load_fastapi_plan(root_path, artifact_dir=artifact_dir)
+    if plan.mode != NATIVE_STRATEGY:
+        raise FrameworkMigrationError(
+            "gap reports describe native plans; run `sanka plan --to fastapi`"
+        )
+    scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
+    destination_path = Path(destination)
+    if not destination_path.is_absolute():
+        destination_path = root_path / destination_path
+    destination_path = destination_path.resolve()
+    if destination_path == root_path:
+        raise FrameworkMigrationError("gap report cannot overwrite the source root")
+    if destination_path.exists() and not destination_path.is_dir():
+        raise FrameworkMigrationError(
+            f"gap report destination is not a directory: {destination_path}"
+        )
+    allowed_existing = {"GAP-REPORT.md", "gap-report.json", "plan-fastapi.json"}
+    if destination_path.is_dir():
+        unexpected = sorted(
+            path.name for path in destination_path.iterdir() if path.name not in allowed_existing
+        )
+        if unexpected:
+            raise FrameworkMigrationError(
+                "gap report destination contains non-report files; refusing to leave a stale "
+                f"scaffold in place: {destination_path} ({', '.join(unexpected)})"
+            )
+    destination_path.mkdir(parents=True, exist_ok=True)
+    _write_json(destination_path / "plan-fastapi.json", plan.to_dict())
+    _write_text(destination_path / "GAP-REPORT.md", _render_gap_report(plan, scan))
+    _write_json(destination_path / "gap-report.json", _gap_report_payload(plan, scan))
     return destination_path
 
 
@@ -657,6 +720,10 @@ def _render_native_output(
             "the native plan contains no generatable routes; nothing to apply"
         )
     dropped = [route for route in plan.routes if route.strategy == ROUTE_STRATEGY_DROPPED_ALIAS]
+    manual = sorted(
+        (route for route in plan.routes if route.strategy == ROUTE_STRATEGY_MANUAL),
+        key=lambda route: (route.path, route.method),
+    )
     scan_routes = {route.key: route for route in scan.routes}
     serializer_by_name = {item.name: item for item in scan.serializer_details}
     views_by_name = {item.name: item for item in scan.view_details}
@@ -747,6 +814,31 @@ def _render_native_output(
         "dropped_routes": [
             {"method": route.method, "path": route.path, "reason": "format-suffix alias"}
             for route in sorted(dropped, key=lambda route: (route.path, route.method))
+        ],
+        # The gap inventory travels WITH the overlay: whoever holds the
+        # generated app also holds the machine-readable list of everything it
+        # does not cover, instead of that truth living only in .sanka/ files
+        # that never leave the source checkout.
+        "readiness": plan.readiness,
+        "native_eligible_routes": plan.native_eligible_routes,
+        "needs_adaptation_routes": plan.needs_adaptation_routes,
+        "unsupported_routes": [
+            {
+                "method": route.method,
+                "path": route.path,
+                "operation": route.operation,
+                "source_view": route.source_view,
+                "reasons": [
+                    {"code": reason.code, "feature": reason.feature, "message": reason.message}
+                    for reason in route.adaptation_reasons
+                ],
+                "stubbed": _stub_safe_path(route.path),
+            }
+            for route in manual
+        ],
+        "skipped_routes": [
+            {"pattern": item.pattern, "view": item.view, "reason": item.reason}
+            for item in scan.skipped_routes
         ],
         "source_root": source_root,
     }
@@ -951,6 +1043,7 @@ class _WalkResult:
         self.serializer_details: dict[str, SerializerIR] = {}
         self.api_roots: list[ApiRootIR] = []
         self.view_details: dict[str, ViewIR] = {}
+        self.skipped_routes: list[SkippedRoute] = []
 
 
 def _walk_patterns(
@@ -978,6 +1071,16 @@ def _walk_patterns(
         callback = getattr(pattern, "callback", None)
         view_class = getattr(callback, "cls", None) or getattr(callback, "view_class", None)
         if callback is None or view_class is None or not _is_drf_view(view_class):
+            # A non-DRF callback is outside the scan's vocabulary, but silence
+            # here hides a real route from every downstream disclosure. Record
+            # it so plans, manifests, and gap reports can say "this exists and
+            # was never scanned" instead of pretending the URL space ends at
+            # DRF's edge.
+            if callback is not None:
+                view_name = _qualified_name(view_class or callback) or repr(callback)
+                result.skipped_routes.append(
+                    SkippedRoute(pattern=combined, view=view_name, reason="non-drf-view")
+                )
             continue
         path, supported = _to_fastapi_path(combined)
         source_file, source_line = _source_location(view_class, root_path)
@@ -1041,6 +1144,9 @@ def _walk_patterns(
                 )
             )
     result.routes = list({route.key: route for route in result.routes}.values())
+    result.skipped_routes = list(
+        {(item.pattern, item.view): item for item in result.skipped_routes}.values()
+    )
     return result
 
 
@@ -1050,6 +1156,14 @@ def _is_drf_view(view_class: type[Any]) -> bool:
 
 def _is_format_alias_path(path: str) -> bool:
     return "{format}" in path or "drf_format_suffix" in path
+
+
+def _stub_safe_path(path: str) -> bool:
+    """True when an unsupported route's path can still be mounted for a stub.
+
+    Paths that keep regex metacharacters after conversion cannot be expressed
+    as a FastAPI path; those routes stay absent and are disclosed as such."""
+    return re.search(r"[\[\]()+*?|\\^$]", path) is None
 
 
 def _adaptation_reason(code: str, feature: str, message: str) -> RouteAdaptationReason:
@@ -2147,10 +2261,22 @@ def _compile_generated_files(output: Path, manifest: dict[str, Any]) -> None:
             raise FrameworkMigrationError(
                 f"generated Python is invalid: {path}: {error}"
             ) from error
-        if manifest.get("mode") == NATIVE_STRATEGY and (
-            "django.setup" in text or "import django" in text
-        ):
-            raise FrameworkMigrationError(f"native output still imports Django: {path}")
+        if manifest.get("mode") == NATIVE_STRATEGY:
+            if manifest.get("sql_engine") == "django":
+                # The retained-ORM projection imports Django by design; what
+                # must never appear is the request-serving machinery.
+                serving_machinery = (
+                    "django.core.asgi",
+                    "django.core.wsgi",
+                    "django.core.handlers",
+                    "django.test",
+                )
+                if any(item in text for item in serving_machinery):
+                    raise FrameworkMigrationError(
+                        f"native output imports Django serving machinery: {path}"
+                    )
+            elif "django.setup" in text or "import django" in text:
+                raise FrameworkMigrationError(f"native output still imports Django: {path}")
 
 
 def _load_generated_app(output: Path) -> Any:
@@ -2553,11 +2679,191 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
                 "",
             ]
         )
+    stubbed = [entry for entry in manifest.get("unsupported_routes", []) if entry.get("stubbed")]
+    if stubbed:
+        lines.extend(
+            [
+                "# Routes outside Sanka's native envelope answer 501 with their",
+                "# adaptation codes: an unmigrated route fails loudly instead of",
+                "# silently 404ing. Replace each stub with a real handler; the",
+                "# inventory lives in sanka-manifest.json under unsupported_routes.",
+                "",
+            ]
+        )
+        for entry in stubbed:
+            method = str(entry["method"]).upper()
+            path = str(entry["path"])
+            body = json.dumps(
+                {
+                    "detail": (
+                        "This route is outside Sanka's native generation envelope "
+                        "and has not been migrated."
+                    ),
+                    "sanka": {
+                        "route": f"{method} {path}",
+                        "adaptation_codes": [
+                            str(reason["code"]) for reason in entry.get("reasons", [])
+                        ],
+                        "see": "sanka-manifest.json#unsupported_routes",
+                    },
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            func = _unique_ident("sanka_unsupported", used_funcs)
+            lines.extend(
+                [
+                    f"@app.api_route({_py_str(path)}, methods=[{_py_str(method)}])",
+                    f"async def {func}() -> Response:",
+                    "    return Response(",
+                    f"        content={_py_str(body)},",
+                    "        status_code=501,",
+                    '        media_type="application/json",',
+                    "    )",
+                    "",
+                ]
+            )
     lines.extend(
         [
             'if __name__ == "__main__":',
             "    import uvicorn",
             '    uvicorn.run(app, host="127.0.0.1", port=8000)',
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+_PARITY_CHECKLIST = """\
+## DRF parity checklist for hand-written handlers
+
+Behavior that most often breaks exact parity when porting DRF by hand — every
+item below has cost a real migration its last few percent:
+
+- DRF stamps an `Allow` header on every response, including 400/404 (HEAD is
+  added for GET; OPTIONS is always present).
+- 404 has two flavors: a missing object renders the model's "No X matches the
+  given query." while an invalid pk type renders the generic "Not found."
+- Field-level null checks run before type checks: `{"items": null}` must yield
+  `["This field may not be null."]`, not a list-type error.
+- "may not be blank" (blank string) and "This field is required." (absent or
+  null-file field) are different validations with different wording.
+- Redirect responses carry an absolute `Location` URI
+  (`request.build_absolute_uri`), never a relative path — and a framework's
+  implicit trailing-slash redirect is not equivalent to the source's redirect
+  view.
+- Auth failures have exact strings and a `WWW-Authenticate` header; session
+  authentication enforces CSRF even for API clients (Django's test client
+  skips that only until `enforce_csrf_checks=True`).
+- Unique-constraint violations surface as the model's own message (e.g.
+  "order with this reference already exists.") as a 400 response — an
+  unhandled database IntegrityError that kills the serving process is not
+  parity.
+- Django's test client omits `Content-Length`; adding or keeping the header
+  where the source has none is a visible difference."""
+
+
+def _gap_report_payload(plan: FrameworkPlan, scan: FrameworkScan) -> dict[str, Any]:
+    manual = sorted(
+        (route for route in plan.routes if route.strategy == ROUTE_STRATEGY_MANUAL),
+        key=lambda route: (route.path, route.method),
+    )
+    return {
+        "schema": "sanka/native-gap-report/v1",
+        "plan_hash": plan.plan_hash,
+        "readiness": plan.readiness,
+        "threshold_unit": "ratio",
+        "native_routes": plan.native_routes,
+        "native_eligible_routes": plan.native_eligible_routes,
+        "needs_adaptation_routes": plan.needs_adaptation_routes,
+        "unsupported_routes": [
+            {
+                "method": route.method,
+                "path": route.path,
+                "operation": route.operation,
+                "source_view": route.source_view,
+                "reasons": [
+                    {"code": reason.code, "feature": reason.feature, "message": reason.message}
+                    for reason in route.adaptation_reasons
+                ],
+            }
+            for route in manual
+        ],
+        "skipped_routes": [
+            {"pattern": item.pattern, "view": item.view, "reason": item.reason}
+            for item in scan.skipped_routes
+        ],
+        "critic_checks": {
+            "route_coverage": "required",
+            "redirect_and_header_parity": "required",
+            "native_serving_evidence": "required",
+            "database_parity": "required",
+        },
+    }
+
+
+def _render_gap_report(plan: FrameworkPlan, scan: FrameworkScan) -> str:
+    manual = sorted(
+        (route for route in plan.routes if route.strategy == ROUTE_STRATEGY_MANUAL),
+        key=lambda route: (route.path, route.method),
+    )
+    lines = [
+        "# Sanka native migration gap report",
+        "",
+        f"Plan `{plan.plan_hash}` — native readiness {plan.readiness:.0%} "
+        f"({plan.native_routes}/{plan.native_eligible_routes} non-alias routes generatable).",
+        "",
+        "The source application remains the specification. Every route below",
+        "still needs a hand-written handler whose behavior is verified against",
+        "the source application, not assumed from generated code.",
+        "",
+    ]
+    if manual:
+        lines.append(f"## Routes needing manual adaptation ({len(manual)})")
+        lines.append("")
+        for route in manual:
+            mounted = (
+                "stubbed to answer 501 in the generated app"
+                if _stub_safe_path(route.path)
+                else "NOT mounted — the path is not representable as a FastAPI route"
+            )
+            lines.append(f"- `{route.method} {route.path}` — {mounted}")
+            for reason in route.adaptation_reasons:
+                lines.append(f"  - `{reason.code}`: {reason.message}")
+        lines.append("")
+    else:
+        lines.extend(
+            [
+                "## Routes needing manual adaptation (0)",
+                "",
+                "Every non-alias scanned route was generated natively.",
+                "",
+            ]
+        )
+    if scan.skipped_routes:
+        lines.extend(
+            [
+                f"## URL patterns the scanner did not scan ({len(scan.skipped_routes)})",
+                "",
+                "Non-DRF Django views: they serve real traffic but are invisible to",
+                "the DRF scan, so no readiness number accounts for them. Port them by",
+                "hand.",
+                "",
+            ]
+        )
+        for item in scan.skipped_routes:
+            lines.append(f"- `{item.pattern}` → `{item.view}` ({item.reason})")
+        lines.append("")
+    lines.append(_PARITY_CHECKLIST)
+    lines.extend(
+        [
+            "",
+            "## Machine-readable detail",
+            "",
+            "`plan-fastapi.json` beside this file carries per-route strategies and",
+            "adaptation codes; a generated app's `sanka-manifest.json` repeats the",
+            "inventory under `unsupported_routes` and `skipped_routes`.",
             "",
         ]
     )
@@ -2579,6 +2885,15 @@ def _render_native_readme(
             f"Persistence is async SQL (`{engine}`) in `sanka_store.py`, mapped onto the "
             "existing Django tables. Django is not imported at serve time."
         )
+    gaps = ""
+    if plan.needs_adaptation_routes:
+        gaps = (
+            f"\n**{plan.needs_adaptation_routes} route(s) are outside the native envelope "
+            f"and were NOT migrated** (native readiness {plan.readiness:.0%}). Mountable "
+            "ones are stubbed to answer 501 with their adaptation codes; the full "
+            "inventory is `unsupported_routes` in `sanka-manifest.json`. For those "
+            "routes the source application remains the specification.\n"
+        )
     return f"""# Generated native FastAPI application
 
 Sanka generated this application from plan `{plan.plan_hash}`.
@@ -2586,6 +2901,7 @@ Sanka generated this application from plan `{plan.plan_hash}`.
 Routes are declared with FastAPI decorators in `{entrypoint}` (`@app.get`,
 `@app.post`, ...). Shared DRF-parity validation lives in `sanka_native.py`.
 {persistence}
+{gaps}
 
 Set `SANKA_DATABASE_URL` for PostgreSQL (the scan never stores a password).
 SQLite uses the captured database path, overridable with `SANKA_DATABASE_URL`

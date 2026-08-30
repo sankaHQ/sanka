@@ -384,6 +384,20 @@ def test_bench_candidate_emission(crud_project: Path) -> None:
     text = (candidate / "candidate.yaml").read_text(encoding="utf-8")
     assert "schema_version: sanka-bench/candidate/v0.1" in text
     assert "producer: sanka" in text
+    # the candidate discloses its own gaps: reviewed plan, gap report, and a
+    # fast structural verify travel with the overlay
+    assert (candidate / "GAP-REPORT.md").is_file()
+    gap_payload = json.loads((candidate / "gap-report.json").read_text(encoding="utf-8"))
+    assert gap_payload["schema"] == "sanka/native-gap-report/v1"
+    assert gap_payload["readiness"] == 1.0
+    assert gap_payload["critic_checks"]["native_serving_evidence"] == "required"
+    plan_payload = json.loads((candidate / "plan-fastapi.json").read_text(encoding="utf-8"))
+    assert plan_payload["mode"] == "native"
+    verify_payload = json.loads((candidate / "verify-report.json").read_text(encoding="utf-8"))
+    assert verify_payload["ok"] is True
+    assert manifest["readiness"] == 1.0
+    assert manifest["unsupported_routes"] == []
+    assert manifest["skipped_routes"] == []
 
 
 def test_native_plan_refuses_routes_outside_the_envelope(tmp_path: Path) -> None:
@@ -543,6 +557,7 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
     scan_path = crud_project / ".sanka" / "scan.json"
     payload = json.loads(scan_path.read_text(encoding="utf-8"))
     payload["schema_version"] = 2
+    payload.pop("skipped_routes", None)
     for route in payload["routes"]:
         route.pop("adaptation_reasons", None)
     hash_payload = dict(payload)

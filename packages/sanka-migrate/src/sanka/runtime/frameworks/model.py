@@ -68,6 +68,28 @@ class RouteIR:
 
 
 @dataclass(frozen=True, slots=True)
+class SkippedRoute:
+    """A URL pattern the scanner saw but did not scan.
+
+    Non-DRF callbacks (plain Django views, redirects, admin) are outside the
+    scan's vocabulary, but silently omitting them hides real routes from every
+    downstream disclosure — a migration can look complete while an entire
+    route family was never even counted. Recording them keeps the gap visible."""
+
+    pattern: str
+    view: str
+    reason: str = "non-drf-view"
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SkippedRoute:
+        return cls(
+            pattern=str(payload["pattern"]),
+            view=str(payload["view"]),
+            reason=str(payload.get("reason", "non-drf-view")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class DatabaseIR:
     """Connection identity captured at scan time. Passwords are never stored."""
 
@@ -248,6 +270,7 @@ class FrameworkScan:
     http_security: dict[str, Any] = field(default_factory=dict)
     generic_messages: tuple[tuple[str, str], ...] = ()
     database: DatabaseIR = field(default_factory=lambda: DatabaseIR(vendor="other", name=""))
+    skipped_routes: tuple[SkippedRoute, ...] = ()
     scan_hash: str = field(default="")
 
     def hash_payload(self) -> dict[str, Any]:
@@ -256,6 +279,8 @@ class FrameworkScan:
         if self.schema_version < 3:
             for route in payload["routes"]:
                 route.pop("adaptation_reasons", None)
+        if self.schema_version < 4:
+            payload.pop("skipped_routes", None)
         return payload
 
     def with_hash(self) -> FrameworkScan:
@@ -294,6 +319,9 @@ class FrameworkScan:
                 (str(key), str(value)) for key, value in payload.get("generic_messages", ())
             ),
             database=DatabaseIR.from_dict(payload.get("database")),
+            skipped_routes=tuple(
+                SkippedRoute.from_dict(item) for item in payload.get("skipped_routes", [])
+            ),
             scan_hash=str(payload.get("scan_hash", "")),
         )
 
