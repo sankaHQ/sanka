@@ -16,7 +16,7 @@ HOSTED_SYSTEM_PROVIDERS = {
 
 
 class UnknownConnectorError(ValueError):
-    """No installed connector exposes the requested type."""
+    """No installed local connector exposes the requested type."""
 
 
 class ConnectorRegistry:
@@ -51,7 +51,7 @@ class ConnectorRegistry:
         return sorted(self._registrations)
 
     def roles(self, type_name: str) -> tuple[str, ...]:
-        """Return the roles exposed by one installed first-party provider."""
+        """Return the roles exposed by one installed local provider."""
         registration = self._get(type_name)
         roles: list[str] = []
         if registration.source is not None:
