@@ -51,7 +51,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from sanka.connector import Credentials, SourceConnector
 from sanka.runtime.execution.errors import ExecutionFault
 from sanka.runtime.execution.model import ExecutionRoute
 from sanka.runtime.execution.report_codec import _source_filter_payload
@@ -63,6 +62,7 @@ from sanka.runtime.execution.routes import (
 )
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.record_mapping import destination_properties, relationship_source_ids
+from sanka_connector import Credentials, SourceConnector
 
 DEFAULT_VALIDATION_SAMPLE_SIZE = 10
 """Records sampled per route — the production dry-run ``maxRecords`` default."""

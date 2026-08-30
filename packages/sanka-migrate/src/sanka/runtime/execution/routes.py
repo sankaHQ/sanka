@@ -34,24 +34,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from sanka.connector import (
-    BatchRelationshipWriteResult,
-    BatchWriteInput,
-    BatchWriteResult,
-    Credentials,
-    DestinationConnector,
-    RecordPage,
-    RelationshipWrite,
-    RelationshipWriteResult,
-    SourceConnector,
-    SupportsBatchRelationshipWrites,
-    SupportsBatchWrites,
-    SupportsBoundedReads,
-    SupportsOwnerDirectory,
-    WriteOptions,
-    WriteResult,
-)
-from sanka.connector.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
 from sanka.runtime.execution.errors import ExecutionFault
 from sanka.runtime.execution.model import (
     BatchPage,
@@ -81,6 +63,24 @@ from sanka.runtime.mapping.record_mapping import (
     relationship_source_ids,
     source_field_keys,
 )
+from sanka_connector import (
+    BatchRelationshipWriteResult,
+    BatchWriteInput,
+    BatchWriteResult,
+    Credentials,
+    DestinationConnector,
+    RecordPage,
+    RelationshipWrite,
+    RelationshipWriteResult,
+    SourceConnector,
+    SupportsBatchRelationshipWrites,
+    SupportsBatchWrites,
+    SupportsBoundedReads,
+    SupportsOwnerDirectory,
+    WriteOptions,
+    WriteResult,
+)
+from sanka_connector.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
 
 if TYPE_CHECKING:
     from sanka.runtime.execution.scope import ExactIdScope
@@ -122,7 +122,7 @@ EXACT_SCOPE_COVERAGE_WARNING = (
 class WritePolicies:
     """Reviewed write behavior applied uniformly across one batch.
 
-    Per-route :class:`~sanka.connector.WriteOptions` derive from these plus
+    Per-route :class:`~sanka_connector.WriteOptions` derive from these plus
     each route's identity fields; the owner policies feed the owner-mapping
     phase.
     """

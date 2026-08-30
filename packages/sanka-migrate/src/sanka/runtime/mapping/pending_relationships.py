@@ -27,13 +27,13 @@ import json
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-from sanka.connector import (
+from sanka.runtime.mapping.errors import MappingError
+from sanka_connector import (
     Credentials,
     DestinationConnector,
     RelationshipWrite,
     SupportsBatchRelationshipWrites,
 )
-from sanka.runtime.mapping.errors import MappingError
 
 PendingRelationship = dict[str, Any]
 PendingRelationships = dict[str, PendingRelationship]

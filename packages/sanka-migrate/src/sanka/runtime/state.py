@@ -33,8 +33,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from sanka.connector.records import BatchWriteStatus
 from sanka.runtime.mapping.record_mapping import mapping_group_key
+from sanka_connector.records import BatchWriteStatus
 
 if TYPE_CHECKING:
     from sanka.runtime.execution.local import SqliteExecutionState

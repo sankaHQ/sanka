@@ -1,147 +1,35 @@
-# SPDX-License-Identifier: Apache-2.0
-"""Sanka Connector SDK — Apache-2.0 migration connector interfaces.
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Compatibility import for the standalone Apache-2.0 Connector SDK.
 
-Connectors implement the base protocols (:class:`SourceConnector`,
-:class:`DestinationConnector`) plus any optional capability protocols, and
-must not import the AGPL-licensed runtime (``sanka.runtime``); CI enforces
-that boundary so a connector is never a derivative work of the runtime.
+New code should import :mod:`sanka_connector`. The ``sanka.connector`` name
+remains available so existing Sanka integrations do not break during the
+package split.
 """
 
-from sanka.connector.__about__ import __version__
-from sanka.connector.credentials import (
-    CredentialProvider,
-    Credentials,
-    SupportsCredentialRefresh,
-)
-from sanka.connector.errors import (
-    AuthenticationError,
-    ConfigurationError,
-    ConflictError,
-    ConnectorError,
-    DataError,
-    ErrorCategory,
-    NotFoundError,
-    PermissionDeniedError,
-    ProviderTimeoutError,
-    RateLimitError,
-    SchemaMismatchError,
-    TransientProviderError,
-    UnsupportedFeatureError,
-    ValidationFailedError,
-)
-from sanka.connector.protocols import (
-    DestinationConnector,
-    Limits,
-    SourceConnector,
-    SupportsBatchRelationshipWrites,
-    SupportsBatchWrites,
-    SupportsBoundedCounts,
-    SupportsBoundedReads,
-    SupportsConfigValidation,
-    SupportsHighWaterMark,
-    SupportsIdentityInspection,
-    SupportsLimits,
-    SupportsOwnerDirectory,
-    SupportsPropertyProvisioning,
-    SupportsRecordCounts,
-    SupportsResourceProvisioning,
-    SupportsRetryMetrics,
-    SupportsSchemaProvisioning,
-    SupportsSnapshotBounds,
-)
-from sanka.connector.provisioning import (
-    CustomObjectDefinition,
-    CustomObjectProperty,
-    PipelineDefinition,
-    PipelineStage,
-    PropertyDefinition,
-    PropertyResult,
-    ResourceResult,
-)
-from sanka.connector.records import (
-    BatchRelationshipWriteResult,
-    BatchWriteInput,
-    BatchWriteResult,
-    ConflictPolicy,
-    InvalidEmailPolicy,
-    OwnerProfile,
-    RecordPage,
-    RelationshipWrite,
-    RelationshipWriteResult,
-    SourceFilter,
-    WriteOptions,
-    WriteResult,
-)
-from sanka.connector.registration import ENTRY_POINT_GROUP, ConnectorRegistration
-from sanka.connector.schema import (
-    FieldSchema,
-    Inventory,
-    ObjectSchema,
-    ProviderIdentity,
-    SourceObject,
-)
+from __future__ import annotations
 
-__all__ = [
-    "ENTRY_POINT_GROUP",
-    "AuthenticationError",
-    "BatchRelationshipWriteResult",
-    "BatchWriteInput",
-    "BatchWriteResult",
-    "ConfigurationError",
-    "ConflictError",
-    "ConflictPolicy",
-    "ConnectorError",
-    "ConnectorRegistration",
-    "CredentialProvider",
-    "Credentials",
-    "CustomObjectDefinition",
-    "CustomObjectProperty",
-    "DataError",
-    "DestinationConnector",
-    "ErrorCategory",
-    "FieldSchema",
-    "InvalidEmailPolicy",
-    "Inventory",
-    "Limits",
-    "NotFoundError",
-    "ObjectSchema",
-    "OwnerProfile",
-    "PermissionDeniedError",
-    "PipelineDefinition",
-    "PipelineStage",
-    "PropertyDefinition",
-    "PropertyResult",
-    "ProviderIdentity",
-    "ProviderTimeoutError",
-    "RateLimitError",
-    "RecordPage",
-    "RelationshipWrite",
-    "RelationshipWriteResult",
-    "ResourceResult",
-    "SchemaMismatchError",
-    "SourceConnector",
-    "SourceFilter",
-    "SourceObject",
-    "SupportsBatchRelationshipWrites",
-    "SupportsBatchWrites",
-    "SupportsBoundedCounts",
-    "SupportsBoundedReads",
-    "SupportsConfigValidation",
-    "SupportsCredentialRefresh",
-    "SupportsHighWaterMark",
-    "SupportsIdentityInspection",
-    "SupportsLimits",
-    "SupportsOwnerDirectory",
-    "SupportsPropertyProvisioning",
-    "SupportsRecordCounts",
-    "SupportsResourceProvisioning",
-    "SupportsRetryMetrics",
-    "SupportsSchemaProvisioning",
-    "SupportsSnapshotBounds",
-    "TransientProviderError",
-    "UnsupportedFeatureError",
-    "ValidationFailedError",
-    "WriteOptions",
-    "WriteResult",
-    "__version__",
-]
+import sys
+
+from sanka_connector import *  # noqa: F403
+from sanka_connector import __all__ as __all__
+from sanka_connector import __version__ as __version__
+from sanka_connector import credentials as _credentials
+from sanka_connector import errors as _errors
+from sanka_connector import protocols as _protocols
+from sanka_connector import provisioning as _provisioning
+from sanka_connector import records as _records
+from sanka_connector import registration as _registration
+from sanka_connector import schema as _schema
+
+for _name, _module in {
+    "credentials": _credentials,
+    "errors": _errors,
+    "protocols": _protocols,
+    "provisioning": _provisioning,
+    "records": _records,
+    "registration": _registration,
+    "schema": _schema,
+}.items():
+    sys.modules[f"{__name__}.{_name}"] = _module
+
+del _name, _module

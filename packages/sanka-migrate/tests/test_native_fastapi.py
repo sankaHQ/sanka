@@ -192,6 +192,11 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     assert "import django" not in store_text
     requirements = (output / "requirements.txt").read_text(encoding="utf-8")
     assert "tortoise-orm>=1.1,<2" in requirements
+    pyproject = (output / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'name = "sanka-generated-fastapi"' in pyproject
+    assert '"tortoise-orm>=1.1,<2"' in pyproject
+    assert "test = [" in pyproject
+    assert '"httpx2>=2,<3"' in pyproject
     app_text = (output / "app.py").read_text(encoding="utf-8")
     assert '@app.get("/api/gadgets/")' in app_text
     assert '@app.post("/api/gadgets/")' in app_text
@@ -219,12 +224,40 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     tested = _run_cli(["test", "--root", str(crud_project), "--to", "fastapi"], crud_project)
     assert tested.returncode == 0, tested.stdout + tested.stderr
     assert "Generated API tests: OK" in tested.stdout
+    assert f"Generated environment: {output / '.venv'}" in tested.stdout
+    assert f"Generated Python: {output / '.venv' / 'bin' / 'python'}" in tested.stdout
+    assert f"Dependency metadata: {output / 'pyproject.toml'}" in tested.stdout
+    assert f"Locked dependencies: {output / 'uv.lock'}" in tested.stdout
+    assert (output / "uv.lock").is_file()
     assert (output / "test_generated.py").is_file()
     generated_tests = (output / "test_generated.py").read_text(encoding="utf-8")
     assert "test_gadgetviewset_create_roundtrip" in generated_tests
     assert "import django" not in generated_tests
     verified = _run_cli(["verify", "--root", str(crud_project)], crud_project)
     assert verified.returncode == 0, verified.stdout + verified.stderr
+    assert "Verified paths" in verified.stdout
+    assert f"Source app:    {crud_project}" in verified.stdout
+    assert f"Scan:          {crud_project / '.sanka' / 'scan.json'}" in verified.stdout
+    assert f"Plan:          {crud_project / '.sanka' / 'plan-fastapi.json'}" in verified.stdout
+    assert f"Generated app: {output}" in verified.stdout
+    assert f"Manifest:      {output / 'sanka-manifest.json'}" in verified.stdout
+    assert f"Dependencies:  {output / 'pyproject.toml'}" in verified.stdout
+    assert f"Environment:   {output / '.venv'}" in verified.stdout
+    assert f"Python:        {output / '.venv' / 'bin' / 'python'}" in verified.stdout
+    assert f"Lockfile:      {output / 'uv.lock'}" in verified.stdout
+    assert "Generated Python checked" in verified.stdout
+    for name in manifest["generated_files"]:
+        assert f"  - {output / name}" in verified.stdout
+    assert "generated route declarations match the reviewed plan ✓" in verified.stdout
+    assert "generated Python files exist and compile ✓" in verified.stdout
+    assert "manifest matches the current scan and reviewed plan ✓" in verified.stdout
+    assert "generated serving path has no Django imports ✓" in verified.stdout
+    assert "2 / 2 source-vs-generated probes matched" in verified.stdout
+    assert "automatic coverage is limited to parameter-free GET/HEAD routes" in verified.stdout
+    assert (
+        "compared status, content type, body, Allow, Location, and WWW-Authenticate"
+        in verified.stdout
+    )
     assert "Native migration verification: complete" in verified.stdout
 
 

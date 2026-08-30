@@ -14,7 +14,7 @@ destination connector, exiting non-zero when invalid records exist.
 
 Shorthand and provider selection::
 
-    sanka connect hubspot
+    sanka connect markdown
     sanka migrate ./content sqlite://content.db
 
 Django REST Framework to FastAPI compatibility flow::
@@ -55,6 +55,7 @@ from sanka.runtime.frameworks import (
     DEFAULT_FASTAPI_OUTPUT,
     NATIVE_STRATEGY,
     FrameworkMigrationError,
+    GeneratedEnvironmentError,
     apply_fastapi_plan,
     load_fastapi_plan,
     plan_fastapi,
@@ -91,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         UnknownConnectorError,
         ExecutionError,
         FrameworkMigrationError,
+        GeneratedEnvironmentError,
         FileNotFoundError,
     ) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -224,9 +226,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     connect = commands.add_parser(
         "connect",
-        help="select a built-in provider and show its supported migration roles",
+        help="select an installed connector and show its supported migration roles",
     )
-    connect.add_argument("provider", help="provider slug, e.g. hubspot or postgres")
+    connect.add_argument("provider", help="local provider slug, e.g. markdown or postgres")
     connect.add_argument("--json", action="store_true", help="print provider details as JSON")
     connect.set_defaults(handler=_cmd_connect)
 
@@ -295,12 +297,17 @@ async def _cmd_connect(args: argparse.Namespace) -> int:
     if provider == "postgresql":
         provider = "postgres"
     roles = list(registry.roles(provider))
-    payload = {"provider": provider, "roles": roles, "bundled": True}
+    payload = {
+        "provider": provider,
+        "roles": roles,
+        "installed": True,
+        "package": f"sanka-connector-{provider}",
+    }
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(f"{provider}: ready ({', '.join(roles)})")
-        print("installed with sanka-migrate; no connector plugin is required")
+        print(f"provided by installed package sanka-connector-{provider}")
     return 0
 
 
@@ -782,6 +789,11 @@ def _print_framework_test(report: dict[str, Any]) -> None:
     print("Testing the generated FastAPI app...")
     print()
     print(f"Wrote {report['file']}")
+    if report.get("environment"):
+        print(f"Generated environment: {report['environment']}")
+        print(f"Generated Python: {report['python']}")
+        print(f"Dependency metadata: {report['pyproject']}")
+        print(f"Locked dependencies: {report['lockfile']}")
     print(f"Ran {report['tests']} tests")
     if report.get("allow_writes"):
         print("Writes ran against an isolated SQLite copy")
@@ -790,7 +802,21 @@ def _print_framework_test(report: dict[str, Any]) -> None:
         print()
         print(report["log"])
     print()
-    print("next: sanka verify")
+    if report["ok"]:
+        print("next: sanka verify")
+        return
+    missing = report.get("missing_dependency")
+    if missing:
+        print(
+            f"Generated app dependency is missing: {missing['module']} "
+            f"(package `{missing['package']}`)."
+        )
+        print("The generated dependency metadata may be incomplete; rerun:")
+        print("  sanka apply --force")
+        print("  sanka test")
+        return
+    print("Fix the test failure above, then rerun:")
+    print("  sanka test")
 
 
 def _print_framework_verify(report: dict[str, Any]) -> None:
@@ -803,20 +829,52 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
     else:
         print("Verifying the DRF → FastAPI compatibility bridge...")
     print()
+    paths = report["paths"]
+    print("Verified paths")
+    print(f"  Source app:    {paths['source']}")
+    print(f"  Scan:          {paths['scan']}")
+    print(f"  Plan:          {paths['plan']}")
+    print(f"  Generated app: {paths['generated']}")
+    print(f"  Manifest:      {paths['manifest']}")
+    print(f"  Dependencies:  {paths['pyproject']}")
+    if paths.get("environment"):
+        print(f"  Environment:   {paths['environment']}")
+        print(f"  Python:        {paths['python']}")
+        print(f"  Lockfile:      {paths['lockfile']}")
+    generated_files = report.get("generated_files") or []
+    if generated_files:
+        print("Generated Python checked")
+        for path in generated_files:
+            print(f"  - {path}")
+    print()
     print("Routes")
     expected_total = routes["planned"] - len(routes.get("dropped", []))
     print(f"  {routes['generated']} / {expected_total} generated")
+    if not routes["missing"] and not routes.get("extra"):
+        print("  generated route declarations match the reviewed plan ✓")
     if routes.get("dropped"):
         print(f"  {len(routes['dropped'])} format-suffix aliases dropped by design")
     print("Generated code")
-    print("  syntax and manifest integrity ✓")
+    print("  generated Python files exist and compile ✓")
+    print("  manifest matches the current scan and reviewed plan ✓")
+    if native:
+        print("  generated serving path has no Django imports ✓")
     print("Safe HTTP behavior")
-    print(f"  {http['passed']} / {http['probed']} read-only routes compatible")
-    if http["safe_routes"] == 0:
-        print("  no parameter-free GET/HEAD routes were available for automatic probing")
+    if not http.get("enabled", True):
+        print("  skipped with --no-http")
+    else:
+        print(f"  {http['passed']} / {http['probed']} source-vs-generated probes matched")
+        print("  automatic coverage is limited to parameter-free GET/HEAD routes")
+        print("  compared status, content type, body, Allow, Location, and WWW-Authenticate")
+        if http["safe_routes"] == 0:
+            print("  no parameter-free GET/HEAD routes were available for automatic probing")
     if routes["missing"]:
         print("Missing routes")
         for route in routes["missing"]:
+            print(f"  - {route}")
+    if routes.get("extra"):
+        print("Unexpected routes")
+        for route in routes["extra"]:
             print(f"  - {route}")
     if routes["needs_adaptation"]:
         print("Needs adaptation")

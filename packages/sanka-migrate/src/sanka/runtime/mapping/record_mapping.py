@@ -21,9 +21,9 @@ from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sanka.connector import SourceFilter
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.model import MigrationMappingField
+from sanka_connector import SourceFilter
 
 MappingGroup = tuple[str, str, SourceFilter | None, list[MigrationMappingField]]
 MappingRouteManifest = list[dict[str, Any]]

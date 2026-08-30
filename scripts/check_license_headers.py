@@ -15,20 +15,9 @@ import sys
 from pathlib import Path
 
 LICENSE_ZONES: list[tuple[str, str]] = [
-    ("packages/sanka-migrate/src/sanka/connector", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_clickhouse", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_csv", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_hubspot", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_markdown", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_postgres", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_salesforce", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_sendgrid", "Apache-2.0"),
-    ("packages/sanka-migrate/src/sanka_connector_sqlite", "Apache-2.0"),
-    ("packages/sanka-migrate/tests/connector_sdk", "Apache-2.0"),
     # This must precede packages/sanka-migrate because matching is prefix based.
     ("packages/sanka-migrate-mcp", "Apache-2.0"),
     ("packages/sanka-migrate", "AGPL-3.0-only"),
-    ("connectors", "Apache-2.0"),
     ("scripts", "Apache-2.0"),
     ("tests", "Apache-2.0"),
     ("docs", "Apache-2.0"),

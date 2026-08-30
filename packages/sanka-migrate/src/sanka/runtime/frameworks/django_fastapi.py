@@ -24,12 +24,14 @@ completed migration.
 from __future__ import annotations
 
 import ast
+import base64
 import importlib
 import importlib.util
 import inspect
 import json
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Iterable
 from dataclasses import replace as replace_dataclass
@@ -37,6 +39,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
+from sanka.runtime.frameworks.generated_environment import (
+    GeneratedEnvironment,
+    ensure_generated_environment,
+)
 from sanka.runtime.frameworks.model import (
     ApiRootIR,
     DatabaseIR,
@@ -54,6 +60,7 @@ from sanka.runtime.frameworks.model import (
 from sanka.runtime.frameworks.native_async import (
     SQL_ENGINE_LABELS,
     render_async_sql_files,
+    render_generated_pyproject,
     resolve_sql_engine,
 )
 
@@ -596,10 +603,9 @@ def _render_bridge_output(plan: FrameworkPlan, output_path: Path, *, source_root
     _write_text(output_path / "app.py", _render_app())
     _write_text(output_path / "sanka_compat.py", _render_compatibility_runtime())
     _write_text(output_path / "README.md", _render_generated_readme(plan))
-    _write_text(
-        output_path / "requirements.txt",
-        "fastapi>=0.115,<1\nuvicorn[standard]>=0.30,<1\n",
-    )
+    requirements = "fastapi>=0.115,<1\nuvicorn[standard]>=0.30,<1\n"
+    _write_text(output_path / "requirements.txt", requirements)
+    _write_text(output_path / "pyproject.toml", render_generated_pyproject(requirements))
     _write_json(output_path / GENERATED_MANIFEST, manifest)
     return len(automatic)
 
@@ -756,7 +762,10 @@ def verify_fastapi_migration(
     if not output_path.is_absolute():
         output_path = root_path / output_path
     output_path = output_path.resolve()
-    manifest = _read_json(output_path / GENERATED_MANIFEST, label="generated manifest")
+    scan_path = _artifact_path(root_path, artifact_dir, SCAN_FILE).resolve()
+    plan_path = _artifact_path(root_path, artifact_dir, PLAN_FILE).resolve()
+    manifest_path = (output_path / GENERATED_MANIFEST).resolve()
+    manifest = _read_json(manifest_path, label="generated manifest")
     if manifest.get("source_scan_hash") != scan.scan_hash:
         raise FrameworkMigrationError("generated output does not match the current scan")
     if manifest.get("plan_hash") != plan.plan_hash:
@@ -777,14 +786,25 @@ def verify_fastapi_migration(
     extra = sorted(actual - expected)
     _compile_generated_files(output_path, manifest)
     probes: list[dict[str, Any]] = []
+    generated_environment: GeneratedEnvironment | None = None
     if probe_http and not missing and not extra:
+        if plan.mode == NATIVE_STRATEGY:
+            generated_environment = ensure_generated_environment(output_path)
         probes = _probe_read_only_routes(
             root_path,
             output_path,
             manifest,
             cases=_load_verification_cases(root_path, cases),
+            target_python=(
+                generated_environment.python if generated_environment is not None else None
+            ),
         )
     failed_probes = [probe for probe in probes if not probe["ok"]]
+    generated_files = [
+        str((output_path / str(name)).resolve())
+        for name in manifest.get("generated_files", [])
+        if str(name).endswith(".py")
+    ]
     return {
         "ok": not missing and not extra and not failed_probes and not needs_adaptation,
         "mode": plan.mode,
@@ -798,6 +818,7 @@ def verify_fastapi_migration(
             "dropped": dropped,
         },
         "http": {
+            "enabled": probe_http,
             "safe_routes": len(
                 [
                     route
@@ -812,6 +833,24 @@ def verify_fastapi_migration(
         "scan_hash": scan.scan_hash,
         "plan_hash": plan.plan_hash,
         "output": str(output_path),
+        "paths": {
+            "source": str(root_path),
+            "scan": str(scan_path),
+            "plan": str(plan_path),
+            "generated": str(output_path),
+            "manifest": str(manifest_path),
+            "pyproject": str((output_path / "pyproject.toml").resolve()),
+            "environment": (
+                str(generated_environment.root) if generated_environment is not None else None
+            ),
+            "python": (
+                str(generated_environment.python) if generated_environment is not None else None
+            ),
+            "lockfile": (
+                str(generated_environment.lockfile) if generated_environment is not None else None
+            ),
+        },
+        "generated_files": generated_files,
     }
 
 
@@ -2119,73 +2158,193 @@ def _probe_read_only_routes(
     manifest: dict[str, Any],
     *,
     cases: list[dict[str, Any]],
+    target_python: Path | None,
 ) -> list[dict[str, Any]]:
     _bootstrap_django(root, str(manifest["settings_module"]))
     _bind_source_database()
-    try:
-        django_test = importlib.import_module("django.test")
-        fastapi_testclient = importlib.import_module("fastapi.testclient")
-    except ModuleNotFoundError as error:
-        raise FrameworkMigrationError(
-            "FastAPI must be installed to run HTTP verification (`pip install sanka-migrate`)"
-        ) from error
+    django_test = importlib.import_module("django.test")
     source = django_test.Client()
-    results: list[dict[str, Any]] = []
     automatic = [
         {"method": route.get("method"), "path": route.get("path"), "headers": {}}
         for route in manifest.get("routes", [])
         if route.get("method") in {"GET", "HEAD"} and "{" not in route.get("path", "")
     ]
-    probes = automatic + cases
+    probes = _deduplicate_probes(automatic + cases)
+    source_responses = [_source_probe_response(source, case) for case in probes]
+    if target_python is not None:
+        target_responses = _native_target_probe_responses(output, target_python, probes)
+    else:
+        target_responses = _compatibility_target_probe_responses(output, probes)
+    results: list[dict[str, Any]] = []
+    for case, source_response, target_response in zip(
+        probes, source_responses, target_responses, strict=True
+    ):
+        source_body = source_response["body"]
+        target_body = target_response["body"]
+        source_type = source_response["content_type"]
+        target_type = target_response["content_type"]
+        bodies_match = _response_bodies_match(source_body, target_body, source_type, target_type)
+        compared_headers = ("allow", "location", "www-authenticate")
+        headers_match = all(
+            source_response["headers"].get(header, "") == target_response["headers"].get(header, "")
+            for header in compared_headers
+        )
+        ok = (
+            source_response["status"] == target_response["status"]
+            and source_type == target_type
+            and bodies_match
+            and headers_match
+        )
+        results.append(
+            {
+                "method": case["method"],
+                "path": case["path"],
+                "ok": ok,
+                "source_status": source_response["status"],
+                "target_status": target_response["status"],
+                "source_content_type": source_type,
+                "target_content_type": target_type,
+                "headers_match": headers_match,
+            }
+        )
+    return results
+
+
+def _deduplicate_probes(probes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str, str]] = set()
+    unique: list[dict[str, Any]] = []
+    for case in probes:
+        method = str(case.get("method", "GET")).upper()
+        path = str(case.get("path", ""))
+        headers = {str(key): str(value) for key, value in dict(case.get("headers", {})).items()}
+        identity = (method, path, json.dumps(headers, sort_keys=True))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append({"method": method, "path": path, "headers": headers})
+    return unique
+
+
+def _source_probe_response(source: Any, case: dict[str, Any]) -> dict[str, Any]:
+    headers = case["headers"]
+    django_headers = {
+        "HTTP_" + key.upper().replace("-", "_"): value
+        for key, value in headers.items()
+        if key.lower() not in {"content-type", "content-length"}
+    }
+    response = source.generic(case["method"], case["path"], **django_headers)
+    importlib.import_module("django.db").connections.close_all()
+    return {
+        "status": response.status_code,
+        "content_type": str(response.get("Content-Type", "")).split(";", 1)[0],
+        "body": bytes(response.content),
+        "headers": {
+            name: str(response.get(name, "")) for name in ("allow", "location", "www-authenticate")
+        },
+    }
+
+
+def _compatibility_target_probe_responses(
+    output: Path, probes: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    try:
+        fastapi_testclient = importlib.import_module("fastapi.testclient")
+    except ModuleNotFoundError as error:
+        raise FrameworkMigrationError(
+            "FastAPI is required to verify a compatibility bridge; install the generated "
+            f"dependencies from {output / 'requirements.txt'} into the source environment"
+        ) from error
+    responses: list[dict[str, Any]] = []
     with fastapi_testclient.TestClient(_load_generated_app(output)) as target:
         for case in probes:
-            method = str(case.get("method", "GET")).upper()
-            path = str(case.get("path", ""))
-            headers = {str(key): str(value) for key, value in dict(case.get("headers", {})).items()}
-            identity = (method, path, json.dumps(headers, sort_keys=True))
-            if identity in seen:
-                continue
-            seen.add(identity)
-            django_headers = {
-                "HTTP_" + key.upper().replace("-", "_"): value
-                for key, value in headers.items()
-                if key.lower() not in {"content-type", "content-length"}
-            }
-            source_response = source.generic(method, path, **django_headers)
-            importlib.import_module("django.db").connections.close_all()
-            target_response = target.request(method, path, headers=headers)
-            source_type = str(source_response.get("Content-Type", "")).split(";", 1)[0]
-            target_type = str(target_response.headers.get("content-type", "")).split(";", 1)[0]
-            source_body = bytes(source_response.content)
-            target_body = target_response.content
-            bodies_match = _response_bodies_match(
-                source_body, target_body, source_type, target_type
-            )
-            compared_headers = ("allow", "location", "www-authenticate")
-            headers_match = all(
-                str(source_response.get(header, "")) == str(target_response.headers.get(header, ""))
-                for header in compared_headers
-            )
-            ok = (
-                source_response.status_code == target_response.status_code
-                and source_type == target_type
-                and bodies_match
-                and headers_match
-            )
-            results.append(
+            response = target.request(case["method"], case["path"], headers=case["headers"])
+            responses.append(_target_response_payload(response))
+    return responses
+
+
+def _target_response_payload(response: Any) -> dict[str, Any]:
+    return {
+        "status": response.status_code,
+        "content_type": str(response.headers.get("content-type", "")).split(";", 1)[0],
+        "body": response.content,
+        "headers": {
+            name: str(response.headers.get(name, ""))
+            for name in ("allow", "location", "www-authenticate")
+        },
+    }
+
+
+def _native_target_probe_responses(
+    output: Path,
+    target_python: Path,
+    probes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result = subprocess.run(
+        [str(target_python), "-c", _TARGET_PROBE_SCRIPT],
+        cwd=output,
+        env=dict(os.environ),
+        input=json.dumps(probes),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "generated target probe failed").strip()
+        raise FrameworkMigrationError(
+            f"could not verify the generated app with {target_python}:\n{detail}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise FrameworkMigrationError(
+            "generated target verification returned invalid output"
+        ) from error
+    if not isinstance(payload, list) or len(payload) != len(probes):
+        raise FrameworkMigrationError("generated target verification returned incomplete results")
+    responses: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise FrameworkMigrationError("generated target verification returned invalid results")
+        try:
+            responses.append(
                 {
-                    "method": method,
-                    "path": path,
-                    "ok": ok,
-                    "source_status": source_response.status_code,
-                    "target_status": target_response.status_code,
-                    "source_content_type": source_type,
-                    "target_content_type": target_type,
-                    "headers_match": headers_match,
+                    "status": int(item["status"]),
+                    "content_type": str(item["content_type"]),
+                    "body": base64.b64decode(str(item["body"]), validate=True),
+                    "headers": dict(item["headers"]),
                 }
             )
-    return results
+        except (KeyError, TypeError, ValueError) as error:
+            raise FrameworkMigrationError(
+                "generated target verification returned invalid response data"
+            ) from error
+    return responses
+
+
+_TARGET_PROBE_SCRIPT = r"""import base64
+import json
+import sys
+
+from fastapi.testclient import TestClient
+from app import app
+
+probes = json.load(sys.stdin)
+results = []
+with TestClient(app) as client:
+    for case in probes:
+        response = client.request(case["method"], case["path"], headers=case["headers"])
+        results.append({
+            "status": response.status_code,
+            "content_type": response.headers.get("content-type", "").split(";", 1)[0],
+            "body": base64.b64encode(response.content).decode("ascii"),
+            "headers": {
+                name: response.headers.get(name, "")
+                for name in ("allow", "location", "www-authenticate")
+            },
+        })
+json.dump(results, sys.stdout)
+"""
 
 
 def _load_verification_cases(root: Path, value: str | Path | None) -> list[dict[str, Any]]:
@@ -2404,8 +2563,8 @@ Format-suffix alias routes from the source router are dropped as a disclosed
 contract change; clients negotiate content types with headers instead.
 
 ```bash
-python -m pip install -r requirements.txt
-python {entrypoint}
+uv sync
+uv run python {entrypoint}
 ```
 """
 

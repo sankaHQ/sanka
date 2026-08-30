@@ -5,7 +5,11 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import (
+from sanka.runtime.engine import ExecutionError, MigrationEngine
+from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.spec import EndpointSpec, MigrationSpec
+from sanka.runtime.state import SqliteStateStore
+from sanka_connector import (
     ConnectorRegistration,
     Credentials,
     FieldSchema,
@@ -19,10 +23,6 @@ from sanka.connector import (
     WriteOptions,
     WriteResult,
 )
-from sanka.runtime.engine import ExecutionError, MigrationEngine
-from sanka.runtime.registry import ConnectorRegistry
-from sanka.runtime.spec import EndpointSpec, MigrationSpec
-from sanka.runtime.state import SqliteStateStore
 
 
 class Provider:

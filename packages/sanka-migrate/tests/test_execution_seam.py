@@ -7,8 +7,6 @@ from typing import Any, get_args
 
 import pytest
 
-from sanka.connector import SourceFilter
-from sanka.connector.records import BatchWriteStatus
 from sanka.runtime.execution import (
     EXECUTION_FAULT_CODES,
     NULL_OBSERVER,
@@ -38,6 +36,8 @@ from sanka.runtime.mapping import (
     resolve_destination_record_ids,
 )
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
+from sanka_connector import SourceFilter
+from sanka_connector.records import BatchWriteStatus
 
 _FIELD = MigrationMappingField(source_field="email", target_object="contacts", target_field="email")
 

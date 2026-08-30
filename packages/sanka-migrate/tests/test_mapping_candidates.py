@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
-from sanka.connector import FieldSchema, Inventory, ObjectSchema
 from sanka.runtime.mapping import generate_mapping_candidates
+from sanka_connector import FieldSchema, Inventory, ObjectSchema
 
 
 def _object(

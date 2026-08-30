@@ -27,16 +27,10 @@ EXPECTED_PROJECTS = {
     Path("packages/sanka-migrate/pyproject.toml"): "sanka-migrate",
     Path("packages/sanka-migrate-mcp/pyproject.toml"): "sanka-migrate-mcp",
 }
-
-BUNDLED_CONNECTOR_PACKAGES = {
-    "src/sanka_connector_clickhouse",
-    "src/sanka_connector_csv",
-    "src/sanka_connector_hubspot",
-    "src/sanka_connector_markdown",
-    "src/sanka_connector_postgres",
-    "src/sanka_connector_salesforce",
-    "src/sanka_connector_sendgrid",
-    "src/sanka_connector_sqlite",
+HOSTED_CONNECTOR_PACKAGES = {
+    "sanka-connector-hubspot",
+    "sanka-connector-salesforce",
+    "sanka-connector-sendgrid",
 }
 
 
@@ -101,6 +95,20 @@ def main() -> int:
     if root_project["name"] != "sanka-migrate-workspace":
         errors.append("workspace project name must be sanka-migrate-workspace")
 
+    workspace = _load(ROOT / "pyproject.toml")
+    development_dependencies = {
+        str(value).split("=", 1)[0].lower()
+        for value in workspace.get("dependency-groups", {}).get("dev", [])
+    }
+    unexpected_hosted_packages = sorted(
+        development_dependencies.intersection(HOSTED_CONNECTOR_PACKAGES)
+    )
+    if unexpected_hosted_packages:
+        errors.append(
+            "hosted SaaS providers must not be local development dependencies: "
+            f"{unexpected_hosted_packages}"
+        )
+
     for relative_path, expected_name in EXPECTED_PROJECTS.items():
         document = _load(ROOT / relative_path)
         project = document["project"]
@@ -136,7 +144,7 @@ def main() -> int:
         .get("wheel", {})
         .get("packages", [])
     )
-    expected_runtime_packages = {"src/sanka", *BUNDLED_CONNECTOR_PACKAGES}
+    expected_runtime_packages = {"src/sanka"}
     if set(runtime_packages) != expected_runtime_packages:
         errors.append(
             "runtime wheel must ship the public sanka namespace: "
@@ -166,14 +174,8 @@ def main() -> int:
         errors.append("MCP wheel must ship only the standalone sanka_migrate_mcp package")
 
     connector_entry_points = runtime["project"].get("entry-points", {}).get("sanka.connectors", {})
-    expected_connector_names = {
-        package.removeprefix("src/sanka_connector_") for package in BUNDLED_CONNECTOR_PACKAGES
-    }
-    if set(connector_entry_points) != expected_connector_names:
-        errors.append(
-            "runtime must expose every bundled connector through sanka.connectors: "
-            f"{sorted(expected_connector_names)}"
-        )
+    if connector_entry_points:
+        errors.append("runtime must not bundle provider entry points; use sankaHQ/sanka-connectors")
 
     package_paths = (
         ROOT / "packages/sanka-migrate/src/sanka/runtime",

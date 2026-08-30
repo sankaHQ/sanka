@@ -33,14 +33,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast, runtime_checkable
 
-from sanka.connector import (
-    ConflictPolicy,
-    ConnectorError,
-    CredentialProvider,
-    Credentials,
-    SupportsRecordCounts,
-)
-from sanka.connector.protocols import DestinationConnector, SourceConnector
 from sanka.runtime.execution import (
     DEFAULT_VALIDATION_SAMPLE_SIZE,
     AttemptFence,
@@ -65,6 +57,14 @@ from sanka.runtime.planner import MigrationPlan, RoutePlan, build_plan
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, resolve_env
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES, RunStatus, StateStore
+from sanka_connector import (
+    ConflictPolicy,
+    ConnectorError,
+    CredentialProvider,
+    Credentials,
+    SupportsRecordCounts,
+)
+from sanka_connector.protocols import DestinationConnector, SourceConnector
 
 MAX_WRITE_ATTEMPTS = 5
 _BACKOFF_BASE_SECONDS = 0.5
@@ -681,7 +681,7 @@ def _source_object_payload(obj: Any) -> dict[str, Any]:
 
 
 def _source_object_from_payload(payload: dict[str, Any]) -> Any:
-    from sanka.connector.schema import SourceObject
+    from sanka_connector.schema import SourceObject
 
     return SourceObject(
         key=payload["key"],
@@ -713,7 +713,7 @@ def _inventory_payload(inventory: Any) -> dict[str, Any]:
 
 
 def _inventory_from_payload(payload: dict[str, Any]) -> Any:
-    from sanka.connector.schema import FieldSchema, Inventory, ObjectSchema
+    from sanka_connector.schema import FieldSchema, Inventory, ObjectSchema
 
     return Inventory(
         provider=payload["provider"],

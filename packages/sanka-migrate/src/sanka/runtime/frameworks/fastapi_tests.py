@@ -21,8 +21,15 @@ from sanka.runtime.frameworks.django_fastapi import (
     load_fastapi_plan,
     load_framework_scan,
 )
+from sanka.runtime.frameworks.generated_environment import ensure_generated_environment
 
 GENERATED_TEST_FILE = "test_generated.py"
+_GENERATED_DEPENDENCY_PACKAGES = {
+    "aiosqlite": "aiosqlite",
+    "asyncpg": "asyncpg",
+    "sqlalchemy": "sqlalchemy",
+    "tortoise": "tortoise-orm",
+}
 
 
 def test_fastapi_app(
@@ -49,12 +56,18 @@ def test_fastapi_app(
     if manifest.get("plan_hash") != plan.plan_hash:
         raise FrameworkMigrationError("generated output does not match the reviewed plan")
     env, allow_writes = _isolated_env(output_path, manifest)
+    generated_environment = (
+        ensure_generated_environment(output_path) if plan.mode == NATIVE_STRATEGY else None
+    )
+    test_python = (
+        str(generated_environment.python) if generated_environment is not None else sys.executable
+    )
     source = _render_generated_tests(manifest, allow_writes=allow_writes)
     test_path = output_path / GENERATED_TEST_FILE
     test_path.write_text(source, encoding="utf-8")
     compile(source, str(test_path), "exec")
     result = subprocess.run(
-        [sys.executable, "-m", "unittest", "test_generated", "-v"],
+        [test_python, "-m", "unittest", "test_generated", "-v"],
         cwd=output_path,
         env=env,
         capture_output=True,
@@ -65,6 +78,7 @@ def test_fastapi_app(
     log = (result.stdout or "") + (result.stderr or "")
     ran = _ran_count(log)
     ok = result.returncode == 0
+    missing_dependency = _missing_generated_dependency(log, output_path)
     return {
         "ok": ok,
         "file": str(test_path),
@@ -74,7 +88,18 @@ def test_fastapi_app(
         "scan_hash": scan.scan_hash,
         "plan_hash": plan.plan_hash,
         "output": str(output_path),
+        "environment": (
+            str(generated_environment.root) if generated_environment is not None else None
+        ),
+        "python": test_python,
+        "pyproject": (
+            str(generated_environment.pyproject) if generated_environment is not None else None
+        ),
+        "lockfile": (
+            str(generated_environment.lockfile) if generated_environment is not None else None
+        ),
         "log": log.strip(),
+        "missing_dependency": missing_dependency,
     }
 
 
@@ -106,6 +131,21 @@ def _ran_count(log: str) -> int:
             except (IndexError, ValueError):
                 return 0
     return 0
+
+
+def _missing_generated_dependency(log: str, output: Path) -> dict[str, str] | None:
+    match = re.search(r"ModuleNotFoundError: No module named ['\"]([^'\"]+)['\"]", log)
+    if match is None:
+        return None
+    module = match.group(1).split(".", 1)[0]
+    package = _GENERATED_DEPENDENCY_PACKAGES.get(module)
+    if package is None:
+        return None
+    return {
+        "module": module,
+        "package": package,
+        "requirements": str(output / "requirements.txt"),
+    }
 
 
 def _slug(value: str) -> str:

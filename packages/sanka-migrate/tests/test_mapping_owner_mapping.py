@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytest
 
-from sanka.connector import OwnerProfile
 from sanka.runtime.mapping import (
     MappingError,
     MigrationMappingField,
@@ -11,6 +10,7 @@ from sanka.runtime.mapping import (
     SourceOwnerDirectory,
     map_owner_properties,
 )
+from sanka_connector import OwnerProfile
 
 
 def _directory(*profiles: OwnerProfile) -> OwnerDirectory:

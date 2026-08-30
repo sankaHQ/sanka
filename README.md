@@ -22,15 +22,18 @@ sanka test
 sanka verify
 ```
 
-The package also includes the existing data-migration runtime and bundled
-connectors for databases, warehouses, files, Salesforce, HubSpot, and SendGrid.
+The package also includes the data-migration runtime. The zero-dependency
+Connector SDK and first-party provider packages live separately in
+[`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors), so
+the base runtime never installs unused database drivers or API clients.
 
 ## Current release status
 
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| DRF → FastAPI recipe | Included in source candidate `v0.1.0a8`; the live PyPI project remains the publication authority. Native mode generates async FastAPI over existing SQL tables; compatibility mode is the strangler bridge. Both share scan, a hashed plan, separate FastAPI output, `sanka test` unit tests, and `sanka verify` integrity plus safe read-only probes |
+| Connector SDK and providers | Apache-2.0 packages from [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors); install only the providers a migration needs |
+| DRF → FastAPI recipe | Included in source candidate `v0.1.0a9`; the live PyPI project remains the publication authority. Native mode generates async FastAPI over existing SQL tables; compatibility mode is the strangler bridge. Both share scan, a hashed plan, separate FastAPI output, `sanka test` unit tests, and `sanka verify` integrity plus safe read-only probes |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
@@ -41,10 +44,10 @@ Git tag, and the files published on PyPI are authoritative for a release. The
 client `DEFAULT_API_BASE` constants and the live dataset-catalog response are
 authoritative for the hosted API. This table is the human-readable summary.
 
-The runtime, CLI, and every bundled connector below work end to end. Database
-connectors are exercised in CI against live databases, and the Salesforce and
-HubSpot connectors are ports of adapters used for production migrations at
-Sanka.
+The runtime and connectors are tested in their owning repositories. Database
+connectors are exercised in connector CI against live databases, and the
+Salesforce and HubSpot connectors are ports of adapters used for production
+migrations at Sanka.
 
 ## Why Sanka?
 
@@ -117,7 +120,11 @@ sanka verify                       # integrity + route parity + safe HTTP probes
 `sanka test` is a unit suite for the generated FastAPI app (OpenAPI, list,
 404, validation, and a SQLite-isolated write round-trip). It does not compare
 FastAPI to DRF; that is `sanka verify`. Write tests copy SQLite first so the
-source database is not mutated.
+source database is not mutated. Apply writes the generated app's own
+`pyproject.toml`; test and verify use `uv` to lock it and prepare
+`.sanka/output/fastapi/.venv`. FastAPI, Tortoise/SQLAlchemy/psycopg, and their
+drivers therefore stay with the destination app instead of leaking into the
+Sanka or Django environment.
 
 Native mode serves async FastAPI over the existing tables (Tortoise by
 default). Native plans report a structured reason for every route that needs
@@ -135,7 +142,10 @@ which bundles this engine; installing only `sanka-migrate` provides the same
 subcommands as `sanka-migrate <command>`:
 
 ```bash
-python -m pip install sanka-cli
+uv tool install \
+  --with sanka-connector-markdown \
+  --with sanka-connector-sqlite \
+  sanka-cli
 ```
 
 Migrate a Markdown folder into SQLite:
@@ -207,27 +217,30 @@ computed over the unresolved spec.
 | `sqlite` | ✅ | ✅ | Keyset pagination on PK/rowid; lazy tables, upserts, schema evolution |
 | `postgres` | ✅ | ✅ | Keyset pagination + snapshot bounds on all PK types; type-promotion ladder; SQLSTATE-mapped errors |
 | `clickhouse` | — | ✅ | `ReplacingMergeTree` + identity `ORDER BY`; batch inserts; `FINAL`-guarded count verification |
-| `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
-| `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
-| `sendgrid` | ✅ | — | Marketing Contacts export, export-job snapshot bounds, resumable paging without forwarding signed-download credentials |
 
-All eight first-party connectors and the Apache-2.0 connector interface ship
-inside `sanka-migrate`; users never install a provider plugin. The source files
-retain their Apache-2.0 headers and never import the AGPL runtime, so the
-license boundary stays machine-enforced inside the single distribution.
-Optional behaviors are typed
+The Apache-2.0 `sanka-connector-sdk` has zero runtime dependencies. Each
+local/offline provider is its own `sanka-connector-<provider>` distribution
+and installs only its driver stack. Connector packages never import the AGPL
+runtime; CI in the
+[`sanka-connectors`](https://github.com/sankaHQ/sanka-connectors) repository
+enforces that boundary. Optional behaviors are typed
 capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
 `SupportsSchemaProvisioning`, …) that the engine discovers with
-`isinstance`. Bundled connectors register through the `sanka.connectors`
-entry-point group; see [connectors/](connectors/) for provider documentation
-and tests.
+`isinstance`. Installed providers register through the `sanka.connectors`
+entry-point group.
+
+SaaS and managed-system migrations, including HubSpot, Salesforce, and
+SendGrid, run through Sanka's hosted System Migration API. Their credentials,
+provider clients, execution controls, and audit evidence stay in Sanka's
+managed service rather than local connector packages.
 
 ## Use it as a library
 
-Install one package, then select providers through the Sanka facade:
+Install the runtime plus only the providers you need, then select them through
+the Sanka facade:
 
 ```bash
-pip install sanka-migrate
+pip install sanka-migrate sanka-connector-markdown sanka-connector-sqlite
 ```
 
 ```python
@@ -257,8 +270,8 @@ asyncio.run(main())
 
 `Sanka.migrate(...)` creates or resumes a lifecycle handle; it does not write
 to the destination. The default local run state is
-`.sanka/migrate/state.db`. `Sanka.connect(...)` is write-free: it selects a
-built-in provider and returns a reusable endpoint descriptor. Pass
+`.sanka/migrate/state.db`. `Sanka.connect(...)` is write-free: it selects an
+installed provider and returns a reusable endpoint descriptor. Pass
 `EndpointSpec` from `sanka` directly when a path or URL does not carry enough
 connector information.
 
@@ -325,7 +338,7 @@ Apache-2.0 for the SDK so it carries a patent grant):
 | | Open source | [Hosted solution](https://sanka.com/migrate/) |
 |---|:---:|:---:|
 | Migration runtime, CLI, local state | ✅ | ✅ |
-| Bundled first-party connectors | ✅ | ✅ |
+| Installable first-party connectors | ✅ | ✅ |
 | Plan / apply / verify lifecycle | ✅ | ✅ |
 | Managed OAuth and hosted connection lifecycle | — | ✅ |
 | Hosted execution & large migrations | — | ✅ |
@@ -347,10 +360,11 @@ boundary:
 | Path | License |
 |---|---|
 | `packages/sanka-migrate/src/sanka/runtime` and `sanka/cli` — runtime, planner, and CLI | AGPL-3.0-only |
-| `packages/sanka-migrate/src/sanka/connector` — connector interfaces and types | Apache-2.0 |
-| `packages/sanka-migrate/src/sanka_connector_*` — bundled first-party connectors | Apache-2.0 |
+| `packages/sanka-migrate/src/sanka/connector` — temporary compatibility import for `sanka_connector` | AGPL-3.0-only |
 | `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
-| `connectors/*` — provider documentation and tests | Apache-2.0 |
+
+The standalone Connector SDK and local/offline providers are Apache-2.0 in
+[`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors).
 
 Runtime code that Sanka owns or otherwise has permission to relicense is also
 available under a [commercial license](docs/legal/commercial-license.md) from
@@ -361,8 +375,9 @@ separately grants additional rights. See [LICENSE](LICENSE) for the full map.
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
 `from sanka import Sanka`; internal connector development uses
-`sanka.connector`. The runtime and built-in providers install together as
-`sanka-migrate`, while the separate MCP distribution installs
+`sanka_connector`; `sanka.connector` remains as a compatibility import for one
+transition period. The runtime installs as `sanka-migrate`, provider packages
+as `sanka-connector-*`, and the separate MCP distribution as
 `sanka-migrate-mcp`.
 
 ## Development
@@ -380,7 +395,8 @@ provisions both); they skip cleanly otherwise. Architecture notes:
 ## Contributing
 
 No CLA is required. Contributions use the license already applicable to the
-modified files: AGPL-3.0-only for the runtime and Apache-2.0 for the connector
-interface, bundled connectors, MCP package, tests, scripts, and documentation.
+modified files: AGPL-3.0-only for the runtime and Apache-2.0 for the MCP
+package, tests, scripts, and documentation. Connector SDK/provider
+contributions belong in the Apache-2.0 `sanka-connectors` repository.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact path map and contribution
 workflow.

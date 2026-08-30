@@ -12,9 +12,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Literal
 
-from sanka.connector import OwnerProfile
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.model import MigrationMappingField
+from sanka_connector import OwnerProfile
 
 MissingOwnerPolicy = Literal["block", "leave_empty", "fallback"]
 

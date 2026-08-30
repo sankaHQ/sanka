@@ -1,20 +1,25 @@
-# Sanka connector interface
+# Sanka Connector SDK
 
-The Apache-2.0 interface layer bundled inside the
-[Sanka](https://github.com/sankaHQ/sanka)
-migration connectors: the connector protocols, capability declarations, record
-and schema types, credential-provider protocol, and structured error taxonomy.
+The Apache-2.0 Connector SDK and first-party provider packages live in the
+separate [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors)
+repository. It is intentionally limited to local/offline migrations.
 
-Connector source imports **this interface only** — never the AGPL-licensed
-runtime modules — so the source-level license boundary remains explicit even
-though users receive one `sanka-migrate` distribution. CI enforces that
-boundary. A separately published connector SDK may be introduced later for
-third-party developers; it is not part of the initial package set.
+The `sanka-connector-sdk` distribution provides the zero-dependency
+`sanka_connector` interface: connector protocols, capability declarations,
+record and schema types, credential-provider contracts, provisioning types,
+registration helpers, and the structured error taxonomy. Provider packages
+such as `sanka-connector-postgres` depend on that SDK and declare only the
+third-party libraries needed by that provider.
 
-**Status: pre-release, SPI v1 in place** — ported from Sanka's production
-migration adapters: base `SourceConnector` / `DestinationConnector` protocols,
-optional capability protocols (identity inspection, snapshot bounds, record
-counts, owner directory, batch writes, schema provisioning, retry metrics,
-limits, config validation), credentials + provider protocol, schema/record/
-provisioning types, and the structured error taxonomy. Shapes may still move
-before 0.1.0.
+Sanka discovers installed providers through the `sanka.connectors` Python
+entry-point group. The AGPL-3.0-only `sanka-migrate` runtime depends on the SDK,
+but it does not bundle provider implementations or their dependencies. The
+legacy `sanka.connector` import remains a compatibility alias; new connector
+code should import `sanka_connector` directly.
+
+SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid
+are not connector distributions. They execute through Sanka's hosted System
+Migration API, where provider credentials, managed jobs, and audit evidence
+remain private to the hosted runtime.
+
+**Status: pre-release, SPI v1 in place.** Shapes may still move before 0.1.0.

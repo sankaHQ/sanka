@@ -20,9 +20,9 @@ from sanka.cli._research import SankaMigrateApiClient, SankaMigrateApiError, sig
 from sanka.runtime.engine import MigrationEngine
 
 
-def test_bundled_namespace_exposes_interface_and_runtime() -> None:
-    # The one sanka-migrate distribution keeps the Apache connector API and
-    # AGPL runtime importable through the same public namespace.
+def test_compatibility_namespace_exposes_sdk_and_runtime() -> None:
+    # Existing integrations keep the sanka.connector import while the Apache
+    # SDK is distributed independently as sanka-connector-sdk.
     assert sanka.connector.__version__
     assert sanka.runtime.__version__
 
@@ -48,12 +48,12 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
     assert "{scan,plan,validate,apply,test,verify,status,migrate,connect,research,assess}" in output
 
 
-def test_connect_reports_a_bundled_provider(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["connect", "hubspot"]) == 0
+def test_connect_reports_an_installed_provider(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["connect", "markdown"]) == 0
 
     output = capsys.readouterr().out
-    assert "hubspot: ready (source, destination)" in output
-    assert "no connector plugin is required" in output
+    assert "markdown: ready (source)" in output
+    assert "provided by installed package sanka-connector-markdown" in output
 
 
 def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) -> None:
@@ -62,13 +62,31 @@ def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) 
     assert json.loads(capsys.readouterr().out) == {
         "provider": "postgres",
         "roles": ["source", "destination"],
-        "bundled": True,
+        "installed": True,
+        "package": "sanka-connector-postgres",
     }
 
 
 def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["connect", "not-a-provider"]) == 1
-    assert "no bundled provider" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "no installed connector" in error
+    assert "sanka-connector-not-a-provider" in error
+
+
+@pytest.mark.parametrize(
+    ("provider", "label"),
+    [("hubspot", "HubSpot"), ("salesforce", "Salesforce"), ("sendgrid", "SendGrid")],
+)
+def test_connect_routes_system_providers_to_the_hosted_api(
+    provider: str, label: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["connect", provider]) == 1
+
+    error = capsys.readouterr().err
+    assert label in error
+    assert "hosted System Migration API" in error
+    assert f"sanka-connector-{provider}" not in error
 
 
 # -- sanka-migrate validate ---------------------------------------------------

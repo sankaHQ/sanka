@@ -14,7 +14,15 @@ from typing import Any
 
 import pytest
 
-from sanka.connector import (
+from sanka.runtime.engine import ExecutionError, MigrationEngine
+from sanka.runtime.execution import ExecutionSnapshot, JournalEntry
+from sanka.runtime.mapping.model import MigrationMappingField
+from sanka.runtime.mapping.record_mapping import mapping_group_key
+from sanka.runtime.planner import MigrationPlan, RoutePlan
+from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.spec import EndpointSpec, MigrationSpec
+from sanka.runtime.state import RunStatus, SqliteStateStore
+from sanka_connector import (
     BatchWriteInput,
     BatchWriteResult,
     ConnectorError,
@@ -33,14 +41,6 @@ from sanka.connector import (
     WriteOptions,
     WriteResult,
 )
-from sanka.runtime.engine import ExecutionError, MigrationEngine
-from sanka.runtime.execution import ExecutionSnapshot, JournalEntry
-from sanka.runtime.mapping.model import MigrationMappingField
-from sanka.runtime.mapping.record_mapping import mapping_group_key
-from sanka.runtime.planner import MigrationPlan, RoutePlan
-from sanka.runtime.registry import ConnectorRegistry
-from sanka.runtime.spec import EndpointSpec, MigrationSpec
-from sanka.runtime.state import RunStatus, SqliteStateStore
 
 # -- in-memory connectors ------------------------------------------------------
 
