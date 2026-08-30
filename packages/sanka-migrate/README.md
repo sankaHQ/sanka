@@ -22,6 +22,8 @@ secret-key rejection) and canonical plan hashing (`sanka.runtime.hashing`) are
 in place, together with the engine, state store, and CLI lifecycle commands.
 APIs may still change before `1.0`.
 
+Python 3.12 or newer is required.
+
 ## Django REST Framework → FastAPI
 
 Run the FastAPI migration from a Django repository root. The `sanka` command
@@ -31,7 +33,7 @@ alone provides the same subcommands as `sanka-migrate <command>`:
 ```bash
 sanka scan
 sanka plan --to fastapi
-sanka apply
+sanka apply --plan-hash sha256:<hash-from-plan>
 sanka test
 sanka verify
 ```

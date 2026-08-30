@@ -72,6 +72,7 @@ def _run_source(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(scenario["path"]),
             data=data,
             content_type="application/json",
+            headers=dict(scenario.get("headers", {})),
         )
         results.append({"status": response.status_code, "body": _body(bytes(response.content))})
     return results
@@ -91,7 +92,10 @@ def _run_native(output: Path, scenarios: list[dict[str, Any]]) -> list[dict[str,
                 str(scenario["method"]),
                 str(scenario["path"]),
                 content=_raw_body(scenario),
-                headers={"content-type": "application/json"},
+                headers={
+                    "content-type": "application/json",
+                    **dict(scenario.get("headers", {})),
+                },
             )
             results.append({"status": response.status_code, "body": _body(response.content)})
         return results

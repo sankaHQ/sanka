@@ -67,6 +67,34 @@ def test_secret_bearing_option_keys_are_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "connection",
+    [
+        "postgresql://user:secret@db.example/app",
+        "host=db.example user=app password='secret value' dbname=app",
+        "https://db.example/app?password=secret",
+        "clickhouse://db.example/app?api_key=secret",
+    ],
+)
+def test_literal_connection_secrets_are_rejected(connection: str) -> None:
+    with pytest.raises(SpecError, match="literal secret"):
+        EndpointSpec(type="database", connection=connection)
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        "$DATABASE_URL",
+        "${DATABASE_URL}",
+        "production-primary",
+        "postgresql://user@localhost/app",
+        "./local.sqlite3",
+    ],
+)
+def test_nonsecret_connection_references_are_allowed(connection: str) -> None:
+    assert EndpointSpec(type="database", connection=connection).connection == connection
+
+
 def test_endpoint_shorthand_and_unknown_keys_fold_into_options() -> None:
     spec = MigrationSpec.from_dict(
         {

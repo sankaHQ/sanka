@@ -61,6 +61,7 @@ from sanka.runtime.execution.model import (
 )
 from sanka.runtime.execution.report_codec import dump_journal, load_journal
 from sanka.runtime.execution.state import ClaimOutcome, SaveOutcome
+from sanka.runtime.private_sqlite import connect_private_sqlite
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
 
 _T = TypeVar("_T")
@@ -148,14 +149,13 @@ class SqliteExecutionState:
         job_id: str | None = None,
     ) -> None:
         self._path = Path(path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         self._run_id = str(run_id)
         self._job_id = str(job_id) if job_id is not None else None
         self._claimed: AttemptIdentity | None = None
         self._lock = threading.Lock()
         # Protocol methods hop threads through asyncio.to_thread; the lock
         # serializes every transaction on this single shared connection.
-        self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        self._conn = connect_private_sqlite(self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)

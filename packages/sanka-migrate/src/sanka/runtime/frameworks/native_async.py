@@ -908,11 +908,12 @@ Django is not imported.
 from __future__ import annotations
 
 import json
+import os
 import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 import sanka_store as store
@@ -922,6 +923,7 @@ MANIFEST = json.loads((HERE_MANIFEST / "sanka-manifest.json").read_text(encoding
 
 _DECIMAL_TAIL = re.compile(r"\.0*\s*$")
 _MAX_STRING_LENGTH = 1000
+_DEFAULT_MAX_REQUEST_BODY_BYTES = 1_048_576
 
 
 def _attr(instance: Any, name: str) -> Any:
@@ -951,7 +953,46 @@ def resource(view: str) -> dict[str, Any]:
 
 
 async def read_raw_body(request: Request) -> bytes:
-    return await request.body()
+    try:
+        maximum = int(os.environ.get("SANKA_MAX_REQUEST_BODY_BYTES", ""))
+    except ValueError:
+        maximum = _DEFAULT_MAX_REQUEST_BODY_BYTES
+    if maximum <= 0:
+        maximum = _DEFAULT_MAX_REQUEST_BODY_BYTES
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > maximum:
+                raise HTTPException(status_code=413, detail="Request body too large.")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > maximum:
+            raise HTTPException(status_code=413, detail="Request body too large.")
+    return bytes(body)
+
+
+def apply_security_headers(response: Response, request: Request, security: dict[str, Any]) -> None:
+    if security.get("content_type_nosniff"):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if security.get("referrer_policy"):
+        response.headers.setdefault("Referrer-Policy", security["referrer_policy"])
+    if security.get("cross_origin_opener_policy"):
+        response.headers.setdefault(
+            "Cross-Origin-Opener-Policy", security["cross_origin_opener_policy"]
+        )
+    if security.get("x_frame_options"):
+        response.headers.setdefault("X-Frame-Options", security["x_frame_options"])
+    hsts_seconds = int(security.get("hsts_seconds") or 0)
+    if hsts_seconds > 0 and request.url.scheme == "https":
+        value = f"max-age={hsts_seconds}"
+        if security.get("hsts_include_subdomains"):
+            value += "; includeSubDomains"
+        if security.get("hsts_preload"):
+            value += "; preload"
+        response.headers.setdefault("Strict-Transport-Security", value)
 
 
 def _represent(spec: dict[str, Any], value: Any) -> Any:
@@ -1235,7 +1276,6 @@ async def handle(
     spec: dict[str, Any],
     operation: str,
     request: Request,
-    raw_body: bytes | None = None,
 ) -> Any:
     path = next(route["path"] for route in spec["routes"] if route["operation"] == operation)
     allow = MANIFEST["allow"][path]
@@ -1270,7 +1310,8 @@ async def handle(
                     await store.delete_row(field["child"], child)
         await store.delete_row(spec, instance)
         return Response(status_code=204, headers={"Allow": allow})
-    payload, parse_error = _parse_json(raw_body or b"")
+    raw_body = await read_raw_body(request)
+    payload, parse_error = _parse_json(raw_body)
     if parse_error is not None:
         parse_error.headers["Allow"] = allow
         return parse_error
@@ -1321,7 +1362,11 @@ async def handle(
 async def api_root(request: Request, path: str) -> Any:
     root = next(item for item in MANIFEST["api_roots"] if item["path"] == path)
     allow = MANIFEST["allow"][path]
-    base = str(request.base_url).rstrip("/")
-    payload = {key: f"{base}{link}" for key, link in root["links"]}
+    allowed_hosts = MANIFEST.get("http_security", {}).get("allowed_hosts", [])
+    if allowed_hosts and "*" not in allowed_hosts:
+        base = str(request.base_url).rstrip("/")
+        payload = {key: f"{base}{link}" for key, link in root["links"]}
+    else:
+        payload = {key: link for key, link in root["links"]}
     return JSONResponse(payload, headers={"Allow": allow})
 '''

@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from sanka.runtime.mapping.record_mapping import mapping_group_key
+from sanka.runtime.private_sqlite import connect_private_sqlite
 from sanka_connector.records import BatchWriteStatus
 
 if TYPE_CHECKING:
@@ -167,8 +168,7 @@ class SqliteStateStore:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._path)
+        self._conn = connect_private_sqlite(self._path)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

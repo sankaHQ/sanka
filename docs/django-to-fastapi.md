@@ -18,14 +18,14 @@ Django REST Framework (DRF) to FastAPI. Two strategies share one scan:
 ## The five-command contract
 
 Run these commands from the Django repository root and from the project's
-existing Python environment:
+existing Python 3.12+ environment:
 
 ```bash
 python -m pip install sanka-cli sanka-migrate
 
 sanka scan
 sanka plan --to fastapi
-sanka apply            # prompts for Tortoise / SQLAlchemy / psycopg when interactive
+sanka apply --plan-hash sha256:<hash-from-plan>  # exact hash printed by plan
 sanka test
 sanka verify
 ```
@@ -100,10 +100,10 @@ In native mode every route receives one of four dispositions:
 
 The exact middleware allowlist covers Django's `SecurityMiddleware`,
 `SessionMiddleware`, `CommonMiddleware`, `CsrfViewMiddleware`,
-`AuthenticationMiddleware`, `MessageMiddleware`, and `XFrameOptionsMiddleware`,
-plus WhiteNoise's `WhiteNoiseMiddleware` and django-cors-headers'
-`CorsMiddleware`. Project-specific subclasses and similarly named middleware
-remain outside the allowlist; matching is by the full import path.
+`AuthenticationMiddleware`, `MessageMiddleware`, and `XFrameOptionsMiddleware`.
+WhiteNoise, CORS, project-specific subclasses, and similarly named middleware
+remain outside the allowlist because native output cannot reproduce their
+settings faithfully; matching is by the full import path.
 
 Native migration readiness is the number of `native-fastapi-crud` and
 `native-fastapi-api-root` routes divided by scanned routes after excluding
@@ -113,16 +113,15 @@ does not receive native automation credit. Alias drops are reported separately
 as a count and share of scanned routes. Compatibility readiness continues to
 measure routes emitted by the bridge.
 
-`sanka apply` verifies the current scan and canonical plan hashes. For an
-approval workflow or CI gate, pass the exact reviewed hash explicitly with
-`sanka apply --plan-hash sha256:...`.
+`sanka apply` verifies the current scan and canonical plan hashes and always
+requires the exact reviewed hash with `--plan-hash`.
 
 Planning never modifies application source or destination code.
 
 ### `sanka apply`
 
-Apply requires the reviewed plan hash when supplied and refuses stale or
-modified plans. It writes a standalone generated application to
+Apply requires the reviewed plan hash and refuses stale or modified plans. It
+writes a standalone generated application to
 `.sanka/output/fastapi` by default and refuses to overwrite a non-empty output
 without `--force`.
 
@@ -149,9 +148,16 @@ request handlers keep the initialized context even when the ASGI server runs
 lifespan and requests in different tasks.
 
 In compatibility mode the native SQL files are replaced by `sanka_compat.py`,
-the in-process Django dispatcher.
+the in-process Django dispatcher. Requests and responses are forwarded as ASGI
+streams rather than buffered in memory.
 
-Source files are never overwritten. `sanka apply --bench-candidate <dir>`
+Native output validates configured Django `ALLOWED_HOSTS`, reproduces the
+captured SecurityMiddleware/X-Frame header subset, and reads JSON bodies only
+after authentication through a streaming size cap. The default cap is 1 MiB;
+set `SANKA_MAX_REQUEST_BODY_BYTES` in the generated application's environment
+to choose another positive byte limit.
+
+Source files are never overwritten. `sanka apply --plan-hash <hash> --bench-candidate <dir>`
 additionally emits a Sanka Migration Bench candidate (overlay plus
 `candidate.yaml`) from the reviewed native plan. The benchmark contract keeps
 Django for ORM access, so this projection uses generated DRF-free Django
@@ -284,7 +290,8 @@ The tool-neutral acceptance suite is Sanka Migration Bench
 (`sankaHQ/sanka-bench`). Its native-target gate is decided by recorded serving
 evidence from a guarded process, so only output whose serving path genuinely
 excludes DRF can pass; the compatibility bridge is pinned there as a
-permanent negative control. `sanka apply --bench-candidate` produces the
+permanent negative control. `sanka apply --plan-hash <hash> --bench-candidate`
+produces the
 candidate the benchmark grades.
 
 Do not publish a numerical compatibility or time-saved claim until a pinned

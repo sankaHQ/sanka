@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,24 @@ def test_run_lifecycle_and_lookup(tmp_path: Path) -> None:
         store.get_run("missing")
     with pytest.raises(StateError):
         store.set_status("missing", RunStatus.FAILED)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes only")
+def test_state_database_is_private(tmp_path: Path) -> None:
+    state_dir = tmp_path / "nested" / "state"
+    store = SqliteStateStore(state_dir / "state.db")
+    store.close()
+    assert stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE((state_dir / "state.db").stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes only")
+def test_shared_state_directory_is_rejected_without_chmod(tmp_path: Path) -> None:
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o755)
+    with pytest.raises(PermissionError, match="group/world"):
+        SqliteStateStore(shared / "state.db")
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o755
 
 
 def test_checkpoints_round_trip(tmp_path: Path) -> None:

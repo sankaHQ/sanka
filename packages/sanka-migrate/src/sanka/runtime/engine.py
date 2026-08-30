@@ -9,8 +9,8 @@ Safety properties (see docs/ARCHITECTURE.md tenets):
 - ``apply`` delegates batch execution to the shared
   :mod:`sanka.runtime.execution` family — the same route executor the
   production host runs — so the local engine carries relationships,
-  references, owner mapping, frozen high-water-mark scope (when the source
-  supports it, degrading gracefully otherwise), and attempt-exact resume:
+  references, owner mapping, plan-time exact candidate scope, and
+  attempt-exact resume:
   every batch lands in the fenced execution journal, and per-record results
   land in the pair-keyed execution ledger with a count-verified fail-closed
   write.
@@ -36,6 +36,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 from sanka.runtime.execution import (
     DEFAULT_VALIDATION_SAMPLE_SIZE,
     AttemptFence,
+    ExactIdScope,
     ExecutionFault,
     ExecutionHost,
     ExecutionJournal,
@@ -46,7 +47,8 @@ from sanka.runtime.execution import (
     ExecutionStatus,
     JournalEntry,
     WritePolicies,
-    freeze_scope,
+    exact_candidate_hash,
+    exact_id_scope,
     normalized_attempt_identity,
     run_batch,
     validate_routes,
@@ -257,6 +259,24 @@ class MigrationEngine:
                 else _inventory_from_payload(raw_destination_inventory)
             ),
         )
+        source, source_credentials = await self._source(spec)
+        planned_routes: list[RoutePlan] = []
+        candidate_ids_by_route: dict[str, list[str]] = {}
+        for route in plan.routes:
+            candidate_ids = await self._candidate_ids(
+                source=source,
+                source_credentials=source_credentials,
+                route=route,
+            )
+            candidate_ids_by_route[route.route_key] = candidate_ids
+            planned_routes.append(replace(route, candidate_ids=candidate_ids))
+        plan = replace(
+            plan,
+            routes=planned_routes,
+            candidate_hash=(
+                exact_candidate_hash(candidate_ids_by_route) if candidate_ids_by_route else None
+            ),
+        )
         self._store.save_plan(run_id, canonical_json(plan.to_payload()), plan.plan_hash)
         return plan
 
@@ -278,9 +298,13 @@ class MigrationEngine:
         ``warnings``) from :func:`sanka.runtime.execution.validate_routes`.
         """
         run = self._store.get_run(run_id)
-        if run.plan_json is None:
+        if run.plan_json is None or run.plan_hash is None:
             raise ExecutionError(f"run {run_id!r} has no plan; run plan first")
         plan = MigrationPlan.from_payload(json.loads(run.plan_json))
+        if plan.plan_hash != run.plan_hash:
+            raise PlanMismatchError(
+                f"persisted plan content for run {run_id!r} does not match its stored hash"
+            )
         spec = self._spec(run_id)
         source, source_credentials = await self._source(spec)
         try:
@@ -300,15 +324,22 @@ class MigrationEngine:
                 f"run {run_id!r} validation failed ({fault.code}): {fault}"
             ) from fault
 
-    async def apply(self, run_id: str, *, plan_hash: str | None = None) -> None:
+    async def apply(self, run_id: str, *, plan_hash: str) -> None:
         run = self._store.get_run(run_id)
         if run.plan_json is None or run.plan_hash is None:
             raise ExecutionError(f"run {run_id!r} has no plan; run plan first")
-        if plan_hash is not None and plan_hash != run.plan_hash:
+        if not plan_hash:
+            raise PlanMismatchError("a nonempty reviewed plan hash is required")
+        if plan_hash != run.plan_hash:
             raise PlanMismatchError(
                 f"plan hash mismatch: expected {run.plan_hash}, got {plan_hash}"
             )
         plan = MigrationPlan.from_payload(json.loads(run.plan_json))
+        if plan.plan_hash != run.plan_hash:
+            raise PlanMismatchError(
+                f"persisted plan content for run {run_id!r} does not match its stored hash"
+            )
+        approved_scope = self._approved_exact_scope(plan)
         spec = self._spec(run_id)
         source, source_credentials = await self._source(spec)
         destination, destination_credentials = await self._destination(spec)
@@ -333,6 +364,7 @@ class MigrationEngine:
                 destination=destination,
                 destination_credentials=destination_credentials,
                 policies=policies,
+                approved_scope=approved_scope,
             )
         except ConnectorError as error:
             self._store.set_status(run_id, RunStatus.FAILED)
@@ -354,9 +386,13 @@ class MigrationEngine:
 
     async def verify(self, run_id: str) -> VerifyReport:
         run = self._store.get_run(run_id)
-        if run.plan_json is None:
+        if run.plan_json is None or run.plan_hash is None:
             raise ExecutionError(f"run {run_id!r} has no plan; nothing to verify")
         plan = MigrationPlan.from_payload(json.loads(run.plan_json))
+        if plan.plan_hash != run.plan_hash:
+            raise PlanMismatchError(
+                f"persisted plan content for run {run_id!r} does not match its stored hash"
+            )
         spec = self._spec(run_id)
         source, source_credentials = await self._source(spec)
         destination, destination_credentials = await self._destination(spec)
@@ -375,7 +411,15 @@ class MigrationEngine:
             counts = summary.get(route.route_key, {})
             migrated = sum(counts.get(status, 0) for status in TERMINAL_WRITE_STATUSES)
             failed = counts.get("failed", 0)
-            source_count = await self._source_count(source, source_credentials, route)
+            # Verification reconciles the exact source set approved by the
+            # plan, not the mutable live source. Records added after approval
+            # are intentionally outside this run and must not make an exact
+            # apply appear incomplete.
+            source_count = (
+                len(route.candidate_ids)
+                if plan.candidate_hash is not None
+                else await self._source_count(source, source_credentials, route)
+            )
             ok = failed == 0 and (source_count is None or migrated == source_count)
             routes.append(
                 RouteVerification(
@@ -405,12 +449,13 @@ class MigrationEngine:
         destination: DestinationConnector,
         destination_credentials: Credentials,
         policies: WritePolicies,
+        approved_scope: ExactIdScope,
     ) -> ExecutionStatus:
         """Claim the run's attempt and loop batches to a terminal status.
 
         Single-shot local execution over the execution family: the journal
-        entry is loaded (or created), the attempt fence claims it, the scope
-        is frozen (or revalidated against the persisted one on resume), and
+        entry is loaded (or created), the attempt fence claims it, the exact
+        plan scope is revalidated against any persisted resume, and
         ``run_batch`` runs until no route holds more records — saving the
         journal after every batch, so an interrupted apply resumes from the
         exact batch it stopped at. A batch that makes no progress fails the
@@ -432,11 +477,8 @@ class MigrationEngine:
             entry = claimed
 
         routes = [_execution_route(route) for route in plan.routes]
-        scope = await self._freeze_apply_scope(
-            plan,
-            saved_scope=entry.scope if entry is not None else None,
-            source=source,
-            source_credentials=source_credentials,
+        scope = self._resume_exact_scope(
+            approved_scope, saved_scope=entry.scope if entry is not None else None
         )
         now = _utc_now()
         if entry is None:
@@ -476,6 +518,7 @@ class MigrationEngine:
                     snapshot=entry.snapshot,
                     host=host,
                     route_high_water_marks=marks,
+                    exact_scope=scope,
                     on_missing_identity="fail",
                     retry=self._with_retries,
                 )
@@ -506,36 +549,90 @@ class MigrationEngine:
                 return "completed"
             previous_marker = marker
 
-    async def _freeze_apply_scope(
-        self,
-        plan: MigrationPlan,
-        *,
-        saved_scope: ExecutionScope | None,
-        source: SourceConnector,
-        source_credentials: Credentials,
-    ) -> ExecutionScope:
-        """Freeze (or revalidate) the bounded scope this apply is bound to.
-
-        The first apply freezes per-route high-water marks — sources without
-        the capability degrade gracefully to unbounded reads — and counts
-        the frozen route totals. A resumed apply requires the persisted
-        manifest to still describe the plan's routes and reuses the saved
-        marks, keeping the run bound to the originally frozen candidate set.
-        """
+    def _approved_exact_scope(self, plan: MigrationPlan) -> ExactIdScope:
+        if not plan.routes:
+            raise ExecutionError("the reviewed plan has no executable routes")
+        if not plan.candidate_hash:
+            raise ExecutionError(
+                "the reviewed plan predates candidate-bound approval; run plan again"
+            )
         groups: list[MappingGroup] = [
             (route.source_object, route.target_object, None, route.field_mappings)
             for route in plan.routes
         ]
-        saved_marks = dict(saved_scope.route_high_water_marks) if saved_scope is not None else {}
-        return await freeze_scope(
-            groups=groups,
-            source=source,
-            source_credentials=source_credentials,
-            expected_route_manifest=(
-                list(saved_scope.route_manifest) if saved_scope is not None else None
-            ),
-            route_high_water_marks=saved_marks or None,
-        )
+        try:
+            return exact_id_scope(
+                groups=groups,
+                candidate_ids_by_route={
+                    route.route_key: route.candidate_ids for route in plan.routes
+                },
+                expected_candidate_hash=plan.candidate_hash,
+            )
+        except ExecutionFault as fault:
+            raise ExecutionError(
+                f"reviewed candidate scope is invalid ({fault.code}): {fault}"
+            ) from fault
+
+    def _resume_exact_scope(
+        self,
+        approved_scope: ExactIdScope,
+        *,
+        saved_scope: ExecutionScope | None,
+    ) -> ExactIdScope:
+        """Revalidate a journal resume against the approved exact scope."""
+        if saved_scope is None:
+            return approved_scope
+        if (
+            tuple(saved_scope.route_manifest) != approved_scope.route_manifest
+            or tuple(saved_scope.selected_route_keys) != approved_scope.selected_route_keys
+        ):
+            raise ExecutionError("saved execution scope does not match the reviewed plan")
+        return approved_scope
+
+    async def _candidate_ids(
+        self,
+        *,
+        source: SourceConnector,
+        source_credentials: Credentials,
+        route: RoutePlan,
+    ) -> list[str]:
+        """Enumerate the exact source identities the reviewed plan approves."""
+        candidate_ids: list[str] = []
+        seen_ids: set[str] = set()
+        seen_cursors: set[str] = set()
+        cursor: str | None = None
+        while True:
+            page = await source.read_records(
+                source_credentials,
+                object_type=route.source_object,
+                field_keys=[route.identity_field],
+                limit=self._batch_size,
+                cursor=cursor,
+                source_filter=None,
+            )
+            for record in page.records:
+                raw_identity = record.get(route.identity_field)
+                identity = "" if raw_identity is None else str(raw_identity).strip()
+                if not identity:
+                    raise ExecutionError(
+                        f"route {route.route_key!r} has a record without identity "
+                        f"field {route.identity_field!r}"
+                    )
+                if identity in seen_ids:
+                    raise ExecutionError(
+                        f"route {route.route_key!r} has duplicate source identity {identity!r}"
+                    )
+                seen_ids.add(identity)
+                candidate_ids.append(identity)
+            if not page.has_more:
+                return sorted(candidate_ids)
+            next_cursor = str(page.next_cursor or "").strip()
+            if not next_cursor or next_cursor == cursor or next_cursor in seen_cursors:
+                raise ExecutionError(
+                    f"route {route.route_key!r} did not advance while freezing candidates"
+                )
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     async def _save_failed(
         self, journal: ExecutionJournal, entry: JournalEntry, *, message: str

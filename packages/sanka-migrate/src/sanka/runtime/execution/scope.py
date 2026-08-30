@@ -283,6 +283,17 @@ class ExactIdScope(ExecutionScope):
     candidate_ids_by_route: Mapping[str, tuple[str, ...]]
     candidate_hash: str
 
+    @property
+    def scope_hash(self) -> str:
+        """Approval hash covering both the route envelope and exact candidates."""
+        return content_hash(
+            {
+                "routeManifest": list(self.route_manifest),
+                "selectedRouteKeys": list(self.selected_route_keys),
+                "candidateHash": self.candidate_hash,
+            }
+        )
+
     def verify_candidate_hash(self) -> None:
         """Refuse when the candidate set drifted from its approved hash."""
 

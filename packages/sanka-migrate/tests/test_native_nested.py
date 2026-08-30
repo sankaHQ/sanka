@@ -128,6 +128,11 @@ def _run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _plan_hash(project: Path) -> str:
+    payload = json.loads((project / ".sanka" / "plan-fastapi.json").read_text())
+    return str(payload["plan_hash"])
+
+
 def _run_probe(
     mode: str, project: Path, database: Path, *, output: Path | None = None
 ) -> dict[str, Any]:
@@ -174,7 +179,9 @@ def _generate(project: Path) -> Path:
     plan = _run_cli(["plan", str(project), "--to", "fastapi"], project)
     assert plan.returncode == 0, plan.stderr
     assert "Native migration readiness: 100%" in plan.stdout
-    applied = _run_cli(["apply", "--root", str(project)], project)
+    applied = _run_cli(
+        ["apply", "--root", str(project), "--plan-hash", _plan_hash(project)], project
+    )
     assert applied.returncode == 0, applied.stderr
     return project / ".sanka" / "output" / "fastapi"
 
@@ -212,6 +219,8 @@ def test_bench_candidate_preserves_django_carryover(nested_project: Path) -> Non
             "--force",
             "--bench-candidate",
             "candidate",
+            "--plan-hash",
+            _plan_hash(nested_project),
         ],
         nested_project,
     )

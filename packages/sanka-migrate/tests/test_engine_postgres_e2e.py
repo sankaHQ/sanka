@@ -91,5 +91,5 @@ async def test_markdown_to_postgres_lifecycle(tmp_path: Path, schema: str) -> No
     assert await _table_count(schema, "documents") == 3
 
     # Re-applying converges instead of duplicating (identity ledger).
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan.plan_hash)
     assert await _table_count(schema, "documents") == 3

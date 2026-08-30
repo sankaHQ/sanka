@@ -245,6 +245,7 @@ class FrameworkScan:
     api_roots: tuple[ApiRootIR, ...] = ()
     view_details: tuple[ViewIR, ...] = ()
     middleware: tuple[str, ...] = ()
+    http_security: dict[str, Any] = field(default_factory=dict)
     generic_messages: tuple[tuple[str, str], ...] = ()
     database: DatabaseIR = field(default_factory=lambda: DatabaseIR(vendor="other", name=""))
     scan_hash: str = field(default="")
@@ -288,6 +289,7 @@ class FrameworkScan:
             api_roots=tuple(ApiRootIR.from_dict(item) for item in payload.get("api_roots", [])),
             view_details=tuple(ViewIR.from_dict(item) for item in payload.get("view_details", [])),
             middleware=tuple(payload.get("middleware", [])),
+            http_security=dict(payload.get("http_security", {})),
             generic_messages=tuple(
                 (str(key), str(value)) for key, value in payload.get("generic_messages", ())
             ),

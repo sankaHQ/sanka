@@ -5,6 +5,7 @@ engine API and the CLI shorthand."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 
 from sanka.cli import main
 from sanka.runtime.engine import MigrationEngine, PlanMismatchError
+from sanka.runtime.execution import exact_candidate_hash
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
@@ -83,13 +85,13 @@ async def test_reapply_is_idempotent_via_identity_ledger(tmp_path: Path) -> None
     engine = _engine(tmp_path)
 
     run_id = engine.create(_spec(content, db))
-    await engine.plan(run_id)
-    await engine.apply(run_id)
+    plan = await engine.plan(run_id)
+    await engine.apply(run_id, plan_hash=plan.plan_hash)
     first_summary = engine.store.ledger_summary(run_id)
 
     # Re-running the same run must not duplicate rows or ledger entries —
     # terminal records are filtered, checkpoints already say done.
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan.plan_hash)
     assert engine.store.ledger_summary(run_id) == first_summary
     count = sqlite3.connect(db).execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     assert count == 3
@@ -110,12 +112,43 @@ async def test_apply_is_plan_hash_bound(tmp_path: Path) -> None:
     assert not db.exists()  # nothing was written
 
 
-def test_cli_migrate_shorthand(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_apply_excludes_records_added_after_plan_approval(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+    engine = _engine(tmp_path)
+    run_id = engine.create(_spec(content, db))
+    plan = await engine.plan(run_id)
+
+    assert plan.candidate_hash is not None
+    assert plan.routes[0].candidate_ids == ["a.md", "b.md", "c.md"]
+    (content / "d.md").write_text("Added after approval\n", encoding="utf-8")
+
+    await engine.apply(run_id, plan_hash=plan.plan_hash)
+    paths = [
+        row[0]
+        for row in sqlite3.connect(db)
+        .execute("SELECT path FROM documents ORDER BY path")
+        .fetchall()
+    ]
+    assert paths == ["a.md", "b.md", "c.md"]
+
+    report = await engine.verify(run_id)
+    assert report.ok
+    assert report.routes[0].source_count == 3
+    assert report.routes[0].migrated == 3
+
+
+def test_cli_migrate_shorthand_requires_interactive_approval(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     content, db = tmp_path / "content", tmp_path / "out.db"
     _write_content(content)
     state = tmp_path / "state.db"
 
-    exit_code = main(["migrate", str(content), f"sqlite://{db}", "--yes", "--state", str(state)])
+    monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
+    exit_code = main(["migrate", str(content), f"sqlite://{db}", "--state", str(state)])
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -124,6 +157,59 @@ def test_cli_migrate_shorthand(tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert "verification OK" in output
     count = sqlite3.connect(db).execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     assert count == 3
+
+
+def test_cli_migrate_has_no_noninteractive_approval_bypass(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+
+    with pytest.raises(SystemExit):
+        main(["migrate", str(content), f"sqlite://{db}", "--yes"])
+    assert not db.exists()
+
+
+async def test_apply_rehashes_persisted_plan_before_resolving_destination(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+    engine = _engine(tmp_path)
+    run_id = engine.create(_spec(content, db))
+    plan = await engine.plan(run_id)
+
+    (content / "d.md").write_text("Added after approval\n", encoding="utf-8")
+    tampered = plan.to_payload()
+    tampered["routes"][0]["candidateIds"].append("d.md")
+    tampered["candidateHash"] = exact_candidate_hash(
+        {tampered["routes"][0]["routeKey"]: tampered["routes"][0]["candidateIds"]}
+    )
+    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+        connection.execute(
+            "UPDATE runs SET plan_json = ? WHERE id = ?",
+            (json.dumps(tampered), run_id),
+        )
+
+    with pytest.raises(PlanMismatchError, match="persisted plan content"):
+        await engine.apply(run_id, plan_hash=plan.plan_hash)
+    assert not db.exists()
+
+
+async def test_verify_rehashes_persisted_plan(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+    engine = _engine(tmp_path)
+    run_id = engine.create(_spec(content, db))
+    plan = await engine.plan(run_id)
+    await engine.apply(run_id, plan_hash=plan.plan_hash)
+
+    tampered = plan.to_payload()
+    tampered["warnings"].append("tampered")
+    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+        connection.execute(
+            "UPDATE runs SET plan_json = ? WHERE id = ?",
+            (json.dumps(tampered), run_id),
+        )
+
+    with pytest.raises(PlanMismatchError, match="persisted plan content"):
+        await engine.verify(run_id)
 
 
 def test_cli_spec_flow_plan_apply_verify(
@@ -141,7 +227,11 @@ def test_cli_spec_flow_plan_apply_verify(
     base = ["-f", str(spec_file), "--state", str(state)]
 
     assert main(["plan", *base]) == 0
-    assert main(["apply", *base]) == 0
+    store = SqliteStateStore(state)
+    run = store.find_latest_run(_spec(content, db).spec_hash)
+    assert run is not None and run.plan_hash is not None
+    store.close()
+    assert main(["apply", *base, "--plan-hash", run.plan_hash]) == 0
     assert main(["verify", *base]) == 0
     assert main(["status", *base]) == 0
     output = capsys.readouterr().out
