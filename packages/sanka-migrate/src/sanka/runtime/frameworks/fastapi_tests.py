@@ -16,7 +16,6 @@ from typing import Any
 
 from sanka.runtime.frameworks.django_fastapi import (
     DEFAULT_ARTIFACT_DIR,
-    GENERATED_MANIFEST,
     NATIVE_STRATEGY,
     FrameworkMigrationError,
     load_fastapi_plan,
@@ -25,8 +24,11 @@ from sanka.runtime.frameworks.django_fastapi import (
 from sanka.runtime.frameworks.generated_environment import ensure_generated_environment
 from sanka.runtime.frameworks.generated_integrity import (
     GeneratedIntegrityError,
-    read_generated_manifest,
-    verify_generated_bundle,
+    freeze_generated_bundle,
+)
+from sanka.runtime.frameworks.untrusted_framework import (
+    UntrustedFrameworkError,
+    run_untrusted_framework_worker,
 )
 from sanka.runtime.safe_local_io import (
     UnsafeLocalPathError,
@@ -49,6 +51,7 @@ def test_fastapi_app(
     *,
     artifact_dir: str | Path = DEFAULT_ARTIFACT_DIR,
     output: str | Path | None = None,
+    allow_unsafe_source_execution: bool = False,
 ) -> dict[str, Any]:
     """Write ``test_generated.py`` next to the applied app and run it."""
     root_path = Path(root).resolve()
@@ -59,10 +62,8 @@ def test_fastapi_app(
     if not output_path.is_absolute():
         output_path = root_path / output_path
     output_path = absolute_path(output_path)
-    manifest_path = output_path / GENERATED_MANIFEST
     try:
-        manifest = read_generated_manifest(manifest_path)
-        verify_generated_bundle(output_path, manifest)
+        frozen_output, manifest = freeze_generated_bundle(output_path)
     except GeneratedIntegrityError as error:
         raise FrameworkMigrationError(str(error)) from error
     if manifest.get("source_scan_hash") != scan.scan_hash:
@@ -72,6 +73,9 @@ def test_fastapi_app(
     env, allow_writes = _isolated_env(output_path, manifest)
     generated_environment = (
         ensure_generated_environment(output_path) if plan.mode == NATIVE_STRATEGY else None
+    )
+    execution_bundle = (
+        generated_environment.bundle_root if generated_environment is not None else frozen_output
     )
     test_python = (
         str(generated_environment.python) if generated_environment is not None else sys.executable
@@ -96,30 +100,53 @@ def test_fastapi_app(
         "result = unittest.TextTestRunner(verbosity=2).run(suite); "
         "raise SystemExit(0 if result.wasSuccessful() else 1)"
     )
-    try:
-        verify_generated_bundle(output_path, read_generated_manifest(manifest_path))
-    except GeneratedIntegrityError as error:
-        raise FrameworkMigrationError(str(error)) from error
-    result = subprocess.run(
-        [
-            test_python,
-            "-I",
-            "-B",
-            "-c",
-            runner,
-            str(execution_root),
-            str(output_path),
-        ],
-        cwd=execution_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    log = (result.stdout or "") + (result.stderr or "")
-    ran = _ran_count(log)
-    ok = result.returncode == 0
+    if plan.mode == NATIVE_STRATEGY:
+        result = subprocess.run(
+            [
+                test_python,
+                "-I",
+                "-B",
+                "-c",
+                runner,
+                str(execution_root),
+                str(execution_bundle),
+            ],
+            cwd=execution_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        log = (result.stdout or "") + (result.stderr or "")
+        ran = _ran_count(log)
+        ok = result.returncode == 0
+    else:
+        database_copy = str(env.get("SANKA_TEST_DB") or "")
+        readable_roots = [root_path, execution_bundle]
+        if database_copy:
+            readable_roots.append(Path(database_copy).parent)
+        try:
+            payload = run_untrusted_framework_worker(
+                {
+                    "operation": "compatibility-test",
+                    "root": str(root_path),
+                    "settings": str(manifest["settings_module"]),
+                    "output": str(execution_bundle),
+                    "test_source": source,
+                    "source_root": str(root_path),
+                    "database_copy": database_copy,
+                },
+                readable_roots=readable_roots,
+                allow_unsafe=allow_unsafe_source_execution,
+            )
+        except UntrustedFrameworkError as error:
+            raise FrameworkMigrationError(str(error)) from error
+        if not isinstance(payload.get("ok"), bool):
+            raise FrameworkMigrationError("isolated compatibility test returned invalid results")
+        ok = bool(payload["ok"])
+        ran = int(payload.get("tests") or 0)
+        log = str(payload.get("log") or "")
     missing_dependency = _missing_generated_dependency(log, output_path)
     return {
         "ok": ok,
@@ -168,13 +195,14 @@ def _isolated_env(output: Path, manifest: dict[str, Any]) -> tuple[dict[str, str
         }
     }
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    source_root = absolute_path(output / str(manifest.get("source_root") or "."))
+    env["SANKA_SOURCE_ROOT"] = str(source_root)
     database = manifest.get("database") or {}
     if str(database.get("vendor") or "") != "sqlite":
         return env, False
     name = str(database.get("name") or "")
     if not name or name == ":memory:":
         return env, False
-    source_root = absolute_path(output / str(manifest.get("source_root") or "."))
     src = absolute_path(Path(name) if Path(name).is_absolute() else source_root / name)
     if not src.is_relative_to(source_root):
         raise FrameworkMigrationError(

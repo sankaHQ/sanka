@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from sanka.runtime.engine import ExecutionError, MigrationEngine
+from sanka.runtime.engine import CandidateBudget, ExecutionError, MigrationEngine
 from sanka.runtime.execution import ExecutionSnapshot, JournalEntry, exact_candidate_hash
 from sanka.runtime.mapping.model import MigrationMappingField
 from sanka.runtime.mapping.record_mapping import mapping_group_key
@@ -291,6 +291,7 @@ def _engine(
     destination: MemoryDestination,
     *,
     batch_size: int = 100,
+    candidate_budget: CandidateBudget | None = None,
 ) -> MigrationEngine:
     registry = ConnectorRegistry(
         {
@@ -302,11 +303,61 @@ def _engine(
         store=SqliteStateStore(tmp_path / "state.db"),
         registry=registry,
         batch_size=batch_size,
+        candidate_budget=candidate_budget,
     )
 
 
 def _spec() -> MigrationSpec:
     return MigrationSpec(source=EndpointSpec(type="memsrc"), target=EndpointSpec(type="memdst"))
+
+
+@pytest.mark.parametrize(
+    ("budget", "message"),
+    [
+        (
+            CandidateBudget(
+                max_candidates=3,
+                max_pages=10,
+                max_identity_bytes=100,
+                max_candidate_bytes=1_000,
+                max_plan_bytes=10_000,
+                max_elapsed_seconds=60,
+            ),
+            "aggregate candidate count budget",
+        ),
+        (
+            CandidateBudget(
+                max_candidates=10,
+                max_pages=1,
+                max_identity_bytes=100,
+                max_candidate_bytes=1_000,
+                max_plan_bytes=10_000,
+                max_elapsed_seconds=60,
+            ),
+            "aggregate candidate page budget",
+        ),
+    ],
+)
+async def test_candidate_budgets_are_shared_across_routes(
+    tmp_path: Path, budget: CandidateBudget, message: str
+) -> None:
+    source = MemorySource(
+        {
+            "accounts": [{"id": "1"}, {"id": "2"}],
+            "contacts": [{"id": "1"}, {"id": "2"}],
+        }
+    )
+    engine = _engine(
+        tmp_path,
+        source,
+        MemoryDestination(),
+        batch_size=10,
+        candidate_budget=budget,
+    )
+    run_id = engine.create(_spec())
+
+    with pytest.raises(ExecutionError, match=message):
+        await engine.plan(run_id)
 
 
 def _scalar_route(

@@ -293,12 +293,23 @@ class MigrationEngine:
         source, source_credentials = await self._source(spec)
         planned_routes: list[RoutePlan] = []
         candidate_ids_by_route: dict[str, list[str]] = {}
+        remaining_candidates = self._candidate_budget.max_candidates
+        remaining_candidate_bytes = self._candidate_budget.max_candidate_bytes
+        remaining_pages = self._candidate_budget.max_pages
+        candidate_deadline = self._monotonic() + self._candidate_budget.max_elapsed_seconds
         for route in plan.routes:
-            candidate_ids = await self._candidate_ids(
+            candidate_ids, used_pages, used_bytes = await self._candidate_ids(
                 source=source,
                 source_credentials=source_credentials,
                 route=route,
+                max_candidates=remaining_candidates,
+                max_candidate_bytes=remaining_candidate_bytes,
+                max_pages=remaining_pages,
+                deadline=candidate_deadline,
             )
+            remaining_candidates -= len(candidate_ids)
+            remaining_candidate_bytes -= used_bytes
+            remaining_pages -= used_pages
             candidate_ids_by_route[route.route_key] = candidate_ids
             planned_routes.append(replace(route, candidate_ids=candidate_ids))
         plan = replace(
@@ -619,7 +630,11 @@ class MigrationEngine:
         source: SourceConnector,
         source_credentials: Credentials,
         route: RoutePlan,
-    ) -> list[str]:
+        max_candidates: int,
+        max_candidate_bytes: int,
+        max_pages: int,
+        deadline: float,
+    ) -> tuple[list[str], int, int]:
         """Enumerate the exact source identities the reviewed plan approves."""
         candidate_ids: list[str] = []
         seen_ids: set[str] = set()
@@ -627,21 +642,19 @@ class MigrationEngine:
         cursor: str | None = None
         page_count = 0
         candidate_bytes = 0
-        started_at = self._monotonic()
         while True:
             page_count += 1
-            if page_count > self._candidate_budget.max_pages:
+            if page_count > max_pages:
                 raise ExecutionError(
-                    f"route {route.route_key!r} exceeds the candidate page budget "
+                    "the migration exceeds the aggregate candidate page budget "
                     f"({self._candidate_budget.max_pages})"
                 )
-            elapsed = self._monotonic() - started_at
-            if elapsed > self._candidate_budget.max_elapsed_seconds:
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
                 raise ExecutionError(
-                    f"route {route.route_key!r} exceeds the candidate time budget "
+                    "the migration exceeds the aggregate candidate time budget "
                     f"({self._candidate_budget.max_elapsed_seconds:g}s)"
                 )
-            remaining = self._candidate_budget.max_elapsed_seconds - elapsed
             try:
                 async with asyncio.timeout(remaining):
                     page = await source.read_records(
@@ -682,18 +695,18 @@ class MigrationEngine:
                 seen_ids.add(identity)
                 candidate_ids.append(identity)
                 candidate_bytes += identity_bytes
-                if len(candidate_ids) > self._candidate_budget.max_candidates:
+                if len(candidate_ids) > max_candidates:
                     raise ExecutionError(
-                        f"route {route.route_key!r} exceeds the candidate count budget "
+                        "the migration exceeds the aggregate candidate count budget "
                         f"({self._candidate_budget.max_candidates})"
                     )
-                if candidate_bytes > self._candidate_budget.max_candidate_bytes:
+                if candidate_bytes > max_candidate_bytes:
                     raise ExecutionError(
-                        f"route {route.route_key!r} exceeds the candidate byte budget "
+                        "the migration exceeds the aggregate candidate byte budget "
                         f"({self._candidate_budget.max_candidate_bytes})"
                     )
             if not page.has_more:
-                return sorted(candidate_ids)
+                return sorted(candidate_ids), page_count, candidate_bytes
             next_cursor = str(page.next_cursor or "").strip()
             if len(next_cursor.encode("utf-8")) > self._candidate_budget.max_identity_bytes:
                 raise ExecutionError(

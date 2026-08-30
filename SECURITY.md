@@ -27,6 +27,10 @@ code, schemas, and generated HTTP traffic are treated as untrusted inputs.
 Reviewed plan hashes, exact candidate sets, configured source scope, credential
 references, and local state permissions are security boundaries. Mutating
 operations must fail closed when those boundaries cannot be verified.
+The local OS account running Sanka is trusted: another process with the same
+user identity can inspect or terminate the CLI and is outside this sandbox
+boundary. Sanka still rejects concurrent cooperative access to one state file,
+replaced state-lock inodes, and state generations changed between commits.
 
 Dynamic Django startup and source HTTP probes run in a separate OS-contained
 worker with no network, no ambient credentials, restricted filesystem reads,
@@ -36,6 +40,13 @@ explicitly marks the source repository trusted. Generated code and dependency
 metadata are authenticated with a machine-local integrity key before test or
 verification, and generated dependencies run from a fresh disposable
 environment rather than a mutable environment inside the output directory.
+
+The sandbox protects the operator from dynamically executed source code; it
+does not authenticate what an adversarial source application reports about
+itself. Source-side HTTP results are observational parity evidence against the
+provided project, not proof that the project's behavior is honest. Sanka never
+copies worker-provided Python source into generated applications or benchmark
+candidates.
 
 The hosted Sanka API and its private job runtime are maintained separately.
 Report suspected hosted-service vulnerabilities through the same private

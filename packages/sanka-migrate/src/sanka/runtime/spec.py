@@ -191,6 +191,11 @@ class MigrationSpec:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MigrationSpec:
+        _reject_secret_keys(data, path="spec")
+        known = {"name", "source", "target", "strategy", "verify"}
+        unknown = sorted(str(key) for key in data if key not in known)
+        if unknown:
+            raise SpecError(f"spec contains unknown top-level fields: {', '.join(unknown)}")
         try:
             source = data["source"]
             target = data["target"]

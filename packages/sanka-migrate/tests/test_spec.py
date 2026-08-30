@@ -83,6 +83,20 @@ def test_recursive_spec_values_fail_closed() -> None:
         EndpointSpec(type="a", options=recursive)
 
 
+def test_unknown_top_level_secret_field_is_rejected_before_it_is_discarded() -> None:
+    with pytest.raises(SpecError, match="secret-bearing"):
+        MigrationSpec.from_yaml(
+            "source: a\ntarget: b\nignored:\n  profiles:\n    - apiKey: literal\n"
+        )
+
+
+def test_unknown_top_level_alias_is_rejected() -> None:
+    with pytest.raises(SpecError, match="unknown top-level"):
+        MigrationSpec.from_yaml(
+            "shared: &shared\n  safe: value\nsource: a\ntarget: b\nignored: *shared\n"
+        )
+
+
 @pytest.mark.parametrize(
     "connection",
     [

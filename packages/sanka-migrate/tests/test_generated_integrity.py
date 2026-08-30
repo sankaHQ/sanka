@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 from sanka.runtime.frameworks.generated_integrity import (
     GeneratedIntegrityError,
     attest_generated_bundle,
+    freeze_generated_bundle,
     verify_generated_bundle,
 )
 
@@ -34,6 +36,19 @@ def test_attested_bundle_accepts_exact_files(
 ) -> None:
     output, manifest = _attested_output(tmp_path, monkeypatch)
     verify_generated_bundle(output, manifest)
+
+
+def test_frozen_bundle_is_independent_from_later_output_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output, manifest = _attested_output(tmp_path, monkeypatch)
+    (output / "sanka-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    frozen, frozen_manifest = freeze_generated_bundle(output)
+    (output / "app.py").write_text("tampered\n", encoding="utf-8")
+
+    assert (frozen / "app.py").read_text(encoding="utf-8") == "app = 1\n"
+    verify_generated_bundle(frozen, frozen_manifest)
 
 
 @pytest.mark.parametrize("name", ["app.py", "pyproject.toml"])

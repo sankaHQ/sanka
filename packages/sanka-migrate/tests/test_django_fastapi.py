@@ -162,6 +162,25 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert "Compatibility bridge verification: FAILED" in incomplete_output
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS source sandbox")
+def test_compatibility_test_cannot_write_from_django_startup(
+    drf_project: Path, tmp_path: Path
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    assert main(_reviewed_apply_args(drf_project)) == 0
+    marker = tmp_path / "escaped-from-test.txt"
+    settings = drf_project / "config" / "settings.py"
+    with settings.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\nfrom pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('escaped', encoding='utf-8')\n"
+        )
+
+    assert main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 1
+    assert not marker.exists()
+
+
 def test_failed_generated_test_reports_missing_dependency_without_verify_next_step(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
