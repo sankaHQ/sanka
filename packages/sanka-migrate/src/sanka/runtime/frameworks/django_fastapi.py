@@ -766,6 +766,7 @@ def _render_native_output(
                 "pk_attname": ir.pk_attname,
                 "ordering": list(ir.ordering),
                 "lookup": ir.lookup,
+                "lookup_regex": view_ir.lookup_regex if view_ir is not None else None,
                 "fields": [_field_payload(field) for field in ir.fields],
                 "create": _create_payload(ir, preserve_carryover=preserve_carryover),
                 "update_drops": None if ir.update_drops is None else list(ir.update_drops),
@@ -1083,6 +1084,7 @@ def _walk_patterns(
                 )
             continue
         path, supported = _to_fastapi_path(combined)
+        _normalized, _groups_supported, named_regexes = _replace_named_regex_groups(combined)
         source_file, source_line = _source_location(view_class, root_path)
         view_name = f"{view_class.__module__}.{view_class.__qualname__}"
         serializer = _qualified_name(getattr(view_class, "serializer_class", None))
@@ -1120,6 +1122,27 @@ def _walk_patterns(
             serializer_name=serializer,
             middleware=middleware,
         )
+        lookup_kwarg = str(
+            getattr(view_class, "lookup_url_kwarg", None)
+            or getattr(view_class, "lookup_field", "pk")
+        )
+        lookup_regex = named_regexes.get(lookup_kwarg)
+        if lookup_regex is not None and view_name in result.view_details:
+            detail = result.view_details[view_name]
+            if detail.lookup_regex not in {None, lookup_regex}:
+                native = False
+                adaptation_reasons = (
+                    *adaptation_reasons,
+                    _adaptation_reason(
+                        "SANKA_DRF_LOOKUP_REGEX_CONFLICT",
+                        "route-pattern",
+                        f"Lookup URL kwarg {lookup_kwarg!r} uses multiple regexes.",
+                    ),
+                )
+            else:
+                result.view_details[view_name] = replace_dataclass(
+                    detail, lookup_regex=lookup_regex
+                )
         for method, operation in methods:
             operation_source = _safe_source(getattr(view_class, operation, None))
             transactional = (
@@ -1284,12 +1307,6 @@ def _native_route_support(
             "viewset-overrides",
             "Viewset overrides require manual carryover: " + ", ".join(overrides),
         )
-    if getattr(view_class, "lookup_field", "pk") != "pk":
-        return disqualify(
-            "SANKA_DRF_LOOKUP_FIELD_UNSUPPORTED",
-            "lookup-field",
-            f"Custom lookup_field is configured: {view_class.lookup_field}",
-        )
     view_name = f"{view_class.__module__}.{view_class.__qualname__}"
     if view_name not in result.view_details:
         queryset = getattr(view_class, "queryset", None)
@@ -1357,9 +1374,100 @@ def _native_route_support(
             f"Serializer fields, validation, queryset, or write overrides require manual "
             f"adaptation: {serializer_name}",
         )
+    lookup_reason = _custom_lookup_adaptation_reason(
+        view_class,
+        actions=actions,
+        path=path,
+        serializer=ir,
+    )
+    if lookup_reason is not None:
+        return False, (*middleware_reasons, lookup_reason)
     if middleware_reasons:
         return False, middleware_reasons
     return True, ()
+
+
+def _custom_lookup_adaptation_reason(
+    view_class: type[Any],
+    *,
+    actions: dict[str, str],
+    path: str,
+    serializer: SerializerIR,
+) -> RouteAdaptationReason | None:
+    """Validate the narrow custom-lookup envelope used by native CRUD.
+
+    A native detail lookup must name the same URL kwarg and model field, be
+    unique, and use a scalar serializer field whose value the generated stores
+    can coerce without Django. This is intentionally narrower than everything
+    DRF accepts: it prevents a generated ``get()`` from changing one-object
+    semantics or quietly querying the primary key instead.
+    """
+    lookup_field = str(getattr(view_class, "lookup_field", "pk") or "pk")
+    lookup_kwarg = str(getattr(view_class, "lookup_url_kwarg", None) or lookup_field)
+    if lookup_field == "pk" and lookup_kwarg == "pk":
+        return None
+    if not lookup_field.isidentifier() or not lookup_kwarg.isidentifier():
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_NAME_UNSUPPORTED",
+            "lookup-field",
+            f"Lookup names must be Python identifiers: field={lookup_field!r}, "
+            f"URL kwarg={lookup_kwarg!r}.",
+        )
+    if lookup_kwarg != lookup_field:
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_URL_KWARG_UNSUPPORTED",
+            "lookup-field",
+            "Native generation currently requires lookup_url_kwarg to match "
+            f"lookup_field; got {lookup_kwarg!r} and {lookup_field!r}.",
+        )
+    detail_actions = {"retrieve", "update", "partial_update", "destroy"}
+    if detail_actions.intersection(actions.values()) and f"{{{lookup_kwarg}}}" not in path:
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_PATH_UNRESOLVED",
+            "lookup-field",
+            f"Detail route {path!r} does not expose the lookup kwarg {lookup_kwarg!r}.",
+        )
+    queryset = getattr(view_class, "queryset", None)
+    model = getattr(queryset, "model", None)
+    if model is None:
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_FIELD_MISSING",
+            "lookup-field",
+            f"Model field {lookup_field!r} could not be resolved.",
+        )
+    django_exceptions = importlib.import_module("django.core.exceptions")
+    try:
+        model_field = model._meta.get_field(lookup_field)
+    except django_exceptions.FieldDoesNotExist:
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_FIELD_MISSING",
+            "lookup-field",
+            f"Model field {lookup_field!r} could not be resolved.",
+        )
+    if not (getattr(model_field, "unique", False) or getattr(model_field, "primary_key", False)):
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_FIELD_NOT_UNIQUE",
+            "lookup-field",
+            f"Custom lookup field {lookup_field!r} is not unique.",
+        )
+    serializer_field = next(
+        (field for field in serializer.fields if field.name == lookup_field),
+        None,
+    )
+    if serializer_field is None:
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_FIELD_NOT_SERIALIZED",
+            "lookup-field",
+            f"Custom lookup field {lookup_field!r} is absent from the serializer.",
+        )
+    if not serializer_field.supported or serializer_field.kind not in {"char", "integer"}:
+        return _adaptation_reason(
+            "SANKA_DRF_LOOKUP_TYPE_UNSUPPORTED",
+            "lookup-field",
+            f"Custom lookup field {lookup_field!r} has unsupported native kind "
+            f"{serializer_field.kind!r}.",
+        )
+    return None
 
 
 def _viewset_overrides(view_class: type[Any]) -> tuple[str, ...]:
@@ -1824,9 +1932,7 @@ def _serializer_ir(view_class: type[Any], serializer_name: str) -> SerializerIR 
     if queryset is None:
         return None
     model = queryset.model
-    lookup = str(
-        getattr(view_class, "lookup_url_kwarg", None) or getattr(view_class, "lookup_field", "pk")
-    )
+    lookup = str(getattr(view_class, "lookup_field", "pk") or "pk")
     ir = _build_serializer_ir(
         serializer_class,
         model,
@@ -2161,10 +2267,110 @@ def _route_methods(view_class: type[Any], actions: dict[str, str] | None) -> lis
     return methods
 
 
+def _replace_named_regex_groups(value: str) -> tuple[str, bool, dict[str, str]]:
+    """Replace balanced Django named groups without truncating nested regexes."""
+    output: list[str] = []
+    groups: dict[str, str] = {}
+    supported = True
+    index = 0
+    while index < len(value):
+        if not value.startswith("(?P<", index):
+            output.append(value[index])
+            index += 1
+            continue
+        name_end = value.find(">", index + 4)
+        if name_end < 0:
+            return value, False, {}
+        name = value[index + 4 : name_end]
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            return value, False, {}
+        depth = 1
+        cursor = name_end + 1
+        group_start = cursor
+        escaped = False
+        in_class = False
+        while cursor < len(value):
+            char = value[cursor]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif in_class:
+                if char == "]":
+                    in_class = False
+            elif char == "[":
+                in_class = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            cursor += 1
+        if depth != 0:
+            return value, False, {}
+        expression = value[group_start:cursor]
+        groups[name] = expression
+        supported = supported and _regex_is_single_path_segment(expression)
+        output.append(f"{{{name}}}")
+        index = cursor + 1
+    return "".join(output), supported, groups
+
+
+def _regex_is_single_path_segment(expression: str) -> bool:
+    """Conservatively prove a regex cannot consume a slash."""
+    if not expression:
+        return False
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if char == "\\":
+            if index + 1 >= len(expression):
+                return False
+            escaped = expression[index + 1]
+            if escaped == "/" or escaped in {"D", "S", "W"} or escaped.isdigit():
+                return False
+            index += 2
+            continue
+        if char == "/" or char == ".":
+            return False
+        if char == "[":
+            cursor = index + 1
+            negated = cursor < len(expression) and expression[cursor] == "^"
+            if negated:
+                cursor += 1
+            has_slash = False
+            while cursor < len(expression) and expression[cursor] != "]":
+                if expression[cursor] == "\\":
+                    if cursor + 1 >= len(expression):
+                        return False
+                    escaped = expression[cursor + 1]
+                    if escaped in {"D", "S", "W"} or escaped.isdigit():
+                        return False
+                    if escaped == "/":
+                        has_slash = True
+                    cursor += 2
+                    continue
+                if expression[cursor] == "/":
+                    has_slash = True
+                cursor += 1
+            if cursor >= len(expression):
+                return False
+            if (negated and not has_slash) or (not negated and has_slash):
+                return False
+            index = cursor + 1
+            continue
+        if expression.startswith("(?", index) and not expression.startswith("(?:", index):
+            return False
+        index += 1
+    return True
+
+
 def _to_fastapi_path(raw: str) -> tuple[str, bool]:
     value = raw.strip()
-    value = value.removesuffix("$").removesuffix(r"\Z").replace("^", "")
-    value = re.sub(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>[^)]+\)", r"{\1}", value)
+    value = value.removesuffix("$").removesuffix(r"\Z")
+    value = re.sub(r"(^|/)\^", r"\1", value)
+    value, named_groups_supported, _groups = _replace_named_regex_groups(value)
     value = re.sub(
         r"<(?:(?:str|int|slug|uuid|path):)?([A-Za-z_][A-Za-z0-9_]*)>",
         r"{\1}",
@@ -2173,7 +2379,7 @@ def _to_fastapi_path(raw: str) -> tuple[str, bool]:
     value = value.replace(r"\/", "/").replace(r"\.", ".")
     value = value.replace("/?", "/")
     value = re.sub(r"\(\?:([^()]+)\)", r"\1", value)
-    supported = re.search(r"[\[\]()+*?|\\^$]", value) is None
+    supported = named_groups_supported and re.search(r"[\[\]()+*?|\\^$]", value) is None
     path = "/" + value.lstrip("/")
     path = re.sub(r"/{2,}", "/", path)
     return path, supported
@@ -2596,7 +2802,8 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
         "from contextlib import asynccontextmanager",
         "",
         "from fastapi import FastAPI, Request",
-        "from fastapi.responses import Response",
+        "from fastapi.responses import HTMLResponse, Response",
+        "from starlette.convertors import Convertor, register_url_convertor",
         "from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware",
         "from starlette.middleware.trustedhost import TrustedHostMiddleware",
         "",
@@ -2614,6 +2821,18 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
         "",
         "",
         'app = FastAPI(title="Sanka native FastAPI application", lifespan=lifespan)',
+        "_DJANGO_DEFAULT_404 = "
+        + _py_str(
+            '\n<!doctype html>\n<html lang="en">\n<head>\n'
+            "  <title>Not Found</title>\n</head>\n<body>\n"
+            "  <h1>Not Found</h1><p>The requested resource was not found on this server.</p>\n"
+            "</body>\n</html>\n"
+        ),
+        "",
+        "@app.exception_handler(404)",
+        "async def django_default_404(_request: Request, _error: Exception) -> HTMLResponse:",
+        "    return HTMLResponse(_DJANGO_DEFAULT_404, status_code=404)",
+        "",
         '_HTTP_SECURITY = native.MANIFEST.get("http_security", {})',
         '_ALLOWED_HOSTS = _HTTP_SECURITY.get("allowed_hosts", [])',
         'if _HTTP_SECURITY.get("ssl_redirect"):',
@@ -2630,14 +2849,41 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
     ]
     used_vars: set[str] = set()
     used_funcs: set[str] = set()
+    used_converters: set[str] = set()
     resource_var: dict[str, str] = {}
     object_names: dict[str, str] = {}
+    lookup_by_view: dict[str, str] = {}
+    converter_by_view: dict[str, str] = {}
     for resource in manifest["resources"]:
         view = str(resource["view"])
         ident = _python_ident(str(resource["object_name"]))
         var = _unique_ident(f"_{ident.upper()}", used_vars)
         resource_var[view] = var
         object_names[view] = ident
+        lookup_by_view[view] = str(resource.get("lookup") or "pk")
+        lookup_regex = resource.get("lookup_regex")
+        if isinstance(lookup_regex, str) and lookup_regex:
+            converter = _unique_ident(f"sanka_{ident}_lookup", used_converters)
+            converter_class = _unique_ident(
+                f"_Sanka{ident.title()}LookupConvertor", used_converters
+            )
+            converter_by_view[view] = converter
+            lines.extend(
+                [
+                    f"class {converter_class}(Convertor):",
+                    f"    regex = {_py_str(lookup_regex)}",
+                    "",
+                    "    def convert(self, value: str) -> str:",
+                    "        return value",
+                    "",
+                    "    def to_string(self, value: str) -> str:",
+                    "        return value",
+                    "",
+                    "",
+                    f"register_url_convertor({_py_str(converter)}, {converter_class}())",
+                    "",
+                ]
+            )
         lines.append(f"{var} = native.resource({_py_str(view)})")
     if resource_var:
         lines.append("")
@@ -2660,20 +2906,23 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
             )
             continue
         view = str(route["source_view"])
+        runtime_path = path
+        if view in converter_by_view:
+            lookup = lookup_by_view[view]
+            runtime_path = runtime_path.replace(
+                f"{{{lookup}}}", f"{{{lookup}:{converter_by_view[view]}}}"
+            )
         var = resource_var[view]
         func = _unique_ident(
             f"{_OPERATION_FUNCS.get(operation, operation)}_{object_names[view]}",
             used_funcs,
         )
-        if "{pk}" in path:
-            signature = "request: Request, pk: str"
-            call = f"    return await native.handle({var}, {_py_str(operation)}, request)"
-        else:
-            signature = "request: Request"
-            call = f"    return await native.handle({var}, {_py_str(operation)}, request)"
+        path_parameters = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", path)
+        signature = ", ".join(["request: Request", *(f"{name}: str" for name in path_parameters)])
+        call = f"    return await native.handle({var}, {_py_str(operation)}, request)"
         lines.extend(
             [
-                f"@app.{decorator}({_py_str(path)})",
+                f"@app.{decorator}({_py_str(runtime_path)})",
                 f"async def {func}({signature}) -> Response:",
                 call,
                 "",

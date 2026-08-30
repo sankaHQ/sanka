@@ -337,6 +337,16 @@ def _pk(resource: dict[str, Any]) -> str:
     return str(resource.get("pk_attname") or "id")
 
 
+def _lookup(resource: dict[str, Any]) -> str:
+    lookup = str(resource.get("lookup") or "pk")
+    if lookup == "pk":
+        return _pk(resource)
+    for field in resource.get("fields") or ():
+        if field.get("name") == lookup:
+            return str(field.get("attname") or lookup)
+    return lookup
+
+
 def _fetch_all(resource: dict[str, Any]) -> list[Any]:
     query = _model(resource).objects.all()
     ordering = list(resource.get("ordering") or ())
@@ -352,7 +362,7 @@ async def fetch_all(resource: dict[str, Any]) -> list[Any]:
 def _fetch_one(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
     model = _model(resource)
     try:
-        return model.objects.get(**{_pk(resource): raw}), ""
+        return model.objects.get(**{_lookup(resource): raw}), ""
     except model.DoesNotExist:
         return None, "missing"
     except (ValueError, TypeError, OverflowError):
@@ -506,11 +516,26 @@ def _pk(resource: dict[str, Any]) -> str:
     return str(resource.get("pk_attname") or "id")
 
 
-def _coerce_pk(raw: Any) -> tuple[Any, str]:
-    try:
-        return int(str(raw)), ""
-    except (TypeError, ValueError):
+def _lookup(resource: dict[str, Any]) -> tuple[str, str]:
+    lookup = str(resource.get("lookup") or "pk")
+    if lookup == "pk":
+        return _pk(resource), "integer"
+    for field in resource.get("fields") or ():
+        if field.get("name") == lookup:
+            return str(field.get("attname") or lookup), str(field.get("kind") or "char")
+    return lookup, "char"
+
+
+def _coerce_lookup(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
+    if raw is None:
         return None, "invalid"
+    _name, kind = _lookup(resource)
+    if kind in {"integer", "related_pk"}:
+        try:
+            return int(str(raw)), ""
+        except (TypeError, ValueError):
+            return None, "invalid"
+    return str(raw), ""
 
 
 async def fetch_all(resource: dict[str, Any]) -> list[Any]:
@@ -522,10 +547,11 @@ async def fetch_all(resource: dict[str, Any]) -> list[Any]:
 
 
 async def fetch_one(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
-    pk, error = _coerce_pk(raw)
+    value, error = _coerce_lookup(resource, raw)
     if error:
         return None, error
-    row = await _cls(resource).get_or_none(**{_pk(resource): pk})
+    lookup, _kind = _lookup(resource)
+    row = await _cls(resource).get_or_none(**{lookup: value})
     return (row, "") if row is not None else (None, "missing")
 
 
@@ -646,11 +672,26 @@ def _pk(resource: dict[str, Any]) -> str:
     return str(resource.get("pk_attname") or "id")
 
 
-def _coerce_pk(raw: Any) -> tuple[Any, str]:
-    try:
-        return int(str(raw)), ""
-    except (TypeError, ValueError):
+def _lookup(resource: dict[str, Any]) -> tuple[str, str]:
+    lookup = str(resource.get("lookup") or "pk")
+    if lookup == "pk":
+        return _pk(resource), "integer"
+    for field in resource.get("fields") or ():
+        if field.get("name") == lookup:
+            return str(field.get("attname") or lookup), str(field.get("kind") or "char")
+    return lookup, "char"
+
+
+def _coerce_lookup(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
+    if raw is None:
         return None, "invalid"
+    _name, kind = _lookup(resource)
+    if kind in {"integer", "related_pk"}:
+        try:
+            return int(str(raw)), ""
+        except (TypeError, ValueError):
+            return None, "invalid"
+    return str(raw), ""
 
 
 async def fetch_all(resource: dict[str, Any]) -> list[Any]:
@@ -663,11 +704,12 @@ async def fetch_all(resource: dict[str, Any]) -> list[Any]:
 
 
 async def fetch_one(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
-    pk, error = _coerce_pk(raw)
+    value, error = _coerce_lookup(resource, raw)
     if error:
         return None, error
     model = _cls(resource)
-    stmt = select(model).where(getattr(model, _pk(resource)) == pk)
+    lookup, _kind = _lookup(resource)
+    stmt = select(model).where(getattr(model, lookup) == value)
     async with _sessionmaker()() as session:
         row = await session.scalar(stmt)
     return (row, "") if row is not None else (None, "missing")
@@ -781,15 +823,30 @@ def _pk(resource: dict[str, Any]) -> str:
     return str(resource.get("pk_attname") or "id")
 
 
+def _lookup(resource: dict[str, Any]) -> tuple[str, str]:
+    lookup = str(resource.get("lookup") or "pk")
+    if lookup == "pk":
+        return _pk(resource), "integer"
+    for field in resource.get("fields") or ():
+        if field.get("name") == lookup:
+            return str(field.get("attname") or lookup), str(field.get("kind") or "char")
+    return lookup, "char"
+
+
 def _table(resource: dict[str, Any]) -> str:
     return str(resource["db_table"])
 
 
-def _coerce_pk(raw: Any) -> tuple[Any, str]:
-    try:
-        return int(str(raw)), ""
-    except (TypeError, ValueError):
+def _coerce_lookup(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
+    if raw is None:
         return None, "invalid"
+    _name, kind = _lookup(resource)
+    if kind in {"integer", "related_pk"}:
+        try:
+            return int(str(raw)), ""
+        except (TypeError, ValueError):
+            return None, "invalid"
+    return str(raw), ""
 
 
 def _row(resource: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
@@ -806,13 +863,14 @@ async def fetch_all(resource: dict[str, Any]) -> list[Any]:
 
 
 async def fetch_one(resource: dict[str, Any], raw: Any) -> tuple[Any, str]:
-    pk, error = _coerce_pk(raw)
+    value, error = _coerce_lookup(resource, raw)
     if error:
         return None, error
-    sql = f'SELECT * FROM "{_table(resource)}" WHERE "{_pk(resource)}" = %s'
+    lookup, _kind = _lookup(resource)
+    sql = f'SELECT * FROM "{_table(resource)}" WHERE "{lookup}" = %s'
     async with await psycopg.AsyncConnection.connect(_CONNINFO) as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(sql, (pk,))
+            await cur.execute(sql, (value,))
             row = await cur.fetchone()
     return (row, "") if row is not None else (None, "missing")
 
