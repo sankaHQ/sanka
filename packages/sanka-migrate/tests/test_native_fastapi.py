@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from sanka.runtime.frameworks.django_fastapi import _unsupported_middleware
+from sanka.runtime.frameworks.django_fastapi import _to_fastapi_path, _unsupported_middleware
 from sanka.runtime.hashing import content_hash
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -210,7 +210,8 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     app_text = (output / "app.py").read_text(encoding="utf-8")
     assert '@app.get("/api/gadgets/")' in app_text
     assert '@app.post("/api/gadgets/")' in app_text
-    assert '@app.get("/api/gadgets/{pk}/")' in app_text
+    assert 'regex = "[^/.]+"' in app_text
+    assert '@app.get("/api/gadgets/{pk:sanka_gadget_lookup}/")' in app_text
     assert "add_api_route" not in app_text
     assert "add_api_route" not in runtime_text
     assert "async def list_gadget(" in app_text
@@ -282,6 +283,141 @@ def test_native_output_matches_drf_behavior_and_database(
     for index, (left, right) in enumerate(zip(source["results"], native["results"], strict=True)):
         assert left == right, f"scenario {index} ({SCENARIOS[index]}): {left} != {right}"
     assert source["database"] == native["database"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected", "supported"),
+    [
+        (
+            r"^api/dynamic/entries/(?P<code>(?:[-\w.+@]+))/$",
+            "/api/dynamic/entries/{code}/",
+            True,
+        ),
+        (r"^api/entries/(?P<code>[^/]+)/$", "/api/entries/{code}/", True),
+        (r"^api/files/(?P<path>.+)/$", "/api/files/{path}/", False),
+        (r"^api/files/(?P<path>[^a]+)/$", "/api/files/{path}/", False),
+    ],
+)
+def test_fastapi_path_conversion_balances_nested_named_groups(
+    raw: str, expected: str, supported: bool
+) -> None:
+    assert _to_fastapi_path(raw) == (expected, supported)
+
+
+def test_native_output_supports_unique_string_lookup_semantics(
+    crud_project: Path, tmp_path: Path
+) -> None:
+    model = crud_project / "inventory" / "models.py"
+    model.write_text(
+        model.read_text(encoding="utf-8").replace(
+            "    name = models.CharField(max_length=80)\n",
+            '    code = models.CharField(max_length=80, unique=True, default="alpha")\n'
+            "    name = models.CharField(max_length=80)\n",
+        ),
+        encoding="utf-8",
+    )
+    serializer = crud_project / "inventory" / "serializers.py"
+    serializer.write_text(
+        serializer.read_text(encoding="utf-8").replace(
+            'fields = ("id", "name", "quantity", "notes")',
+            'fields = ("id", "code", "name", "quantity", "notes")',
+        ),
+        encoding="utf-8",
+    )
+    view = crud_project / "inventory" / "views.py"
+    view.write_text(
+        view.read_text(encoding="utf-8").replace(
+            "    serializer_class = GadgetSerializer\n",
+            "    serializer_class = GadgetSerializer\n"
+            '    lookup_field = "code"\n'
+            '    lookup_value_regex = r"(?:[-\\w.+@]+)"\n',
+        ),
+        encoding="utf-8",
+    )
+
+    output = _generate(crud_project)
+    manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
+    resource = manifest["resources"][0]
+    assert resource["lookup"] == "code"
+    assert resource["lookup_regex"] == r"(?:[-\w.+@]+)"
+    assert any(route["path"] == "/api/gadgets/{code}/" for route in resource["routes"])
+    app_text = (output / "app.py").read_text(encoding="utf-8")
+    assert f"regex = {json.dumps(resource['lookup_regex'])}" in app_text
+    assert 'register_url_convertor("sanka_gadget_lookup"' in app_text
+    assert '@app.get("/api/gadgets/{code:sanka_gadget_lookup}/")' in app_text
+    assert "request: Request, code: str" in app_text
+
+    scenarios: list[dict[str, Any]] = [
+        {"method": "GET", "path": "/api/gadgets/alpha/"},
+        {"method": "GET", "path": "/api/gadgets/not!allowed/"},
+        {
+            "method": "PATCH",
+            "path": "/api/gadgets/alpha/",
+            "body": {"quantity": 11},
+        },
+        {"method": "GET", "path": "/api/gadgets/release@2026.08/"},
+        {
+            "method": "POST",
+            "path": "/api/gadgets/",
+            "body": {"code": "release@2026.08", "name": "Release", "quantity": 2},
+        },
+        {"method": "GET", "path": "/api/gadgets/release@2026.08/"},
+    ]
+    source = _run_probe(
+        "source",
+        crud_project,
+        tmp_path / "lookup-source.sqlite3",
+        scenarios=scenarios,
+    )
+    native = _run_probe(
+        "native",
+        crud_project,
+        tmp_path / "lookup-native.sqlite3",
+        output=output,
+        scenarios=scenarios,
+    )
+    assert source == native
+
+
+def test_native_plan_rejects_nonunique_custom_lookup(crud_project: Path) -> None:
+    model = crud_project / "inventory" / "models.py"
+    model.write_text(
+        model.read_text(encoding="utf-8").replace(
+            "    name = models.CharField(max_length=80)\n",
+            "    code = models.CharField(max_length=80)\n"
+            "    name = models.CharField(max_length=80)\n",
+        ),
+        encoding="utf-8",
+    )
+    serializer = crud_project / "inventory" / "serializers.py"
+    serializer.write_text(
+        serializer.read_text(encoding="utf-8").replace(
+            'fields = ("id", "name", "quantity", "notes")',
+            'fields = ("id", "code", "name", "quantity", "notes")',
+        ),
+        encoding="utf-8",
+    )
+    view = crud_project / "inventory" / "views.py"
+    view.write_text(
+        view.read_text(encoding="utf-8").replace(
+            "    serializer_class = GadgetSerializer\n",
+            '    serializer_class = GadgetSerializer\n    lookup_field = "code"\n',
+        ),
+        encoding="utf-8",
+    )
+
+    assert _run_cli(["scan", str(crud_project)], crud_project).returncode == 0
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    payload = json.loads(plan.stdout)
+    detail = next(
+        route
+        for route in payload["routes"]
+        if route["method"] == "GET" and route["path"] == "/api/gadgets/{code}/"
+    )
+    assert {reason["code"] for reason in detail["adaptation_reasons"]} == {
+        "SANKA_DRF_LOOKUP_FIELD_NOT_UNIQUE"
+    }
 
 
 def test_native_output_limits_streamed_bodies_and_rejects_untrusted_hosts(
