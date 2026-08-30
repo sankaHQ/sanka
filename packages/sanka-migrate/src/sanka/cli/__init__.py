@@ -63,6 +63,7 @@ from sanka.runtime.frameworks import (
     test_fastapi_app,
     verify_fastapi_migration,
     write_bench_candidate,
+    write_gap_report,
 )
 from sanka.runtime.frameworks.model import FrameworkPlan, FrameworkScan
 from sanka.runtime.frameworks.native_async import (
@@ -183,6 +184,19 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=SQL_ENGINES,
         default=None,
         help="async SQL engine (prompts when interactive; tortoise is recommended)",
+    )
+    apply_.add_argument(
+        "--min-readiness",
+        type=float,
+        default=50.0,
+        metavar="PCT",
+        help="minimum native readiness percentage for generation (default: 50; "
+        "use 0 to explicitly allow a partial scaffold)",
+    )
+    apply_.add_argument(
+        "--gap-report-only",
+        action="store_true",
+        help="write GAP-REPORT.md and the reviewed plan instead of generating an app",
     )
     apply_.add_argument(
         "--bench-candidate",
@@ -362,6 +376,34 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
     if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
         sql_engine = args.orm
         plan = load_fastapi_plan(args.root, artifact_dir=args.artifact_dir)
+        if plan.mode == NATIVE_STRATEGY:
+            if not 0 <= args.min_readiness <= 100:
+                raise FrameworkMigrationError("--min-readiness must be between 0 and 100")
+            print(
+                f"native readiness: {plan.readiness:.0%} "
+                f"({plan.native_routes}/{plan.native_eligible_routes} non-alias routes); "
+                f"{plan.needs_adaptation_routes} route(s) need manual adaptation"
+            )
+            below_min = plan.readiness * 100.0 < args.min_readiness
+            if args.gap_report_only or below_min or plan.native_routes == 0:
+                destination = args.bench_candidate or args.output or "gap-report"
+                report_path = write_gap_report(
+                    args.root, destination, artifact_dir=args.artifact_dir
+                )
+                if args.gap_report_only:
+                    print(f"gap report written to {report_path}")
+                    return 0
+                reason = (
+                    "the native plan contains no generatable routes"
+                    if plan.native_routes == 0
+                    else f"readiness is below --min-readiness {args.min_readiness:g}%"
+                )
+                print(f"not applying: {reason}; gap report written to {report_path}")
+                return 1
+        if plan.mode != NATIVE_STRATEGY and args.gap_report_only:
+            raise FrameworkMigrationError(
+                "gap reports describe native plans; run `sanka plan --to fastapi`"
+            )
         if plan.mode == NATIVE_STRATEGY and sql_engine is None and sys.stdin.isatty():
             sql_engine = _prompt_sql_engine(plan.sql_engine)
         output, routes = apply_fastapi_plan(
@@ -386,6 +428,9 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
                 artifact_dir=args.artifact_dir,
             )
             print(f"benchmark candidate written to {candidate}")
+            print(
+                "candidate discloses its gaps: GAP-REPORT.md, plan-fastapi.json, verify-report.json"
+            )
         print("next: sanka test")
         return 0
     spec = _load_spec(args.file)
@@ -699,6 +744,11 @@ def _print_framework_scan(scan: FrameworkScan) -> None:
     print(f"  {len(scan.serializers)} serializers")
     print(f"  {len(scan.models)} models")
     print(f"  {len(scan.permissions)} permissions")
+    if scan.skipped_routes:
+        print()
+        print("Not scanned (non-DRF views — port these by hand)")
+        for skipped in scan.skipped_routes:
+            print(f"  {skipped.pattern} -> {skipped.view}")
     print(f"  {len(custom_actions)} custom actions")
     print(f"  {scan.test_files} test files")
     print()
