@@ -100,6 +100,19 @@ def test_exact_candidate_hash_is_order_insensitive_and_content_sensitive() -> No
     assert baseline != exact_candidate_hash({"a|b": ["2", "1"]})
 
 
+def test_exact_scope_hash_is_candidate_content_sensitive() -> None:
+    first = exact_id_scope(
+        groups=_two_route_groups(),
+        candidate_ids_by_route={"Account|companies": ["001A"]},
+    )
+    second = exact_id_scope(
+        groups=_two_route_groups(),
+        candidate_ids_by_route={"Account|companies": ["001B"]},
+    )
+
+    assert first.scope_hash != second.scope_hash
+
+
 def test_exact_id_scope_verifies_an_expected_candidate_hash() -> None:
     approved = exact_candidate_hash({"Account|companies": ["001A", "001B"]})
 

@@ -144,7 +144,9 @@ def test_validate_is_write_free_and_exits_zero_when_valid(
     assert not db.exists()
 
     # ...while apply on the same spec does create it.
-    assert main(["apply", *base]) == 0
+    plan_hash = sqlite3.connect(base[-1]).execute("SELECT plan_hash FROM runs").fetchone()[0]
+    assert plan_hash
+    assert main(["apply", *base, "--plan-hash", plan_hash]) == 0
     assert db.exists()
     count = sqlite3.connect(db).execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     assert count == 2

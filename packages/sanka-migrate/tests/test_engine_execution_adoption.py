@@ -9,13 +9,14 @@ additive ``RunStatus.CANCELLED`` boundary mapping."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from sanka.runtime.engine import ExecutionError, MigrationEngine
-from sanka.runtime.execution import ExecutionSnapshot, JournalEntry
+from sanka.runtime.execution import ExecutionSnapshot, JournalEntry, exact_candidate_hash
 from sanka.runtime.mapping.model import MigrationMappingField
 from sanka.runtime.mapping.record_mapping import mapping_group_key
 from sanka.runtime.planner import MigrationPlan, RoutePlan
@@ -337,13 +338,30 @@ def _scalar_route(
     )
 
 
-def _create_run(engine: MigrationEngine, routes: list[RoutePlan]) -> str:
+def _create_run(
+    engine: MigrationEngine, source: MemorySource, routes: list[RoutePlan]
+) -> tuple[str, str]:
     from sanka.runtime.hashing import canonical_json
 
-    plan = MigrationPlan(source_provider="memsrc", target_provider="memdst", routes=routes)
+    planned_routes: list[RoutePlan] = []
+    candidates: dict[str, list[str]] = {}
+    for route in routes:
+        ids = sorted(
+            str(record[route.identity_field]).strip()
+            for record in source.tables[route.source_object]
+            if str(record.get(route.identity_field, "")).strip()
+        )
+        candidates[route.route_key] = ids
+        planned_routes.append(replace(route, candidate_ids=ids))
+    plan = MigrationPlan(
+        source_provider="memsrc",
+        target_provider="memdst",
+        routes=planned_routes,
+        candidate_hash=exact_candidate_hash(candidates),
+    )
     run_id = engine.create(_spec())
     engine.store.save_plan(run_id, canonical_json(plan.to_payload()), plan.plan_hash)
-    return run_id
+    return run_id, plan.plan_hash
 
 
 # -- new-capability coverage ---------------------------------------------------
@@ -361,8 +379,9 @@ async def test_apply_resolves_references_and_writes_relationships(tmp_path: Path
     )
     destination = MemoryDestination()
     engine = _engine(tmp_path, source, destination)
-    run_id = _create_run(
+    run_id, plan_hash = _create_run(
         engine,
+        source,
         [
             _scalar_route("authors", ["id", "name"], estimated_count=2),
             _scalar_route(
@@ -391,7 +410,7 @@ async def test_apply_resolves_references_and_writes_relationships(tmp_path: Path
         ],
     )
 
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan_hash)
 
     authors = destination.rows["authors"]
     ada_id = next(dest_id for dest_id, props in authors.items() if props["name"] == "Ada")
@@ -425,12 +444,13 @@ async def test_apply_maps_owners_through_the_destination_directory(tmp_path: Pat
         target_field="owner_id",
         mapping_kind="owner",
     )
-    run_id = _create_run(
+    run_id, plan_hash = _create_run(
         engine,
+        source,
         [_scalar_route("contacts", ["id", "name"], extra_fields=[owner_field], estimated_count=1)],
     )
 
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan_hash)
 
     (contact,) = destination.rows["contacts"].values()
     assert contact["owner_id"] == "owner-42"
@@ -444,17 +464,19 @@ async def test_interrupted_apply_resumes_attempt_exact(tmp_path: Path) -> None:
     source = MemorySource({"records": records})
     destination = MemoryDestination()
     engine = _engine(tmp_path, source, destination, batch_size=2)
-    run_id = _create_run(engine, [_scalar_route("records", ["id", "name"], estimated_count=4)])
+    run_id, plan_hash = _create_run(
+        engine, source, [_scalar_route("records", ["id", "name"], estimated_count=4)]
+    )
 
     source.fail_at_cursor = "r2"  # the second page read fails
     with pytest.raises(ExecutionError, match="transient"):
-        await engine.apply(run_id)
+        await engine.apply(run_id, plan_hash=plan_hash)
     assert engine.store.get_run(run_id).status is RunStatus.FAILED
     assert len(destination.write_calls) == 2  # first page landed durably
     assert engine.store.ledger_summary(run_id) == {"records|records": {"created": 2}}
 
     source.fail_at_cursor = None
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan_hash)
 
     assert engine.store.get_run(run_id).status is RunStatus.APPLIED
     # The resumed apply read from the saved checkpoint, not from the start.
@@ -467,27 +489,27 @@ async def test_interrupted_apply_resumes_attempt_exact(tmp_path: Path) -> None:
     assert report.ok and report.routes[0].migrated == 4
 
 
-async def test_resumed_apply_stays_bound_to_the_frozen_high_water_mark(tmp_path: Path) -> None:
-    """With a mark-capable source the scope freezes at first apply and a
-    resume reuses the saved marks: records added after the freeze stay out."""
+async def test_resumed_apply_stays_bound_to_the_reviewed_exact_candidates(tmp_path: Path) -> None:
+    """Resume reuses the plan's exact candidates; later records stay out."""
     records = [{"id": f"r{n}", "name": f"row {n}"} for n in range(1, 5)]
     source = BoundedMemorySource({"records": records})
     destination = MemoryDestination()
     engine = _engine(tmp_path, source, destination, batch_size=2)
-    run_id = _create_run(engine, [_scalar_route("records", ["id", "name"], estimated_count=4)])
+    run_id, plan_hash = _create_run(
+        engine, source, [_scalar_route("records", ["id", "name"], estimated_count=4)]
+    )
 
     source.fail_at_cursor = "r2"
     with pytest.raises(ExecutionError, match="transient"):
-        await engine.apply(run_id)
+        await engine.apply(run_id, plan_hash=plan_hash)
 
     source.fail_at_cursor = None
     source.tables["records"].append({"id": "r5", "name": "added after the freeze"})
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan_hash)
 
     assert engine.store.get_run(run_id).status is RunStatus.APPLIED
-    # Every read was bounded by the frozen mark, including the resumed ones.
-    assert source.bounded_requests
-    assert {upper for (_object, _cursor, upper) in source.bounded_requests} == {"r4"}
+    # The plan's exact-ID scope supersedes a provider high-water mark.
+    assert not source.bounded_requests
     migrated_ids = {props["id"] for props in destination.rows["records"].values()}
     assert migrated_ids == {"r1", "r2", "r3", "r4"}  # r5 is outside the scope
     assert engine.store.ledger_summary(run_id) == {"records|records": {"created": 4}}
@@ -500,14 +522,12 @@ async def test_missing_identity_records_fail_and_hold_the_run(tmp_path: Path) ->
     source = MemorySource({"records": [{"id": "", "name": "ghost"}]})
     destination = MemoryDestination()
     engine = _engine(tmp_path, source, destination)
-    run_id = _create_run(engine, [_scalar_route("records", ["id", "name"], estimated_count=1)])
+    run_id = engine.create(_spec())
+    with pytest.raises(ExecutionError, match="without identity"):
+        await engine.plan(run_id)
 
-    with pytest.raises(ExecutionError, match="1 failed record"):
-        await engine.apply(run_id)
-
-    assert engine.store.get_run(run_id).status is RunStatus.FAILED
     assert destination.write_calls == []
-    assert engine.store.ledger_summary(run_id) == {"records|records": {"failed": 1}}
+    assert engine.store.ledger_summary(run_id) == {}
 
 
 async def test_apply_uses_destination_batch_writes(tmp_path: Path) -> None:
@@ -518,9 +538,11 @@ async def test_apply_uses_destination_batch_writes(tmp_path: Path) -> None:
     source = MemorySource({"records": records})
     destination = BatchMemoryDestination()
     engine = _engine(tmp_path, source, destination, batch_size=2)
-    run_id = _create_run(engine, [_scalar_route("records", ["id", "name"], estimated_count=3)])
+    run_id, plan_hash = _create_run(
+        engine, source, [_scalar_route("records", ["id", "name"], estimated_count=3)]
+    )
 
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan_hash)
 
     assert engine.store.get_run(run_id).status is RunStatus.APPLIED
     assert len(destination.write_calls) == 3
@@ -537,7 +559,9 @@ async def test_apply_honors_a_cancellation_recorded_in_the_journal(tmp_path: Pat
     source = MemorySource({"records": [{"id": "r1", "name": "row"}]})
     destination = MemoryDestination()
     engine = _engine(tmp_path, source, destination)
-    run_id = _create_run(engine, [_scalar_route("records", ["id", "name"], estimated_count=1)])
+    run_id, plan_hash = _create_run(
+        engine, source, [_scalar_route("records", ["id", "name"], estimated_count=1)]
+    )
 
     store = engine.store
     assert isinstance(store, SqliteStateStore)
@@ -562,7 +586,7 @@ async def test_apply_honors_a_cancellation_recorded_in_the_journal(tmp_path: Pat
         state.close()
 
     with pytest.raises(ExecutionError, match="cancelled"):
-        await engine.apply(run_id)
+        await engine.apply(run_id, plan_hash=plan_hash)
 
     assert engine.store.get_run(run_id).status is RunStatus.CANCELLED
     assert destination.write_calls == []

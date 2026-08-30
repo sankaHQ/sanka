@@ -53,9 +53,11 @@ async def test_flagship_postgres_to_clickhouse(tmp_path: Path) -> None:
 
         spec = MigrationSpec(
             source=EndpointSpec(
-                type="postgres", connection=POSTGRES_DSN, options={"schema": schema}
+                type="postgres",
+                connection="$SANKA_MIGRATE_TEST_POSTGRES_DSN",
+                options={"schema": schema},
             ),
-            target=EndpointSpec(type="clickhouse", connection=CLICKHOUSE_URL),
+            target=EndpointSpec(type="clickhouse", connection="$SANKA_MIGRATE_TEST_CLICKHOUSE_URL"),
         )
         engine = MigrationEngine(
             store=SqliteStateStore(tmp_path / "state.db"),

@@ -69,7 +69,11 @@ async def test_markdown_to_postgres_lifecycle(tmp_path: Path, schema: str) -> No
     _write_content(content)
     spec = MigrationSpec(
         source=EndpointSpec(type="markdown", connection=str(content)),
-        target=EndpointSpec(type="postgres", connection=_DSN, options={"schema": schema}),
+        target=EndpointSpec(
+            type="postgres",
+            connection="$SANKA_MIGRATE_TEST_POSTGRES_DSN",
+            options={"schema": schema},
+        ),
     )
     engine = MigrationEngine(
         store=SqliteStateStore(tmp_path / "state" / "state.db"),
@@ -91,5 +95,5 @@ async def test_markdown_to_postgres_lifecycle(tmp_path: Path, schema: str) -> No
     assert await _table_count(schema, "documents") == 3
 
     # Re-applying converges instead of duplicating (identity ledger).
-    await engine.apply(run_id)
+    await engine.apply(run_id, plan_hash=plan.plan_hash)
     assert await _table_count(schema, "documents") == 3

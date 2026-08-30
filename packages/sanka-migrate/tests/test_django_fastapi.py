@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -111,8 +113,9 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert "8 / 8 source-vs-generated probes matched" in verify_output
     assert "Compatibility bridge verification: complete" in verify_output
 
-    assert main(["apply", "--root", str(drf_project)]) == 1
-    assert "output is not empty" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["apply", "--root", str(drf_project)])
+    assert "--plan-hash" in capsys.readouterr().err
 
     assert main(["apply", "--root", str(drf_project), "--plan-hash", "sha256:wrong"]) == 1
     assert "does not match current plan" in capsys.readouterr().err
@@ -129,7 +132,20 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
     unsupported_plan_output = capsys.readouterr().out
     assert "Needs adaptation\n  1 endpoints" in unsupported_plan_output
-    assert main(["apply", "--root", str(drf_project), "--force"]) == 0
+    unsupported_plan = load_fastapi_plan(drf_project)
+    assert (
+        main(
+            [
+                "apply",
+                "--root",
+                str(drf_project),
+                "--force",
+                "--plan-hash",
+                unsupported_plan.plan_hash,
+            ]
+        )
+        == 0
+    )
     capsys.readouterr()
 
     assert main(["verify", "--root", str(drf_project), "--no-http"]) == 1
@@ -163,8 +179,63 @@ def test_failed_generated_test_reports_missing_dependency_without_verify_next_st
     assert "Generated API tests: FAILED" in output
     assert "Generated app dependency is missing: tortoise" in output
     assert "package `tortoise-orm`" in output
-    assert "sanka apply --force\n  sanka test" in output
+    assert "sanka apply --plan-hash <hash> --force\n  sanka test" in output
     assert "next: sanka verify" not in output
+
+
+def test_compatibility_stream_propagates_failure_after_response_start(
+    drf_project: Path,
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    plan = load_fastapi_plan(drf_project)
+    assert main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
+    output = drf_project / ".sanka" / "output" / "fastapi"
+    script = """
+import asyncio
+from starlette.requests import Request
+import sanka_compat as bridge
+
+async def failing_app(scope, receive, send):
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": b"partial", "more_body": True})
+    raise RuntimeError("failed after response start")
+
+async def receive():
+    return {"type": "http.request", "body": b"", "more_body": False}
+
+async def check():
+    bridge.DJANGO_APP = failing_app
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "GET", "scheme": "http", "path": "/", "raw_path": b"/",
+        "query_string": b"", "root_path": "", "headers": [],
+        "client": ("127.0.0.1", 1), "server": ("testserver", 80),
+    }
+    response = await bridge._dispatch(Request(scope, receive), "GET")
+
+    async def consume():
+        return [chunk async for chunk in response.body_iterator]
+
+    try:
+        await asyncio.wait_for(consume(), timeout=1)
+    except RuntimeError as error:
+        assert str(error) == "failed after response start"
+    else:
+        raise AssertionError("stream failure was swallowed")
+
+asyncio.run(check())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=output,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_generated_test_extracts_actionable_missing_dependency(tmp_path: Path) -> None:

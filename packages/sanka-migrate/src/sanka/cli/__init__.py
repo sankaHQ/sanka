@@ -5,7 +5,7 @@ Spec-driven flow (migration-as-code)::
 
     sanka plan     -f sanka-migrate.yaml
     sanka validate -f sanka-migrate.yaml
-    sanka apply    -f sanka-migrate.yaml
+    sanka apply --plan-hash sha256:... -f sanka-migrate.yaml
     sanka verify   -f sanka-migrate.yaml
 
 ``validate`` is write-free by construction: it samples live source records
@@ -21,7 +21,7 @@ Django REST Framework to FastAPI compatibility flow::
 
     sanka scan
     sanka plan --to fastapi
-    sanka apply
+    sanka apply --plan-hash sha256:...
     sanka test
     sanka verify
 
@@ -168,7 +168,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     apply_ = commands.add_parser("apply", help="execute the reviewed plan (resumable)")
     common(apply_)
-    apply_.add_argument("--plan-hash", default=None, help="require this exact plan hash")
+    apply_.add_argument(
+        "--plan-hash",
+        required=True,
+        help="exact reviewed plan hash printed by `sanka plan`",
+    )
     apply_.add_argument("--to", choices=("fastapi",), help="select an application plan")
     apply_.add_argument("--root", default=".", help="application repository root")
     apply_.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
@@ -221,7 +225,6 @@ def _build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("source", help="source (directory, file, or URL-style endpoint)")
     migrate.add_argument("target", help="target (URL-style endpoint, e.g. sqlite://out.db)")
     migrate.add_argument("--state", default=DEFAULT_STATE_FILE, help="run-state SQLite file")
-    migrate.add_argument("-y", "--yes", action="store_true", help="apply without confirmation")
     migrate.set_defaults(handler=_cmd_migrate)
 
     connect = commands.add_parser(
@@ -478,11 +481,10 @@ async def _cmd_migrate(args: argparse.Namespace) -> int:
     run_id = engine.create(spec)
     plan = await engine.plan(run_id)
     _print_plan(run_id, plan)
-    if not args.yes:
-        answer = input("Apply this plan? [y/N] ").strip().lower()
-        if answer not in {"y", "yes"}:
-            print("aborted; nothing was written")
-            return 1
+    answer = input("Apply this exact plan? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        print("aborted; nothing was written")
+        return 1
     await engine.apply(run_id, plan_hash=plan.plan_hash)
     report = await engine.verify(run_id)
     _print_verify(report)
@@ -812,7 +814,7 @@ def _print_framework_test(report: dict[str, Any]) -> None:
             f"(package `{missing['package']}`)."
         )
         print("The generated dependency metadata may be incomplete; rerun:")
-        print("  sanka apply --force")
+        print("  sanka apply --plan-hash <hash> --force")
         print("  sanka test")
         return
     print("Fix the test failure above, then rerun:")
@@ -912,7 +914,11 @@ def _print_plan(run_id: str, plan: MigrationPlan) -> None:
             print(f"  - {warning}")
     print()
     print(f"ready: {plan.ready:.0%}")
+    print(f"approved source records: {sum(len(route.candidate_ids) for route in plan.routes)}")
+    if plan.candidate_hash:
+        print(f"candidate hash: {plan.candidate_hash}")
     print(f"plan hash: {plan.plan_hash}")
+    print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
 
 
 def _validation_invalid(payload: dict[str, Any]) -> bool:

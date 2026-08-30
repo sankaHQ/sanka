@@ -34,19 +34,17 @@ SAFE_MIDDLEWARE_STACK = (
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
 )
 EXPECTED_UNSUPPORTED_MIDDLEWARE_COUNTS = {
-    "styleguide-example": 2,
-    "django-crm": 3,
-    "care": 4,
-    "djangoforapis": 1,
-    "readthedocs": 10,
-    "netbox": 7,
+    "styleguide-example": 4,
+    "django-crm": 5,
+    "care": 6,
+    "djangoforapis": 2,
+    "readthedocs": 11,
+    "netbox": 8,
     "defectdojo": 12,
     "peering-manager": 3,
-    "kitsune": 28,
+    "kitsune": 30,
 }
 
 SCENARIOS: list[dict[str, Any]] = [
@@ -102,14 +100,23 @@ def _run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _plan_hash(project: Path) -> str:
+    payload = json.loads((project / ".sanka" / "plan-fastapi.json").read_text())
+    return str(payload["plan_hash"])
+
+
 def _run_probe(
     mode: str,
     project: Path,
     database: Path,
     *,
     output: Path | None = None,
+    max_body_bytes: int | None = None,
+    scenarios: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     env = _clean_env()
+    if max_body_bytes is not None:
+        env["SANKA_MAX_REQUEST_BODY_BYTES"] = str(max_body_bytes)
     argv = [
         sys.executable,
         str(PROBE),
@@ -120,7 +127,7 @@ def _run_probe(
         "--database",
         str(database),
         "--scenarios",
-        json.dumps(SCENARIOS),
+        json.dumps(SCENARIOS if scenarios is None else scenarios),
     ]
     if output is not None:
         argv.extend(["--output", str(output)])
@@ -157,7 +164,9 @@ def _generate(project: Path) -> Path:
     assert plan.returncode == 0, plan.stderr
     assert "DRF → FastAPI Migration Plan (native)" in plan.stdout
     assert "Native migration readiness: 100%" in plan.stdout
-    applied = _run_cli(["apply", "--root", str(project)], project)
+    applied = _run_cli(
+        ["apply", "--root", str(project), "--plan-hash", _plan_hash(project)], project
+    )
     assert applied.returncode == 0, applied.stderr
     assert "native FastAPI routes" in applied.stdout
     return project / ".sanka" / "output" / "fastapi"
@@ -176,6 +185,7 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     assert "GET /api/" in generated_keys
     assert all("{format}" not in key for key in generated_keys)
     assert manifest["dropped_routes"]
+    assert manifest["http_security"]["allowed_hosts"] == ["testserver", "localhost"]
     runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
     for forbidden in (
         "rest_framework",
@@ -206,6 +216,8 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     assert "async def list_gadget(" in app_text
     assert "async def create_gadget(" in app_text
     assert "await native.handle" in app_text
+    assert "Depends(native.read_raw_body)" not in app_text
+    assert "TrustedHostMiddleware" in app_text
     assert "lifespan" in app_text
     assert "finally:" in app_text
 
@@ -272,10 +284,64 @@ def test_native_output_matches_drf_behavior_and_database(
     assert source["database"] == native["database"]
 
 
+def test_native_output_limits_streamed_bodies_and_rejects_untrusted_hosts(
+    crud_project: Path, tmp_path: Path
+) -> None:
+    output = _generate(crud_project)
+    oversized = _run_probe(
+        "native",
+        crud_project,
+        tmp_path / "oversized.sqlite3",
+        output=output,
+        max_body_bytes=16,
+    )
+    # The first write scenario is larger than the configured 16-byte cap.
+    assert oversized["results"][1]["status"] == 413
+
+    hostile = _run_probe(
+        "native",
+        crud_project,
+        tmp_path / "hostile.sqlite3",
+        output=output,
+        scenarios=[{"method": "GET", "path": "/api/", "headers": {"host": "evil.test"}}],
+    )
+    assert hostile["results"][0]["status"] == 400
+
+
+def test_native_output_checks_host_before_https_redirect(
+    crud_project: Path, tmp_path: Path
+) -> None:
+    settings = crud_project / "crud_config" / "settings.py"
+    settings.write_text(
+        settings.read_text(encoding="utf-8") + "\nSECURE_SSL_REDIRECT = True\n",
+        encoding="utf-8",
+    )
+    output = _generate(crud_project)
+    hostile = _run_probe(
+        "native",
+        crud_project,
+        tmp_path / "hostile-redirect.sqlite3",
+        output=output,
+        scenarios=[{"method": "GET", "path": "/api/", "headers": {"host": "evil.test"}}],
+    )
+
+    assert hostile["results"][0]["status"] == 400
+
+
 def test_native_apply_is_deterministic(crud_project: Path) -> None:
     first = _generate(crud_project)
     contents = {path.name: path.read_bytes() for path in sorted(first.iterdir()) if path.is_file()}
-    applied = _run_cli(["apply", "--root", str(crud_project), "--force"], crud_project)
+    applied = _run_cli(
+        [
+            "apply",
+            "--root",
+            str(crud_project),
+            "--force",
+            "--plan-hash",
+            _plan_hash(crud_project),
+        ],
+        crud_project,
+    )
     assert applied.returncode == 0, applied.stderr
     for path in sorted(first.iterdir()):
         if path.is_file():
@@ -285,7 +351,16 @@ def test_native_apply_is_deterministic(crud_project: Path) -> None:
 def test_bench_candidate_emission(crud_project: Path) -> None:
     _generate(crud_project)
     applied = _run_cli(
-        ["apply", "--root", str(crud_project), "--force", "--bench-candidate", "candidate"],
+        [
+            "apply",
+            "--root",
+            str(crud_project),
+            "--force",
+            "--bench-candidate",
+            "candidate",
+            "--plan-hash",
+            _plan_hash(crud_project),
+        ],
         crud_project,
     )
     assert applied.returncode == 0, applied.stderr
@@ -495,14 +570,35 @@ def test_apply_sqlalchemy_and_rejects_psycopg_on_sqlite(crud_project: Path) -> N
         ["plan", str(crud_project), "--to", "fastapi", "--orm", "sqlalchemy"], crud_project
     )
     assert plan.returncode == 0, plan.stderr
-    applied = _run_cli(["apply", "--root", str(crud_project), "--orm", "sqlalchemy"], crud_project)
+    applied = _run_cli(
+        [
+            "apply",
+            "--root",
+            str(crud_project),
+            "--orm",
+            "sqlalchemy",
+            "--plan-hash",
+            _plan_hash(crud_project),
+        ],
+        crud_project,
+    )
     assert applied.returncode == 0, applied.stderr
     output = crud_project / ".sanka" / "output" / "fastapi"
     store = (output / "sanka_store.py").read_text(encoding="utf-8")
     assert "sqlalchemy" in store
     assert "Tortoise" not in store
     refused = _run_cli(
-        ["apply", "--root", str(crud_project), "--force", "--orm", "psycopg"], crud_project
+        [
+            "apply",
+            "--root",
+            str(crud_project),
+            "--force",
+            "--orm",
+            "psycopg",
+            "--plan-hash",
+            _plan_hash(crud_project),
+        ],
+        crud_project,
     )
     assert refused.returncode == 1, refused.stdout
     assert "PostgreSQL" in refused.stderr

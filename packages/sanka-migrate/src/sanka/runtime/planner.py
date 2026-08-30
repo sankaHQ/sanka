@@ -50,6 +50,7 @@ class RoutePlan:
     field_mappings: list[MigrationMappingField]
     estimated_count: int
     mapping_origin: MappingOrigin
+    candidate_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -59,6 +60,7 @@ class MigrationPlan:
     routes: list[RoutePlan]
     warnings: list[str] = field(default_factory=list)
     coverage: dict[str, Any] = field(default_factory=dict)
+    candidate_hash: str | None = None
 
     @property
     def ready(self) -> float:
@@ -80,11 +82,13 @@ class MigrationPlan:
                     "fieldMappings": [_mapping_field_payload(m) for m in r.field_mappings],
                     "estimatedCount": r.estimated_count,
                     "mappingOrigin": r.mapping_origin,
+                    "candidateIds": list(r.candidate_ids),
                 }
                 for r in self.routes
             ],
             "warnings": list(self.warnings),
             "coverage": dict(self.coverage),
+            "candidateHash": self.candidate_hash,
         }
 
     @property
@@ -107,11 +111,15 @@ class MigrationPlan:
                     field_mappings=[_mapping_field_from_payload(m) for m in r["fieldMappings"]],
                     estimated_count=r["estimatedCount"],
                     mapping_origin=cast(MappingOrigin, r["mappingOrigin"]),
+                    candidate_ids=[str(value) for value in r.get("candidateIds", [])],
                 )
                 for r in payload["routes"]
             ],
             warnings=list(payload.get("warnings", [])),
             coverage=dict(payload.get("coverage", {})),
+            candidate_hash=(
+                str(payload["candidateHash"]) if payload.get("candidateHash") else None
+            ),
         )
 
 

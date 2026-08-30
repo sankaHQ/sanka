@@ -34,6 +34,15 @@ def _workflow() -> dict[str, Any]:
     return loaded
 
 
+def _bench_workflow() -> dict[str, Any]:
+    loaded = yaml.load(
+        (ROOT / ".github" / "workflows" / "bench.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert isinstance(loaded, dict)
+    return loaded
+
+
 def _publish_step(job: dict[str, Any]) -> dict[str, Any]:
     steps = job["steps"]
     matches = [step for step in steps if str(step.get("uses", "")).startswith(PUBLISH_ACTION)]
@@ -72,3 +81,23 @@ def test_only_publish_jobs_receive_oidc_permission() -> None:
         if job_name == "build":
             continue
         assert job["permissions"] == {"id-token": "write"}
+
+
+def test_private_bench_credentials_only_run_on_trusted_main() -> None:
+    workflow = _bench_workflow()
+    triggers = workflow["on"]
+    assert "pull_request" not in triggers
+    assert triggers == {"push": {"branches": ["main"]}}
+
+    steps = workflow["jobs"]["bench"]["steps"]
+    secret_checkouts = [
+        step
+        for step in steps
+        if step.get("with", {}).get("token") == "${{ secrets.SANKA_BENCH_TOKEN }}"
+    ]
+    assert len(secret_checkouts) == 1
+    assert secret_checkouts[0]["with"]["persist-credentials"] == "false"
+    for step in steps:
+        uses = step.get("uses")
+        if uses is not None:
+            assert "@v" not in uses

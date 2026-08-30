@@ -19,10 +19,12 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from sanka.runtime.hashing import content_hash
 
 _SECRET_KEY_PATTERN = re.compile(r"password|secret|token|credential|api_key", re.IGNORECASE)
+_LIBPQ_PASSWORD_PATTERN = re.compile(r"(?:^|\s)password\s*=", re.IGNORECASE)
 _ENV_REF_PATTERN = re.compile(
     r"^\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))$"
 )
@@ -43,6 +45,33 @@ def _reject_secret_keys(mapping: Mapping[str, Any], *, path: str) -> None:
             _reject_secret_keys(value, path=f"{path}.{key}")
 
 
+def _reject_literal_connection_secret(connection: str | None, *, path: str) -> None:
+    if connection is None or _ENV_REF_PATTERN.match(connection):
+        return
+    if "://" not in connection:
+        if _LIBPQ_PASSWORD_PATTERN.search(connection):
+            raise SpecError(
+                f"{path} contains a literal secret; reference the complete DSN via "
+                "$ENV_VAR or use a named connection so credentials are never persisted"
+            )
+        return
+    try:
+        parsed = urlsplit(connection)
+        password = parsed.password
+    except ValueError as error:
+        raise SpecError(f"{path} is not a valid connection URL") from error
+    secret_query_keys = [
+        key
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+        if _SECRET_KEY_PATTERN.search(key)
+    ]
+    if password is not None or secret_query_keys:
+        raise SpecError(
+            f"{path} contains a literal secret; reference the complete URL via "
+            "$ENV_VAR or use a named connection so credentials are never persisted"
+        )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EndpointSpec:
     """One side of a migration: a connector type plus how to reach it."""
@@ -54,10 +83,22 @@ class EndpointSpec:
     def __post_init__(self) -> None:
         if not self.type.strip():
             raise SpecError("endpoint.type is required")
+        _reject_literal_connection_secret(self.connection, path=f"{self.type}.connection")
         _reject_secret_keys(self.options, path=f"{self.type}.options")
 
     def to_dict(self) -> dict[str, Any]:
         return {"type": self.type, "connection": self.connection, "options": dict(self.options)}
+
+    @classmethod
+    def _from_resolved_values(
+        cls, *, type: str, connection: str | None, options: dict[str, Any]
+    ) -> EndpointSpec:
+        """Build the execution-only form after a safe reference is resolved."""
+        endpoint = object.__new__(cls)
+        object.__setattr__(endpoint, "type", type)
+        object.__setattr__(endpoint, "connection", connection)
+        object.__setattr__(endpoint, "options", options)
+        return endpoint
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -159,7 +200,7 @@ def resolve_env(
         return value
 
     def resolve_endpoint(endpoint: EndpointSpec, *, section: str) -> EndpointSpec:
-        return EndpointSpec(
+        return EndpointSpec._from_resolved_values(
             type=endpoint.type,
             connection=substitute(endpoint.connection, path=f"{section}.connection"),
             options=substitute(endpoint.options, path=f"{section}.options"),

@@ -1,15 +1,13 @@
 name: Bench
 
 # Sanka Migration Bench regression gate: generate candidates from this
-# revision and grade them with the tool-neutral evaluator. sanka-bench is a
-# private repository, so the job needs a fine-grained PAT with read access to
-# sankaHQ/sanka-bench stored as the SANKA_BENCH_TOKEN secret; without the
-# secret the workflow reports a skip instead of failing.
+# trusted main revision and grade them with the tool-neutral evaluator.
+# sanka-bench is private, so this job must never run in a pull-request trust
+# domain. SANKA_BENCH_TOKEN is a fine-grained, read-only repository token.
 
 on:
   push:
     branches: [main]
-  pull_request:
 
 permissions:
   contents: read
@@ -26,15 +24,18 @@ jobs:
       - name: Skip (no SANKA_BENCH_TOKEN secret configured)
         if: steps.token.outputs.have != 'true'
         run: echo "SANKA_BENCH_TOKEN is not configured; the bench gate was skipped."
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.have == 'true'
-      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.have == 'true'
         with:
           repository: sankaHQ/sanka-bench
           token: ${{ secrets.SANKA_BENCH_TOKEN }}
           path: .bench/sanka-bench
-      - uses: astral-sh/setup-uv@v5
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         if: steps.token.outputs.have == 'true'
       - name: Sync
         if: steps.token.outputs.have == 'true'

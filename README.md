@@ -11,13 +11,15 @@ tables and does not import Django at serve time. Compatibility mode keeps a
 verified strangler bridge: FastAPI owns the generated route graph while the
 original Django/DRF handlers remain available in-process.
 
+Sanka requires Python 3.12 or newer.
+
 ```bash
 python -m pip install sanka-cli
 cd my-django-app
 
 sanka scan
 sanka plan --to fastapi
-sanka apply
+sanka apply --plan-hash sha256:<hash-from-plan>
 sanka test
 sanka verify
 ```
@@ -44,10 +46,10 @@ Git tag, and the files published on PyPI are authoritative for a release. The
 client `DEFAULT_API_BASE` constants and the live dataset-catalog response are
 authoritative for the hosted API. This table is the human-readable summary.
 
-The runtime and connectors are tested in their owning repositories. Database
-connectors are exercised in connector CI against live databases, and the
-Salesforce and HubSpot connectors are ports of adapters used for production
-migrations at Sanka.
+The runtime and connectors are tested in their owning repositories. Local
+database connectors are exercised in connector CI against live databases.
+Hosted SaaS/system migrations remain behind Sanka's hosted migration API and
+job runtime; they are not installed as local connector packages.
 
 ## Why Sanka?
 
@@ -92,9 +94,9 @@ migrations actually need:
 
 - **Nothing changes during planning.** Inspection and planning are write-free
   by construction; the output is a plan document with a canonical hash.
-- **Apply is bound to the reviewed plan.** Execution takes the plan hash you
-  (or your agent, or your approver) reviewed — change the plan, and the hash
-  no longer matches.
+- **Apply is bound to the reviewed plan and source set.** Planning freezes the
+  exact source identities into a candidate hash. Execution requires the plan
+  hash you reviewed and excludes records added afterward.
 - **Everything resumes.** Batching, throttling, retries with backoff, keyset
   checkpoints, and an identity ledger (source ID → destination ID) that makes
   re-running an interrupted migration converge instead of duplicating.
@@ -112,7 +114,7 @@ routers and `@action` decorators:
 sanka scan                         # writes .sanka/scan.json
 sanka scan --json                  # also prints the application IR
 sanka plan --to fastapi            # native plan by default; --strategy compatibility for the bridge
-sanka apply                         # writes only to .sanka/output/fastapi
+sanka apply --plan-hash sha256:…    # exact hash printed by plan; writes generated output
 sanka test                          # writes and runs test_generated.py against that app
 sanka verify                       # integrity + route parity + safe HTTP probes
 ```
@@ -191,14 +193,14 @@ target:
 
 ```bash
 uv run sanka plan     # inspect both sides, print the reviewable plan + hash
-uv run sanka apply    # execute exactly the reviewed plan; resumable
+uv run sanka apply --plan-hash sha256:…  # execute the reviewed plan; resumable
 uv run sanka verify   # reconcile source, ledger, and destination
 uv run sanka status   # run status + per-route ledger counts
 ```
 
 Specs never contain secrets: `$ENV_VAR` references resolve only at execution
-time, secret-looking option keys are rejected outright, and the plan hash is
-computed over the unresolved spec.
+time, secret-looking option keys and literal password-bearing connection URLs
+are rejected outright, and the plan hash is computed over the unresolved spec.
 
 ## What the runtime handles for you
 
