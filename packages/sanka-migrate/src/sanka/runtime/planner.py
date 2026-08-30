@@ -58,6 +58,10 @@ class MigrationPlan:
     source_provider: str
     target_provider: str
     routes: list[RoutePlan]
+    spec_hash: str | None = None
+    source_connection_reference: str | None = None
+    target_connection_reference: str | None = None
+    write_policies: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     coverage: dict[str, Any] = field(default_factory=dict)
     candidate_hash: str | None = None
@@ -71,6 +75,10 @@ class MigrationPlan:
         return {
             "sourceProvider": self.source_provider,
             "targetProvider": self.target_provider,
+            "specHash": self.spec_hash,
+            "sourceConnectionReference": self.source_connection_reference,
+            "targetConnectionReference": self.target_connection_reference,
+            "writePolicies": dict(self.write_policies),
             "routes": [
                 {
                     "routeKey": r.route_key,
@@ -100,6 +108,18 @@ class MigrationPlan:
         return cls(
             source_provider=payload["sourceProvider"],
             target_provider=payload["targetProvider"],
+            spec_hash=str(payload["specHash"]) if payload.get("specHash") else None,
+            source_connection_reference=(
+                str(payload["sourceConnectionReference"])
+                if payload.get("sourceConnectionReference") is not None
+                else None
+            ),
+            target_connection_reference=(
+                str(payload["targetConnectionReference"])
+                if payload.get("targetConnectionReference") is not None
+                else None
+            ),
+            write_policies=dict(payload.get("writePolicies") or {}),
             routes=[
                 RoutePlan(
                     route_key=r["routeKey"],

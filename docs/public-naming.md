@@ -88,7 +88,7 @@ API migration if they are ever changed.
 ## Release boundary
 
 This naming contract prepares artifacts only. It does not publish a package,
-change repository visibility, configure a PyPI trusted publisher, or adopt the
-draft commercial-license text. Those are separate approval gates. The current
-contribution terms use the license applicable to each modified file and do not
-require a CLA.
+change repository visibility, or configure a PyPI trusted publisher. Those are
+separate approval gates. Commercial licensing is available by contacting Sanka.
+The current contribution terms use the license applicable to each modified file
+and do not require a CLA.

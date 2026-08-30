@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
@@ -159,6 +160,29 @@ class InspectionResult:
     suggested_targets: dict[str, str | None]
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CandidateBudget:
+    """Hard resource ceilings for freezing and loading exact candidate sets."""
+
+    max_candidates: int = 100_000
+    max_pages: int = 10_000
+    max_identity_bytes: int = 1_024
+    max_candidate_bytes: int = 64 * 1024 * 1024
+    max_plan_bytes: int = 96 * 1024 * 1024
+    max_elapsed_seconds: float = 30 * 60
+
+    def __post_init__(self) -> None:
+        values = (
+            self.max_candidates,
+            self.max_pages,
+            self.max_identity_bytes,
+            self.max_candidate_bytes,
+            self.max_plan_bytes,
+        )
+        if any(value <= 0 for value in values) or self.max_elapsed_seconds <= 0:
+            raise ValueError("candidate budget limits must all be positive")
+
+
 class MigrationEngine:
     """Drives migration runs against a state store and connector registry."""
 
@@ -171,13 +195,19 @@ class MigrationEngine:
         batch_size: int = 100,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         env: dict[str, str] | None = None,
+        candidate_budget: CandidateBudget | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._store = store
         self._registry = registry
         self._credential_provider = credential_provider
+        if not 1 <= batch_size <= 10_000:
+            raise ValueError("batch_size must be between 1 and 10,000")
         self._batch_size = batch_size
         self._sleep = sleep
         self._env = env
+        self._candidate_budget = candidate_budget or CandidateBudget()
+        self._monotonic = monotonic
 
     @property
     def store(self) -> StateStore:
@@ -238,7 +268,8 @@ class MigrationEngine:
         return result
 
     async def plan(self, run_id: str) -> MigrationPlan:
-        spec = self._spec(run_id)
+        unresolved_spec = self._unresolved_spec(run_id)
+        spec = self._resolve_spec(unresolved_spec)
         run = self._store.get_run(run_id)
         if run.inspection_json is None:
             await self.inspect(run_id)
@@ -273,10 +304,15 @@ class MigrationEngine:
         plan = replace(
             plan,
             routes=planned_routes,
+            spec_hash=run.spec_hash,
+            source_connection_reference=unresolved_spec.source.connection,
+            target_connection_reference=unresolved_spec.target.connection,
+            write_policies={"conflictPolicy": _conflict_policy(unresolved_spec)},
             candidate_hash=(
                 exact_candidate_hash(candidate_ids_by_route) if candidate_ids_by_route else None
             ),
         )
+        self._validate_candidate_budget(plan)
         self._store.save_plan(run_id, canonical_json(plan.to_payload()), plan.plan_hash)
         return plan
 
@@ -300,11 +336,7 @@ class MigrationEngine:
         run = self._store.get_run(run_id)
         if run.plan_json is None or run.plan_hash is None:
             raise ExecutionError(f"run {run_id!r} has no plan; run plan first")
-        plan = MigrationPlan.from_payload(json.loads(run.plan_json))
-        if plan.plan_hash != run.plan_hash:
-            raise PlanMismatchError(
-                f"persisted plan content for run {run_id!r} does not match its stored hash"
-            )
+        plan = self._load_bound_plan(run_id)
         spec = self._spec(run_id)
         source, source_credentials = await self._source(spec)
         try:
@@ -334,11 +366,7 @@ class MigrationEngine:
             raise PlanMismatchError(
                 f"plan hash mismatch: expected {run.plan_hash}, got {plan_hash}"
             )
-        plan = MigrationPlan.from_payload(json.loads(run.plan_json))
-        if plan.plan_hash != run.plan_hash:
-            raise PlanMismatchError(
-                f"persisted plan content for run {run_id!r} does not match its stored hash"
-            )
+        plan = self._load_bound_plan(run_id)
         approved_scope = self._approved_exact_scope(plan)
         spec = self._spec(run_id)
         source, source_credentials = await self._source(spec)
@@ -388,11 +416,7 @@ class MigrationEngine:
         run = self._store.get_run(run_id)
         if run.plan_json is None or run.plan_hash is None:
             raise ExecutionError(f"run {run_id!r} has no plan; nothing to verify")
-        plan = MigrationPlan.from_payload(json.loads(run.plan_json))
-        if plan.plan_hash != run.plan_hash:
-            raise PlanMismatchError(
-                f"persisted plan content for run {run_id!r} does not match its stored hash"
-            )
+        plan = self._load_bound_plan(run_id)
         spec = self._spec(run_id)
         source, source_credentials = await self._source(spec)
         destination, destination_credentials = await self._destination(spec)
@@ -601,15 +625,42 @@ class MigrationEngine:
         seen_ids: set[str] = set()
         seen_cursors: set[str] = set()
         cursor: str | None = None
+        page_count = 0
+        candidate_bytes = 0
+        started_at = self._monotonic()
         while True:
-            page = await source.read_records(
-                source_credentials,
-                object_type=route.source_object,
-                field_keys=[route.identity_field],
-                limit=self._batch_size,
-                cursor=cursor,
-                source_filter=None,
-            )
+            page_count += 1
+            if page_count > self._candidate_budget.max_pages:
+                raise ExecutionError(
+                    f"route {route.route_key!r} exceeds the candidate page budget "
+                    f"({self._candidate_budget.max_pages})"
+                )
+            elapsed = self._monotonic() - started_at
+            if elapsed > self._candidate_budget.max_elapsed_seconds:
+                raise ExecutionError(
+                    f"route {route.route_key!r} exceeds the candidate time budget "
+                    f"({self._candidate_budget.max_elapsed_seconds:g}s)"
+                )
+            remaining = self._candidate_budget.max_elapsed_seconds - elapsed
+            try:
+                async with asyncio.timeout(remaining):
+                    page = await source.read_records(
+                        source_credentials,
+                        object_type=route.source_object,
+                        field_keys=[route.identity_field],
+                        limit=self._batch_size,
+                        cursor=cursor,
+                        source_filter=None,
+                    )
+            except TimeoutError as error:
+                raise ExecutionError(
+                    f"route {route.route_key!r} exceeded the candidate time budget"
+                ) from error
+            if len(page.records) > self._batch_size:
+                raise ExecutionError(
+                    f"route {route.route_key!r} returned more than the requested "
+                    f"candidate page size ({self._batch_size})"
+                )
             for record in page.records:
                 raw_identity = record.get(route.identity_field)
                 identity = "" if raw_identity is None else str(raw_identity).strip()
@@ -618,15 +669,36 @@ class MigrationEngine:
                         f"route {route.route_key!r} has a record without identity "
                         f"field {route.identity_field!r}"
                     )
+                identity_bytes = len(identity.encode("utf-8"))
+                if identity_bytes > self._candidate_budget.max_identity_bytes:
+                    raise ExecutionError(
+                        f"route {route.route_key!r} has an identity exceeding "
+                        f"{self._candidate_budget.max_identity_bytes} bytes"
+                    )
                 if identity in seen_ids:
                     raise ExecutionError(
                         f"route {route.route_key!r} has duplicate source identity {identity!r}"
                     )
                 seen_ids.add(identity)
                 candidate_ids.append(identity)
+                candidate_bytes += identity_bytes
+                if len(candidate_ids) > self._candidate_budget.max_candidates:
+                    raise ExecutionError(
+                        f"route {route.route_key!r} exceeds the candidate count budget "
+                        f"({self._candidate_budget.max_candidates})"
+                    )
+                if candidate_bytes > self._candidate_budget.max_candidate_bytes:
+                    raise ExecutionError(
+                        f"route {route.route_key!r} exceeds the candidate byte budget "
+                        f"({self._candidate_budget.max_candidate_bytes})"
+                    )
             if not page.has_more:
                 return sorted(candidate_ids)
             next_cursor = str(page.next_cursor or "").strip()
+            if len(next_cursor.encode("utf-8")) > self._candidate_budget.max_identity_bytes:
+                raise ExecutionError(
+                    f"route {route.route_key!r} returned an oversized candidate cursor"
+                )
             if not next_cursor or next_cursor == cursor or next_cursor in seen_cursors:
                 raise ExecutionError(
                     f"route {route.route_key!r} did not advance while freezing candidates"
@@ -700,9 +772,64 @@ class MigrationEngine:
         return route.estimated_count if route.estimated_count > 0 else None
 
     def _spec(self, run_id: str) -> MigrationSpec:
+        return self._resolve_spec(self._unresolved_spec(run_id))
+
+    def _resolve_spec(self, spec: MigrationSpec) -> MigrationSpec:
+        return resolve_env(spec, env=self._env) if self._env is not None else resolve_env(spec)
+
+    def _load_bound_plan(self, run_id: str) -> MigrationPlan:
+        run = self._store.get_run(run_id)
+        if run.plan_json is None or run.plan_hash is None:
+            raise ExecutionError(f"run {run_id!r} has no plan")
+        if len(run.plan_json.encode("utf-8")) > self._candidate_budget.max_plan_bytes:
+            raise PlanMismatchError(
+                f"persisted plan for run {run_id!r} exceeds the plan-size safety limit"
+            )
+        plan = MigrationPlan.from_payload(json.loads(run.plan_json))
+        if plan.plan_hash != run.plan_hash:
+            raise PlanMismatchError(
+                f"persisted plan content for run {run_id!r} does not match its stored hash"
+            )
+        spec = self._unresolved_spec(run_id)
+        expected_policies = {"conflictPolicy": _conflict_policy(spec)}
+        if (
+            plan.spec_hash != run.spec_hash
+            or plan.source_provider != spec.source.type
+            or plan.target_provider != spec.target.type
+            or plan.source_connection_reference != spec.source.connection
+            or plan.target_connection_reference != spec.target.connection
+            or plan.write_policies != expected_policies
+        ):
+            raise PlanMismatchError(
+                f"persisted plan for run {run_id!r} is not bound to the current reviewed spec"
+            )
+        self._validate_candidate_budget(plan)
+        return plan
+
+    def _validate_candidate_budget(self, plan: MigrationPlan) -> None:
+        total_candidates = 0
+        total_bytes = 0
+        for route in plan.routes:
+            total_candidates += len(route.candidate_ids)
+            total_bytes += sum(len(value.encode("utf-8")) for value in route.candidate_ids)
+            if any(
+                len(value.encode("utf-8")) > self._candidate_budget.max_identity_bytes
+                for value in route.candidate_ids
+            ):
+                raise PlanMismatchError("persisted plan contains an oversized candidate identity")
+        if total_candidates > self._candidate_budget.max_candidates:
+            raise PlanMismatchError("persisted plan exceeds the candidate count safety limit")
+        if total_bytes > self._candidate_budget.max_candidate_bytes:
+            raise PlanMismatchError("persisted plan exceeds the candidate byte safety limit")
+
+    def _unresolved_spec(self, run_id: str) -> MigrationSpec:
         run = self._store.get_run(run_id)
         spec = MigrationSpec.from_dict(json.loads(run.spec_json))
-        return resolve_env(spec, env=self._env) if self._env is not None else resolve_env(spec)
+        if spec.spec_hash != run.spec_hash:
+            raise PlanMismatchError(
+                f"persisted spec content for run {run_id!r} does not match its stored hash"
+            )
+        return spec
 
     async def _source(self, spec: MigrationSpec) -> tuple[SourceConnector, Credentials]:
         return self._registry.source(spec.source.type), await self._credentials(spec.source)

@@ -123,6 +123,11 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("root", nargs="?", default=".", help="Django repository root")
     scan.add_argument("--settings", help="Django settings module (auto-detected by default)")
     scan.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    scan.add_argument(
+        "--trust-source-code",
+        action="store_true",
+        help="allow unsandboxed Django startup only when no OS sandbox is available",
+    )
     scan.add_argument("--json", action="store_true", help="print the scan artifact as JSON")
     scan.set_defaults(handler=_cmd_scan)
 
@@ -228,6 +233,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="JSON file with additional read-only HTTP verification cases",
     )
     verify.add_argument("--no-http", action="store_true", help="skip safe read-only HTTP probes")
+    verify.add_argument(
+        "--trust-source-code",
+        action="store_true",
+        help="allow unsandboxed source probes only when no OS sandbox is available",
+    )
     verify.add_argument("--json", action="store_true", help="print framework verification as JSON")
     verify.set_defaults(handler=_cmd_verify)
 
@@ -474,6 +484,7 @@ async def _cmd_verify(args: argparse.Namespace) -> int:
                 output=args.output,
                 probe_http=not args.no_http,
                 cases=args.cases,
+                allow_unsafe_source_execution=args.trust_source_code,
             )
         )
         if args.json:
@@ -494,6 +505,7 @@ async def _cmd_scan(args: argparse.Namespace) -> int:
         args.root,
         settings_module=args.settings,
         artifact_dir=args.artifact_dir,
+        allow_unsafe_source_execution=args.trust_source_code,
     )
     if args.json:
         print(json.dumps(scan.to_dict(), ensure_ascii=False, indent=2))
@@ -842,10 +854,11 @@ def _print_framework_test(report: dict[str, Any]) -> None:
     print()
     print(f"Wrote {report['file']}")
     if report.get("environment"):
-        print(f"Generated environment: {report['environment']}")
-        print(f"Generated Python: {report['python']}")
-        print(f"Dependency metadata: {report['pyproject']}")
-        print(f"Locked dependencies: {report['lockfile']}")
+        print(f"Attested dependency metadata: {report['pyproject']}")
+        print(f"Disposable environment: {report['environment']}")
+        print(f"Disposable Python: {report['python']}")
+        print(f"Disposable project: {report['environment_pyproject']}")
+        print(f"Resolved lockfile: {report['lockfile']}")
     print(f"Ran {report['tests']} tests")
     if report.get("allow_writes"):
         print("Writes ran against an isolated SQLite copy")
@@ -907,6 +920,7 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
     if routes.get("dropped"):
         print(f"  {len(routes['dropped'])} format-suffix aliases dropped by design")
     print("Generated code")
+    print("  machine-local bundle integrity attestation verified ✓")
     print("  generated Python files exist and compile ✓")
     print("  manifest matches the current scan and reviewed plan ✓")
     if native:

@@ -353,13 +353,18 @@ def _create_run(
         )
         candidates[route.route_key] = ids
         planned_routes.append(replace(route, candidate_ids=ids))
+    spec = _spec()
     plan = MigrationPlan(
         source_provider="memsrc",
         target_provider="memdst",
         routes=planned_routes,
+        spec_hash=spec.spec_hash,
+        source_connection_reference=spec.source.connection,
+        target_connection_reference=spec.target.connection,
+        write_policies={"conflictPolicy": "update_existing"},
         candidate_hash=exact_candidate_hash(candidates),
     )
-    run_id = engine.create(_spec())
+    run_id = engine.create(spec)
     engine.store.save_plan(run_id, canonical_json(plan.to_payload()), plan.plan_hash)
     return run_id, plan.plan_hash
 

@@ -66,8 +66,10 @@ they bind every later phase:
    destination writer; nothing changes during planning — provably, not by
    convention.
 3. **`apply` is scope- and hash-bound.** Execution takes the approved plan
-   hash and an explicit scope (exact ID set, or high-water mark + candidate
-   hash). Changing the plan invalidates the approval.
+   hash and an explicit exact-ID scope. The unresolved spec hash, connection
+   references, nonsecret options, and write policy are part of that approval;
+   changing any of them invalidates it. Candidate enumeration and persisted
+   plans have hard count, page, identity-size, byte, and time budgets.
 4. **Everything resumes.** Checkpoints, idempotent writes keyed by an identity
    ledger (source ID → destination ID with terminal status), and
    attempt-claimed execution are engine features, not connector obligations.
@@ -76,6 +78,10 @@ they bind every later phase:
 6. **Connectors declare capabilities.** Optional behaviors (bounded reads,
    high-water marks, destination schema reconciliation) are typed capability
    protocols the planner discovers — not duck-typed lookups.
+7. **Executable inputs cross an isolation boundary.** Dynamic source-framework
+   inspection runs in an OS-contained worker. Generated code and dependency
+   metadata must match a machine-local attestation before a disposable target
+   environment is created or any generated Python is imported.
 
 ## Roadmap
 

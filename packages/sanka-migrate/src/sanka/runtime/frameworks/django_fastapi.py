@@ -43,6 +43,12 @@ from sanka.runtime.frameworks.generated_environment import (
     GeneratedEnvironment,
     ensure_generated_environment,
 )
+from sanka.runtime.frameworks.generated_integrity import (
+    GeneratedIntegrityError,
+    attest_generated_bundle,
+    read_generated_manifest,
+    verify_generated_bundle,
+)
 from sanka.runtime.frameworks.model import (
     ApiRootIR,
     DatabaseIR,
@@ -63,6 +69,16 @@ from sanka.runtime.frameworks.native_async import (
     render_async_sql_files,
     render_generated_pyproject,
     resolve_sql_engine,
+)
+from sanka.runtime.frameworks.untrusted_framework import (
+    UntrustedFrameworkError,
+    run_untrusted_framework_worker,
+)
+from sanka.runtime.safe_local_io import (
+    absolute_path,
+    ensure_safe_directory,
+    safe_read_text,
+    safe_write_text,
 )
 
 DEFAULT_ARTIFACT_DIR = ".sanka"
@@ -136,11 +152,38 @@ def scan_django(
     *,
     settings_module: str | None = None,
     artifact_dir: str | Path = DEFAULT_ARTIFACT_DIR,
+    allow_unsafe_source_execution: bool = False,
 ) -> FrameworkScan:
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         raise FrameworkMigrationError(f"source root is not a directory: {root_path}")
     selected_settings = settings_module or _infer_settings_module(root_path)
+    try:
+        payload = run_untrusted_framework_worker(
+            {
+                "operation": "scan",
+                "root": str(root_path),
+                "settings": selected_settings,
+            },
+            readable_roots=[root_path],
+            allow_unsafe=allow_unsafe_source_execution,
+        )
+        scan_payload = payload["scan"]
+        if not isinstance(scan_payload, dict):
+            raise TypeError("scan payload is not an object")
+        scan = FrameworkScan.from_dict(scan_payload)
+    except (KeyError, TypeError, ValueError, UntrustedFrameworkError) as error:
+        raise FrameworkMigrationError(str(error)) from error
+    expected = scan.with_hash().scan_hash
+    if not scan.scan_hash or scan.scan_hash != expected:
+        raise FrameworkMigrationError("isolated Django scan returned an invalid content hash")
+    _write_json(_artifact_path(root_path, artifact_dir, SCAN_FILE), scan.to_dict())
+    return scan
+
+
+def _scan_django_in_process(root_path: Path, selected_settings: str) -> FrameworkScan:
+    """Worker-only implementation. Call :func:`scan_django` from trusted code."""
+
     django, rest_framework = _bootstrap_django(root_path, selected_settings)
     django_conf = importlib.import_module("django.conf")
     middleware = tuple(str(item) for item in django_conf.settings.MIDDLEWARE)
@@ -186,7 +229,6 @@ def scan_django(
             sorted(walk.skipped_routes, key=lambda item: (item.pattern, item.view))
         ),
     ).with_hash()
-    _write_json(_artifact_path(root_path, artifact_dir, SCAN_FILE), scan.to_dict())
     return scan
 
 
@@ -367,14 +409,14 @@ def apply_fastapi_plan(
     output_path = Path(output_value)
     if not output_path.is_absolute():
         output_path = root_path / output_path
-    output_path = output_path.resolve()
+    output_path = absolute_path(output_path)
     if output_path == root_path:
         raise FrameworkMigrationError("generated output cannot overwrite the source root")
     if output_path.exists() and any(output_path.iterdir()) and not force:
         raise FrameworkMigrationError(
             f"output is not empty: {output_path}; pass --force to replace generated files"
         )
-    output_path.mkdir(parents=True, exist_ok=True)
+    ensure_safe_directory(output_path)
     relative_source = os.path.relpath(root_path, output_path)
     if plan.mode == NATIVE_STRATEGY:
         scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
@@ -415,7 +457,7 @@ def write_bench_candidate(
     destination_path = Path(destination)
     if not destination_path.is_absolute():
         destination_path = root_path / destination_path
-    destination_path = destination_path.resolve()
+    destination_path = absolute_path(destination_path)
     if destination_path == root_path:
         raise FrameworkMigrationError("benchmark candidate cannot overwrite the source root")
     overlay = destination_path / "overlay"
@@ -696,6 +738,17 @@ def _render_bridge_output(plan: FrameworkPlan, output_path: Path, *, source_root
     requirements = "fastapi>=0.115,<1\nuvicorn[standard]>=0.30,<1\n"
     _write_text(output_path / "requirements.txt", requirements)
     _write_text(output_path / "pyproject.toml", render_generated_pyproject(requirements))
+    manifest = attest_generated_bundle(
+        output_path,
+        manifest,
+        protected_names=[
+            "README.md",
+            "app.py",
+            "pyproject.toml",
+            "requirements.txt",
+            "sanka_compat.py",
+        ],
+    )
     _write_json(output_path / GENERATED_MANIFEST, manifest)
     return len(automatic)
 
@@ -856,11 +909,23 @@ def _render_native_output(
         manifest["has_user_logic"] = True
         generated_names.append("sanka_user_logic.py")
         _write_text(output_path / "sanka_user_logic.py", user_logic)
-    manifest["generated_files"] = [entrypoint, *generated_names]
+    generated_files = [entrypoint, *generated_names]
+    manifest["generated_files"] = generated_files
     _write_text(output_path / entrypoint, _render_native_app(manifest))
     _write_text(
         output_path / "README.md",
         _render_native_readme(plan, sql_engine, entrypoint=entrypoint),
+    )
+    protected_names = [
+        *generated_files,
+        "README.md",
+        "pyproject.toml",
+        "requirements.txt",
+    ]
+    manifest = attest_generated_bundle(
+        output_path,
+        manifest,
+        protected_names=list(dict.fromkeys(protected_names)),
     )
     _write_json(output_path / GENERATED_MANIFEST, manifest)
     return len(generated)
@@ -873,6 +938,7 @@ def verify_fastapi_migration(
     output: str | Path | None = None,
     probe_http: bool = True,
     cases: str | Path | None = None,
+    allow_unsafe_source_execution: bool = False,
 ) -> dict[str, Any]:
     root_path = Path(root).resolve()
     scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
@@ -881,11 +947,15 @@ def verify_fastapi_migration(
     output_path = Path(output_value)
     if not output_path.is_absolute():
         output_path = root_path / output_path
-    output_path = output_path.resolve()
+    output_path = absolute_path(output_path)
     scan_path = _artifact_path(root_path, artifact_dir, SCAN_FILE).resolve()
     plan_path = _artifact_path(root_path, artifact_dir, PLAN_FILE).resolve()
-    manifest_path = (output_path / GENERATED_MANIFEST).resolve()
-    manifest = _read_json(manifest_path, label="generated manifest")
+    manifest_path = output_path / GENERATED_MANIFEST
+    try:
+        manifest = read_generated_manifest(manifest_path)
+        verify_generated_bundle(output_path, manifest)
+    except GeneratedIntegrityError as error:
+        raise FrameworkMigrationError(str(error)) from error
     if manifest.get("source_scan_hash") != scan.scan_hash:
         raise FrameworkMigrationError("generated output does not match the current scan")
     if manifest.get("plan_hash") != plan.plan_hash:
@@ -918,10 +988,11 @@ def verify_fastapi_migration(
             target_python=(
                 generated_environment.python if generated_environment is not None else None
             ),
+            allow_unsafe_source_execution=allow_unsafe_source_execution,
         )
     failed_probes = [probe for probe in probes if not probe["ok"]]
     generated_files = [
-        str((output_path / str(name)).resolve())
+        str(absolute_path(output_path / str(name)))
         for name in manifest.get("generated_files", [])
         if str(name).endswith(".py")
     ]
@@ -1631,20 +1702,13 @@ def _match_perform_create(view_class: type[Any]) -> str | None:
     return str(keyword.arg)
 
 
-def _analyze_create_carryover(
+def _match_nested_create(
     serializer_class: type[Any],
 ) -> tuple[str, tuple[tuple[str, str, str | None], ...]] | None:
-    """Admit an overridden ``create()`` into the native envelope.
+    """Match exactly the nested parent-plus-children create idiom we generate."""
 
-    Nested writes are regenerated as async SQL (parent row plus children),
-    not re-emitted as Django. The author's ``create()`` still has to resolve
-    only to the application's models, ``django.db.transaction``, or
-    ``serializers.ValidationError`` — anything else stays outside the envelope.
-    """
-    import builtins
     import textwrap
 
-    serializers_module = importlib.import_module("rest_framework.serializers")
     models_module = importlib.import_module("django.db.models")
     try:
         source = textwrap.dedent(inspect.getsource(serializer_class.create))
@@ -1661,48 +1725,166 @@ def _analyze_create_carryover(
     if len(arg_names) != 2 or func.args.kwonlyargs or func.args.vararg or func.args.kwarg:
         return None
     self_name, data_name = arg_names
-
-    bound: set[str] = {self_name, data_name}
-    loaded: set[str] = set()
-    attribute_uses: dict[str, set[str]] = {}
-    for node in ast.walk(func):
-        if isinstance(node, ast.Import | ast.ImportFrom):
-            return None
-        if isinstance(node, ast.Name):
-            if isinstance(node.ctx, ast.Store):
-                bound.add(node.id)
-            elif isinstance(node.ctx, ast.Load):
-                loaded.add(node.id)
-        elif isinstance(node, ast.arg):
-            bound.add(node.arg)
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            bound.add(node.name)
-        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            attribute_uses.setdefault(node.value.id, set()).add(node.attr)
-    if self_name in loaded:
+    if any(
+        isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == self_name
+        for node in ast.walk(func)
+    ):
         return None
-
+    writable_nested = [
+        (str(name), field)
+        for name, field in serializer_class().fields.items()
+        if getattr(field, "many", False) and not getattr(field, "read_only", False)
+    ]
+    if len(writable_nested) != 1:
+        return None
+    nested_name, nested_field = writable_nested[0]
+    parent_model = serializer_class.Meta.model
+    child_model = nested_field.child.Meta.model
+    if not (
+        inspect.isclass(parent_model)
+        and inspect.isclass(child_model)
+        and issubclass(parent_model, models_module.Model)
+        and issubclass(child_model, models_module.Model)
+    ):
+        return None
+    parent_model_class = cast(type[Any], parent_model)
+    child_model_class = cast(type[Any], child_model)
+    relation_names = {
+        str(field.name)
+        for field in child_model_class._meta.fields
+        if getattr(getattr(field, "remote_field", None), "model", None) is parent_model
+    }
+    if len(relation_names) != 1:
+        return None
+    relation_name = next(iter(relation_names))
+    body = [node for node in func.body if not _is_docstring(node)]
+    if len(body) != 3 or not isinstance(body[0], ast.Assign):
+        return None
+    pop_assignment = body[0]
+    if len(pop_assignment.targets) != 1 or not isinstance(pop_assignment.targets[0], ast.Name):
+        return None
+    children_name = pop_assignment.targets[0].id
+    pop_call = pop_assignment.value
+    if not (
+        isinstance(pop_call, ast.Call)
+        and _attr_chain(pop_call.func) == [data_name, "pop"]
+        and not pop_call.keywords
+        and len(pop_call.args) == 1
+        and isinstance(pop_call.args[0], ast.Constant)
+        and pop_call.args[0].value == nested_name
+    ):
+        return None
+    transaction_alias: str | None = None
+    transaction_body: list[ast.stmt]
+    if not isinstance(body[1], ast.With) or len(body[1].items) != 1:
+        return None
+    context = body[1].items[0]
+    if context.optional_vars is not None or not isinstance(context.context_expr, ast.Call):
+        return None
+    atomic_call = context.context_expr
+    chain = _attr_chain(atomic_call.func)
+    if (
+        chain is None
+        or len(chain) != 2
+        or chain[1] != "atomic"
+        or atomic_call.args
+        or atomic_call.keywords
+    ):
+        return None
+    transaction_alias = chain[0]
+    transaction_body = body[1].body
+    if len(transaction_body) != 2 or not isinstance(transaction_body[0], ast.Assign):
+        return None
+    parent_assignment = transaction_body[0]
+    if len(parent_assignment.targets) != 1 or not isinstance(
+        parent_assignment.targets[0], ast.Name
+    ):
+        return None
+    parent_name = parent_assignment.targets[0].id
+    parent_call = parent_assignment.value
+    if not isinstance(parent_call, ast.Call):
+        return None
+    parent_chain = _attr_chain(parent_call.func)
+    if parent_chain is None or len(parent_chain) != 3 or parent_chain[1:] != ["objects", "create"]:
+        return None
+    parent_alias = parent_chain[0]
+    if parent_call.args or len(parent_call.keywords) != 1:
+        return None
+    parent_splat = parent_call.keywords[0]
+    if not (
+        parent_splat.arg is None
+        and isinstance(parent_splat.value, ast.Name)
+        and parent_splat.value.id == data_name
+    ):
+        return None
+    loop = transaction_body[1]
+    if not (
+        isinstance(loop, ast.For)
+        and isinstance(loop.target, ast.Name)
+        and isinstance(loop.iter, ast.Name)
+        and loop.iter.id == children_name
+        and not loop.orelse
+        and len(loop.body) == 1
+        and isinstance(loop.body[0], ast.Expr)
+        and isinstance(loop.body[0].value, ast.Call)
+    ):
+        return None
+    child_name = loop.target.id
+    child_call = loop.body[0].value
+    child_chain = _attr_chain(child_call.func)
+    if (
+        child_chain is None
+        or len(child_chain) != 3
+        or child_chain[1:] != ["objects", "create"]
+        or child_call.args
+    ):
+        return None
+    child_alias = child_chain[0]
+    if len(child_call.keywords) != 2:
+        return None
+    relation_keywords = [keyword for keyword in child_call.keywords if keyword.arg is not None]
+    splats = [keyword for keyword in child_call.keywords if keyword.arg is None]
+    if not (
+        len(relation_keywords) == 1
+        and relation_keywords[0].arg == relation_name
+        and isinstance(relation_keywords[0].value, ast.Name)
+        and relation_keywords[0].value.id == parent_name
+        and len(splats) == 1
+        and isinstance(splats[0].value, ast.Name)
+        and splats[0].value.id == child_name
+    ):
+        return None
+    tail = body[2]
+    if not (
+        isinstance(tail, ast.Return)
+        and isinstance(tail.value, ast.Name)
+        and tail.value.id == parent_name
+    ):
+        return None
     module_globals = vars(importlib.import_module(serializer_class.__module__))
-    imports: list[tuple[str, str, str | None]] = []
-    for name in sorted(loaded - bound):
-        if name in vars(builtins):
-            continue
-        if name not in module_globals:
-            return None
-        value = module_globals[name]
-        if inspect.isclass(value) and issubclass(value, models_module.Model):
-            imports.append((name, str(value.__module__), str(value.__qualname__)))
-        elif inspect.ismodule(value) and value.__name__ == "django.db.transaction":
-            imports.append((name, "django.db.transaction", None))
-        elif value is serializers_module:
-            if attribute_uses.get(name, set()) - {"ValidationError"}:
-                return None
-            imports.append((name, "__sanka_shim__", "serializers"))
-        elif value is serializers_module.ValidationError:
-            imports.append((name, "__sanka_shim__", "ValidationError"))
-        else:
-            return None
-    return source, tuple(imports)
+    if module_globals.get(parent_alias) is not parent_model:
+        return None
+    if module_globals.get(child_alias) is not child_model:
+        return None
+    transaction_value = module_globals.get(transaction_alias)
+    if not (
+        inspect.ismodule(transaction_value)
+        and transaction_value.__name__ == "django.db.transaction"
+    ):
+        return None
+    return source, (
+        (
+            parent_alias,
+            str(parent_model_class.__module__),
+            str(parent_model_class.__qualname__),
+        ),
+        (
+            child_alias,
+            str(child_model_class.__module__),
+            str(child_model_class.__qualname__),
+        ),
+        (transaction_alias, "django.db.transaction", None),
+    )
 
 
 def _match_update_drop(serializer_class: type[Any]) -> tuple[str, ...] | None:
@@ -1873,7 +2055,7 @@ def _build_serializer_ir(
         create_overridden = serializer_class.create is not serializers_module.ModelSerializer.create
         update_overridden = serializer_class.update is not serializers_module.ModelSerializer.update
         if create_overridden:
-            carryover = _analyze_create_carryover(serializer_class)
+            carryover = _match_nested_create(serializer_class)
             if carryover is None:
                 supported = False
             else:
@@ -2224,11 +2406,9 @@ def _artifact_path(root: Path, artifact_dir: str | Path, name: str) -> Path:
 
 
 def _read_json(path: Path, *, label: str) -> dict[str, Any]:
-    if not path.is_file():
-        raise FrameworkMigrationError(f"{label} artifact not found: {path}")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as error:
+        value = json.loads(safe_read_text(path, max_bytes=96 * 1024 * 1024))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as error:
         raise FrameworkMigrationError(f"could not read {label} artifact: {path}") from error
     if not isinstance(value, dict):
         raise FrameworkMigrationError(f"{label} artifact must be a JSON object: {path}")
@@ -2240,8 +2420,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    safe_write_text(path, content)
 
 
 def _compile_generated_files(output: Path, manifest: dict[str, Any]) -> None:
@@ -2252,9 +2431,10 @@ def _compile_generated_files(output: Path, manifest: dict[str, Any]) -> None:
     ]
     for name in names:
         path = output / name
-        if not path.is_file():
-            raise FrameworkMigrationError(f"generated file is missing: {path}")
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = safe_read_text(path, max_bytes=16 * 1024 * 1024)
+        except (OSError, UnicodeDecodeError) as error:
+            raise FrameworkMigrationError(f"generated file is missing or unsafe: {path}") from error
         try:
             compile(text, str(path), "exec")
         except SyntaxError as error:
@@ -2313,22 +2493,47 @@ def _probe_read_only_routes(
     *,
     cases: list[dict[str, Any]],
     target_python: Path | None,
+    allow_unsafe_source_execution: bool,
 ) -> list[dict[str, Any]]:
-    _bootstrap_django(root, str(manifest["settings_module"]))
-    _bind_source_database()
-    django_test = importlib.import_module("django.test")
-    source = django_test.Client()
     automatic = [
         {"method": route.get("method"), "path": route.get("path"), "headers": {}}
         for route in manifest.get("routes", [])
         if route.get("method") in {"GET", "HEAD"} and "{" not in route.get("path", "")
     ]
     probes = _deduplicate_probes(automatic + cases)
-    source_responses = [_source_probe_response(source, case) for case in probes]
+    settings = str(manifest["settings_module"])
+    try:
+        source_payload = run_untrusted_framework_worker(
+            {
+                "operation": "source-probes",
+                "root": str(root),
+                "settings": settings,
+                "probes": probes,
+            },
+            readable_roots=[root],
+            allow_unsafe=allow_unsafe_source_execution,
+        )
+        source_responses = _decode_worker_responses(source_payload, expected=len(probes))
+    except UntrustedFrameworkError as error:
+        raise FrameworkMigrationError(str(error)) from error
     if target_python is not None:
         target_responses = _native_target_probe_responses(output, target_python, probes)
     else:
-        target_responses = _compatibility_target_probe_responses(output, probes)
+        try:
+            target_payload = run_untrusted_framework_worker(
+                {
+                    "operation": "compatibility-probes",
+                    "root": str(root),
+                    "settings": settings,
+                    "output": str(output),
+                    "probes": probes,
+                },
+                readable_roots=[root, output],
+                allow_unsafe=allow_unsafe_source_execution,
+            )
+            target_responses = _decode_worker_responses(target_payload, expected=len(probes))
+        except UntrustedFrameworkError as error:
+            raise FrameworkMigrationError(str(error)) from error
     results: list[dict[str, Any]] = []
     for case, source_response, target_response in zip(
         probes, source_responses, target_responses, strict=True
@@ -2362,6 +2567,42 @@ def _probe_read_only_routes(
             }
         )
     return results
+
+
+def _source_probe_responses_in_process(
+    root: Path, settings_module: str, probes: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Worker-only source probe implementation."""
+
+    _bootstrap_django(root, settings_module)
+    _bind_source_database()
+    django_test = importlib.import_module("django.test")
+    source = django_test.Client()
+    return [_source_probe_response(source, case) for case in probes]
+
+
+def _decode_worker_responses(payload: dict[str, Any], *, expected: int) -> list[dict[str, Any]]:
+    raw = payload.get("responses")
+    if not isinstance(raw, list) or len(raw) != expected:
+        raise FrameworkMigrationError("isolated framework worker returned incomplete responses")
+    responses: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise FrameworkMigrationError("isolated framework worker returned invalid responses")
+        try:
+            responses.append(
+                {
+                    "status": int(item["status"]),
+                    "content_type": str(item["content_type"]),
+                    "body": base64.b64decode(str(item["body"]), validate=True),
+                    "headers": dict(item["headers"]),
+                }
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise FrameworkMigrationError(
+                "isolated framework worker returned invalid response data"
+            ) from error
+    return responses
 
 
 def _deduplicate_probes(probes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2433,10 +2674,28 @@ def _native_target_probe_responses(
     target_python: Path,
     probes: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        in {
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "WINDIR",
+        }
+    }
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     result = subprocess.run(
-        [str(target_python), "-c", _TARGET_PROBE_SCRIPT],
+        [str(target_python), "-I", "-B", "-c", _TARGET_PROBE_SCRIPT, str(output)],
         cwd=output,
-        env=dict(os.environ),
+        env=environment,
         input=json.dumps(probes),
         capture_output=True,
         text=True,
@@ -2479,6 +2738,8 @@ def _native_target_probe_responses(
 _TARGET_PROBE_SCRIPT = r"""import base64
 import json
 import sys
+
+sys.path.insert(0, sys.argv[1])
 
 from fastapi.testclient import TestClient
 from app import app

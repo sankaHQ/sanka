@@ -236,11 +236,13 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     tested = _run_cli(["test", "--root", str(crud_project), "--to", "fastapi"], crud_project)
     assert tested.returncode == 0, tested.stdout + tested.stderr
     assert "Generated API tests: OK" in tested.stdout
-    assert f"Generated environment: {output / '.venv'}" in tested.stdout
-    assert f"Generated Python: {output / '.venv' / 'bin' / 'python'}" in tested.stdout
-    assert f"Dependency metadata: {output / 'pyproject.toml'}" in tested.stdout
-    assert f"Locked dependencies: {output / 'uv.lock'}" in tested.stdout
-    assert (output / "uv.lock").is_file()
+    assert f"Attested dependency metadata: {output / 'pyproject.toml'}" in tested.stdout
+    assert "Disposable environment: " in tested.stdout
+    assert "sanka-generated-environment-" in tested.stdout
+    assert "Disposable Python: " in tested.stdout
+    assert "Resolved lockfile: " in tested.stdout
+    assert not (output / ".venv").exists()
+    assert not (output / "uv.lock").exists()
     assert (output / "test_generated.py").is_file()
     generated_tests = (output / "test_generated.py").read_text(encoding="utf-8")
     assert "test_gadgetviewset_create_roundtrip" in generated_tests
@@ -254,9 +256,10 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
     assert f"Generated app: {output}" in verified.stdout
     assert f"Manifest:      {output / 'sanka-manifest.json'}" in verified.stdout
     assert f"Dependencies:  {output / 'pyproject.toml'}" in verified.stdout
-    assert f"Environment:   {output / '.venv'}" in verified.stdout
-    assert f"Python:        {output / '.venv' / 'bin' / 'python'}" in verified.stdout
-    assert f"Lockfile:      {output / 'uv.lock'}" in verified.stdout
+    assert "Environment:   " in verified.stdout
+    assert "sanka-generated-environment-" in verified.stdout
+    assert "Python:        " in verified.stdout
+    assert "Lockfile:      " in verified.stdout
     assert "Generated Python checked" in verified.stdout
     for name in manifest["generated_files"]:
         assert f"  - {output / name}" in verified.stdout
@@ -271,6 +274,40 @@ def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> Non
         in verified.stdout
     )
     assert "Native migration verification: complete" in verified.stdout
+
+
+def test_apply_rejects_symlinked_output_directory(crud_project: Path, tmp_path: Path) -> None:
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    sentinel = tmp_path / "sentinel"
+    sentinel.mkdir()
+    output = crud_project / ".sanka" / "output" / "fastapi"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.symlink_to(sentinel, target_is_directory=True)
+
+    applied = _run_cli(
+        ["apply", "--root", str(crud_project), "--plan-hash", _plan_hash(crud_project)],
+        crud_project,
+    )
+
+    assert applied.returncode == 1
+    assert "symbolic link" in applied.stderr
+    assert list(sentinel.iterdir()) == []
+
+
+def test_test_command_rejects_symlinked_generated_test(crud_project: Path, tmp_path: Path) -> None:
+    output = _generate(crud_project)
+    sentinel = tmp_path / "sentinel.py"
+    sentinel.write_text("sentinel\n", encoding="utf-8")
+    (output / "test_generated.py").symlink_to(sentinel)
+
+    tested = _run_cli(["test", "--root", str(crud_project), "--to", "fastapi"], crud_project)
+
+    assert tested.returncode == 1
+    assert "symbolic link" in tested.stderr
+    assert sentinel.read_text(encoding="utf-8") == "sentinel\n"
 
 
 def test_native_output_matches_drf_behavior_and_database(

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from sanka.cli import main
-from sanka.runtime.engine import MigrationEngine, PlanMismatchError
+from sanka.runtime.engine import CandidateBudget, ExecutionError, MigrationEngine, PlanMismatchError
 from sanka.runtime.execution import exact_candidate_hash
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
@@ -35,11 +35,12 @@ def _spec(content: Path, db: Path) -> MigrationSpec:
     )
 
 
-def _engine(tmp_path: Path) -> MigrationEngine:
+def _engine(tmp_path: Path, *, candidate_budget: CandidateBudget | None = None) -> MigrationEngine:
     return MigrationEngine(
         store=SqliteStateStore(tmp_path / "state" / "state.db"),
         registry=ConnectorRegistry.discover(),
         batch_size=2,  # force pagination + multiple checkpoints
+        candidate_budget=candidate_budget,
     )
 
 
@@ -189,6 +190,71 @@ async def test_apply_rehashes_persisted_plan_before_resolving_destination(tmp_pa
 
     with pytest.raises(PlanMismatchError, match="persisted plan content"):
         await engine.apply(run_id, plan_hash=plan.plan_hash)
+    assert not db.exists()
+
+
+async def test_apply_rehashes_persisted_spec_before_resolving_destination(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+    engine = _engine(tmp_path)
+    run_id = engine.create(_spec(content, db))
+    plan = await engine.plan(run_id)
+
+    tampered = _spec(content, tmp_path / "redirected.db").to_dict()
+    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+        connection.execute(
+            "UPDATE runs SET spec_json = ? WHERE id = ?",
+            (json.dumps(tampered), run_id),
+        )
+
+    with pytest.raises(PlanMismatchError, match="spec content"):
+        await engine.apply(run_id, plan_hash=plan.plan_hash)
+    assert not db.exists()
+    assert not (tmp_path / "redirected.db").exists()
+
+
+async def test_plan_binds_connection_reference_and_conflict_policy(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+    engine = _engine(tmp_path)
+    original = _spec(content, db)
+    run_id = engine.create(original)
+    plan = await engine.plan(run_id)
+    tampered = MigrationSpec(
+        source=original.source,
+        target=EndpointSpec(type="sqlite", connection=str(tmp_path / "redirected.db")),
+        strategy={"conflict_policy": "create"},
+    )
+    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+        connection.execute(
+            "UPDATE runs SET spec_json = ?, spec_hash = ? WHERE id = ?",
+            (json.dumps(tampered.to_dict()), tampered.spec_hash, run_id),
+        )
+
+    with pytest.raises(PlanMismatchError, match="not bound"):
+        await engine.apply(run_id, plan_hash=plan.plan_hash)
+    assert not db.exists()
+    assert not (tmp_path / "redirected.db").exists()
+
+
+async def test_candidate_freezing_enforces_hard_count_budget(tmp_path: Path) -> None:
+    content, db = tmp_path / "content", tmp_path / "out.db"
+    _write_content(content)
+    engine = _engine(
+        tmp_path,
+        candidate_budget=CandidateBudget(
+            max_candidates=2,
+            max_pages=10,
+            max_identity_bytes=100,
+            max_candidate_bytes=1_000,
+            max_plan_bytes=10_000,
+            max_elapsed_seconds=60,
+        ),
+    )
+    run_id = engine.create(_spec(content, db))
+    with pytest.raises(ExecutionError, match="candidate count budget"):
+        await engine.plan(run_id)
+    assert engine.store.get_run(run_id).plan_json is None
     assert not db.exists()
 
 
