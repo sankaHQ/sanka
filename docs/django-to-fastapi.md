@@ -165,6 +165,19 @@ settings and the retained Django ORM while normal `sanka apply` output keeps
 the selected async SQL engine. This lets the tool-neutral benchmark grade the
 same generated FastAPI route contract in its fixed fixture environment.
 
+Native apply is readiness-aware. By default, a plan below 50% native readiness
+does not produce a partial application: Sanka writes `GAP-REPORT.md`, the
+reviewed `plan-fastapi.json`, and a structured `gap-report.json` instead. The
+report enumerates unsupported and unscanned URL patterns plus the route,
+redirect/header, native-serving, and database-parity checks that remain. Use
+`--min-readiness PCT` to raise the gate. Passing `--min-readiness 0` is the
+explicit opt-in for a partial scaffold; `--gap-report-only` always abstains.
+
+A generated benchmark candidate also carries the gap artifacts and a
+`verify-report.json`. These diagnostics never turn partial success into a
+completed migration: `sanka verify` and Sanka Migration Bench still require
+every route and hard gate.
+
 ### `sanka test`
 
 After apply, Sanka writes `test_generated.py` beside the FastAPI app and runs

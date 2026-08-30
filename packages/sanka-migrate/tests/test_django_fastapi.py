@@ -12,6 +12,7 @@ import pytest
 
 from sanka.cli import _print_framework_test, main
 from sanka.runtime.frameworks import load_fastapi_plan, load_framework_scan
+from sanka.runtime.frameworks.django_fastapi import _render_native_app, _stub_safe_path
 from sanka.runtime.frameworks.fastapi_tests import _missing_generated_dependency
 
 FIXTURE = Path(__file__).parent / "fixtures" / "drf_project"
@@ -23,6 +24,11 @@ def drf_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     shutil.copytree(FIXTURE, project)
     monkeypatch.chdir(project)
     return project
+
+
+def _reviewed_apply_args(project: Path, *extra: str) -> list[str]:
+    plan = load_fastapi_plan(project)
+    return ["apply", "--root", str(project), "--plan-hash", plan.plan_hash, *extra]
 
 
 def test_five_command_drf_to_fastapi_lifecycle(
@@ -273,3 +279,159 @@ def test_failed_generated_test_without_missing_dependency_does_not_suggest_verif
     output = capsys.readouterr().out
     assert "Fix the test failure above, then rerun:\n  sanka test" in output
     assert "next: sanka verify" not in output
+
+
+def test_scan_discloses_skipped_non_drf_routes(
+    drf_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    scan_output = capsys.readouterr().out
+    assert "Not scanned (non-DRF views" in scan_output
+    assert "legacy/redirect/" in scan_output
+    scan = load_framework_scan(drf_project)
+    assert scan.schema_version == 4
+    assert [(item.pattern, item.reason) for item in scan.skipped_routes] == [
+        ("legacy/redirect/", "non-drf-view")
+    ]
+    assert scan.skipped_routes[0].view.endswith("legacy_redirect")
+
+
+def test_zero_readiness_native_apply_writes_gap_report_instead(
+    drf_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    capsys.readouterr()
+    assert main(_reviewed_apply_args(drf_project)) == 1
+    output = capsys.readouterr().out
+    assert "native readiness: 0%" in output
+    assert "no generatable routes" in output
+    assert "gap report written to" in output
+    text = (drf_project / "gap-report" / "GAP-REPORT.md").read_text(encoding="utf-8")
+    assert "native readiness 0%" in text
+    assert "Routes needing manual adaptation" in text
+    assert "DRF parity checklist" in text
+    assert "legacy/redirect/" in text
+    assert (drf_project / "gap-report" / "plan-fastapi.json").is_file()
+    payload = json.loads(
+        (drf_project / "gap-report" / "gap-report.json").read_text(encoding="utf-8")
+    )
+    assert payload["schema"] == "sanka/native-gap-report/v1"
+    assert payload["readiness"] == 0.0
+    assert payload["unsupported_routes"]
+    assert payload["skipped_routes"] == [
+        {
+            "pattern": "legacy/redirect/",
+            "view": "config.urls.legacy_redirect",
+            "reason": "non-drf-view",
+        }
+    ]
+    assert payload["critic_checks"]["database_parity"] == "required"
+
+
+def test_min_readiness_gate_refuses_and_writes_gap_report(
+    drf_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    scan = load_framework_scan(drf_project)
+    partial = replace(
+        scan,
+        routes=(
+            replace(scan.routes[0], native=True, adaptation_reasons=()),
+            *scan.routes[1:],
+        ),
+        scan_hash="",
+    ).with_hash()
+    (drf_project / ".sanka" / "scan.json").write_text(
+        json.dumps(partial.to_dict()), encoding="utf-8"
+    )
+    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    capsys.readouterr()
+    assert main(_reviewed_apply_args(drf_project, "--min-readiness", "50")) == 1
+    output = capsys.readouterr().out
+    assert "below --min-readiness 50%" in output
+    assert (drf_project / "gap-report" / "GAP-REPORT.md").is_file()
+
+
+def test_apply_defaults_to_fifty_percent_readiness_gate() -> None:
+    from sanka.cli import _build_parser
+
+    args = _build_parser().parse_args(["apply", "--plan-hash", "sha256:test"])
+    assert args.min_readiness == 50.0
+
+
+def test_apply_rejects_invalid_readiness_threshold(
+    drf_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    capsys.readouterr()
+    assert main(_reviewed_apply_args(drf_project, "--min-readiness", "101")) == 1
+    assert "must be between 0 and 100" in capsys.readouterr().err
+
+
+def test_gap_report_only_succeeds_without_generating(
+    drf_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    capsys.readouterr()
+    assert main(_reviewed_apply_args(drf_project, "--gap-report-only")) == 0
+    output = capsys.readouterr().out
+    assert "gap report written to" in output
+    assert not (drf_project / ".sanka" / "output" / "fastapi" / "app.py").exists()
+
+
+def test_gap_report_refuses_to_coexist_with_a_stale_scaffold(
+    drf_project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["scan", str(drf_project)]) == 0
+    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    destination = drf_project / "gap-report"
+    destination.mkdir()
+    (destination / "app.py").write_text("stale = True\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(_reviewed_apply_args(drf_project, "--gap-report-only")) == 1
+    error = capsys.readouterr().err
+    assert "refusing to leave a stale scaffold" in error
+    assert (destination / "app.py").read_text(encoding="utf-8") == "stale = True\n"
+
+
+def test_render_native_app_stubs_unsupported_routes() -> None:
+    manifest = {
+        "resources": [],
+        "routes": [],
+        "unsupported_routes": [
+            {
+                "method": "PATCH",
+                "path": "/api/things/{pk}",
+                "reasons": [
+                    {
+                        "code": "SANKA_DRF_VIEW_KIND_UNSUPPORTED",
+                        "feature": "view-kind",
+                        "message": "not router-bound ModelViewSet CRUD",
+                    }
+                ],
+                "stubbed": True,
+            },
+            {
+                "method": "GET",
+                "path": "/api/leftover(?:x)",
+                "reasons": [],
+                "stubbed": False,
+            },
+        ],
+    }
+    code = _render_native_app(manifest)
+    assert '@app.api_route("/api/things/{pk}", methods=["PATCH"])' in code
+    assert "status_code=501" in code
+    assert "SANKA_DRF_VIEW_KIND_UNSUPPORTED" in code
+    assert "leftover" not in code
+    compile(code, "target_app.py", "exec")
+
+
+def test_stub_safe_path_rejects_regex_leftovers() -> None:
+    assert _stub_safe_path("/api/things/{pk}")
+    assert _stub_safe_path("/api/things/")
+    assert not _stub_safe_path("/api/things/(?P<pk>[0-9]+)")
+    assert not _stub_safe_path("/api/things/{pk}.json|xml")
