@@ -38,7 +38,7 @@ sanka test
 sanka verify
 ```
 
-This recipe is included in source candidate `v0.1.0a9`; the live
+This recipe is included in source candidate `v0.1.0a10`; the live
 [PyPI project](https://pypi.org/project/sanka-migrate/) remains the publication authority.
 Sanka resolves the live Django URL graph, including DRF router routes and custom actions.
 Apply creates a separate FastAPI application in `.sanka/output/fastapi`; it
