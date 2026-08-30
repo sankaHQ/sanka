@@ -29,6 +29,42 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Readiness-aware abstention still needs a regression floor. Without this
+# reviewed envelope, a converter bug that drops a task from 100% to 90% could
+# be mislabeled as an expected partial migration merely because the remaining
+# scaffold boots. Eligible-route totals identify the exact fixture contract;
+# native counts are minimums so genuine converter improvements remain allowed.
+EXPECTED_ROUTE_ENVELOPE = {
+    "drf-fastapi-001": (7, 7),
+    "drf-fastapi-002": (7, 7),
+    "drf-fastapi-003": (7, 7),
+    "drf-fastapi-004": (7, 13),
+    "drf-fastapi-005": (1, 8),
+    "drf-fastapi-006": (1, 7),
+    "drf-fastapi-007": (1, 7),
+    "drf-fastapi-008": (1, 29),
+    "drf-fastapi-009": (0, 12),
+    "drf-fastapi-010": (0, 5),
+}
+
+
+def _readiness_envelope_error(task: str, native_routes: int, eligible_routes: int) -> str | None:
+    expected = EXPECTED_ROUTE_ENVELOPE.get(task)
+    if expected is None:
+        return f"{task}: missing reviewed readiness envelope; update EXPECTED_ROUTE_ENVELOPE"
+    minimum_native, expected_eligible = expected
+    if eligible_routes != expected_eligible:
+        return (
+            f"{task}: eligible route count changed from {expected_eligible} to "
+            f"{eligible_routes}; review the fixture and readiness envelope"
+        )
+    if native_routes < minimum_native:
+        return (
+            f"{task}: native readiness regressed from at least "
+            f"{minimum_native}/{expected_eligible} to {native_routes}/{eligible_routes}"
+        )
+    return None
+
 
 def _discover_tasks(bench_dir: Path) -> tuple[str, ...]:
     lane = bench_dir / "tasks" / "drf-fastapi"
@@ -96,7 +132,11 @@ def main() -> int:
                 (project / ".sanka" / "plan-fastapi.json").read_text(encoding="utf-8")
             )
             native_routes = int(plan_payload["native_routes"])
+            eligible_routes = int(plan_payload["native_eligible_routes"])
             readiness = float(plan_payload["readiness"])
+            if envelope_error := _readiness_envelope_error(task, native_routes, eligible_routes):
+                failures.append(envelope_error)
+                continue
             apply_step = [
                 "apply",
                 "--root",
