@@ -222,6 +222,7 @@ class ViewAuthIR:
 class ViewIR:
     name: str
     auth: ViewAuthIR | None = None
+    lookup_regex: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
@@ -229,6 +230,9 @@ class ViewIR:
         return cls(
             name=str(payload["name"]),
             auth=ViewAuthIR.from_dict(auth) if isinstance(auth, dict) else None,
+            lookup_regex=(
+                str(payload["lookup_regex"]) if payload.get("lookup_regex") is not None else None
+            ),
         )
 
 

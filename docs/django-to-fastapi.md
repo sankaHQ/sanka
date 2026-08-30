@@ -83,7 +83,11 @@ In native mode every route receives one of four dispositions:
   `many=True` nested child serializers are supported when the author's
   `create()` is the recognized nested-write shape (the generated app inserts
   the parent row and children through async SQL on the existing tables) and
-  `update()` matches the drop-children idiom;
+  `update()` matches the drop-children idiom. A custom `lookup_field` is also
+  supported when it is a unique serialized string or integer field, uses the
+  same `lookup_url_kwarg`, and the detail route exposes that kwarg. The
+  generated Django, Tortoise, SQLAlchemy, and psycopg stores all query the
+  captured lookup column rather than silently falling back to the primary key;
 - `native-fastapi-api-root` — the router API root, regenerated from the
   captured link table;
 - `dropped-format-suffix-alias` — DRF's `.{format}` alias routes are dropped
@@ -278,6 +282,17 @@ envelope fail verification until a human adapts them.
 - standard CRUD actions;
 - `@action` routes;
 - Django path converters and standard DRF named-regex parameters.
+
+Named regex parameters are normalized only when Sanka can conservatively
+prove that the complete balanced expression matches one path segment. Nested
+non-capturing groups such as `(?P<code>(?:[-\w.+@]+))` are handled without
+truncating the expression. For native custom lookups, the captured expression
+is installed as a Starlette URL convertor on the generated FastAPI `APIRoute`,
+so characters rejected by the source regex remain routing-level 404s rather
+than reaching the handler. The generated unmatched-route handler reproduces
+Django's stable `DEBUG=False` default 404 page, while resource misses keep the
+captured DRF JSON error. Patterns that can consume `/`, use lookarounds, or
+otherwise cannot be proven segment-safe remain explicit route-pattern risks.
 
 ### Not claimed yet
 
