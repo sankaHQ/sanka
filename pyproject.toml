@@ -9,12 +9,17 @@ requires-python = ">=3.12"
 package = false
 
 [tool.uv.sources]
-sanka-connector-sdk = { git = "https://github.com/sankaHQ/sanka-connectors", rev = "500376483851d8eb89f1a94c72561f7e684f35ed", subdirectory = "packages/sanka-connector-sdk" }
-sanka-connector-clickhouse = { git = "https://github.com/sankaHQ/sanka-connectors", rev = "500376483851d8eb89f1a94c72561f7e684f35ed", subdirectory = "packages/sanka-connector-clickhouse" }
-sanka-connector-csv = { git = "https://github.com/sankaHQ/sanka-connectors", rev = "500376483851d8eb89f1a94c72561f7e684f35ed", subdirectory = "packages/sanka-connector-csv" }
-sanka-connector-markdown = { git = "https://github.com/sankaHQ/sanka-connectors", rev = "500376483851d8eb89f1a94c72561f7e684f35ed", subdirectory = "packages/sanka-connector-markdown" }
-sanka-connector-postgres = { git = "https://github.com/sankaHQ/sanka-connectors", rev = "500376483851d8eb89f1a94c72561f7e684f35ed", subdirectory = "packages/sanka-connector-postgres" }
-sanka-connector-sqlite = { git = "https://github.com/sankaHQ/sanka-connectors", rev = "500376483851d8eb89f1a94c72561f7e684f35ed", subdirectory = "packages/sanka-connector-sqlite" }
+sanka-connector-sdk = { index = "sanka-testpypi" }
+sanka-connector-clickhouse = { index = "sanka-testpypi" }
+sanka-connector-csv = { index = "sanka-testpypi" }
+sanka-connector-markdown = { index = "sanka-testpypi" }
+sanka-connector-postgres = { index = "sanka-testpypi" }
+sanka-connector-sqlite = { index = "sanka-testpypi" }
+
+[[tool.uv.index]]
+name = "sanka-testpypi"
+url = "https://test.pypi.org/simple"
+explicit = true
 
 [tool.uv.workspace]
 members = [
@@ -32,11 +37,11 @@ dev = [
   "djangorestframework>=3.16,<4",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
-  "sanka-connector-clickhouse==0.1.0a10",
-  "sanka-connector-csv==0.1.0a10",
-  "sanka-connector-markdown==0.1.0a10",
-  "sanka-connector-postgres==0.1.0a10",
-  "sanka-connector-sqlite==0.1.0a10",
+  "sanka-connector-clickhouse==0.1.0a9",
+  "sanka-connector-csv==0.1.0a9",
+  "sanka-connector-markdown==0.1.0a9",
+  "sanka-connector-postgres==0.1.0a9",
+  "sanka-connector-sqlite==0.1.0a9",
   "types-pyyaml>=6",
   "tortoise-orm>=1.1,<2",
   "aiosqlite>=0.20,<1",

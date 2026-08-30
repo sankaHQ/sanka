@@ -1340,50 +1340,74 @@ wheels = [
 
 [[package]]
 name = "sanka-connector-clickhouse"
-version = "0.1.0a10"
-source = { git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-clickhouse&rev=500376483851d8eb89f1a94c72561f7e684f35ed#500376483851d8eb89f1a94c72561f7e684f35ed" }
+version = "0.1.0a9"
+source = { registry = "https://test.pypi.org/simple" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "sanka-connector-sdk" },
 ]
+sdist = { url = "https://test-files.pythonhosted.org/packages/a5/81/9f3484c44ce0af9e7aa6b556a60b03c621e1aa3e0e871ef37a6b8c4df0c6/sanka_connector_clickhouse-0.1.0a9.tar.gz", hash = "sha256:2646c1f29631b1fb4944c67d995f690908df5a38242020e57e69e8cb1e275d5c", size = 15172, upload-time = "2026-08-29T23:40:13.028Z" }
+wheels = [
+    { url = "https://test-files.pythonhosted.org/packages/72/3f/daa7bc7429659a2b77efdfde80b1a34c8090da932642ed7df98a8f6b4d84/sanka_connector_clickhouse-0.1.0a9-py3-none-any.whl", hash = "sha256:c161fa37275b46266a83f2edb5bad281bd4c1431dd2ead9402edd35af561770c", size = 12588, upload-time = "2026-08-29T23:40:11.978Z" },
+]
 
 [[package]]
 name = "sanka-connector-csv"
-version = "0.1.0a10"
-source = { git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-csv&rev=500376483851d8eb89f1a94c72561f7e684f35ed#500376483851d8eb89f1a94c72561f7e684f35ed" }
+version = "0.1.0a9"
+source = { registry = "https://test.pypi.org/simple" }
 dependencies = [
     { name = "sanka-connector-sdk" },
+]
+sdist = { url = "https://test-files.pythonhosted.org/packages/7d/c1/65642b2d0b0b907cee4fe9df7997576655b2099c80d4eecb4c28cac2a0a6/sanka_connector_csv-0.1.0a9.tar.gz", hash = "sha256:f34ddb06498140a0986ca97fc9a05e5220bf4fbce75544388e8042a3a7d8afab", size = 8981, upload-time = "2026-08-29T23:42:15.406Z" }
+wheels = [
+    { url = "https://test-files.pythonhosted.org/packages/6f/32/56b1659d374c5aab540385f5aa34408d5b603dbcc88950242327205cd34b/sanka_connector_csv-0.1.0a9-py3-none-any.whl", hash = "sha256:346405f076e4bf78967650f92344f041cc294e0a40153683928edced56b6a5a7", size = 8725, upload-time = "2026-08-29T23:42:14.404Z" },
 ]
 
 [[package]]
 name = "sanka-connector-markdown"
-version = "0.1.0a10"
-source = { git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-markdown&rev=500376483851d8eb89f1a94c72561f7e684f35ed#500376483851d8eb89f1a94c72561f7e684f35ed" }
+version = "0.1.0a9"
+source = { registry = "https://test.pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sanka-connector-sdk" },
 ]
+sdist = { url = "https://test-files.pythonhosted.org/packages/3e/6d/46339669c7f2b7cc3921d56b86e371c428159b808a367df1d875de47528d/sanka_connector_markdown-0.1.0a9.tar.gz", hash = "sha256:90903dc45577256b26792c9fbe1bc30be1e263511b966fb7ea490575450d9e15", size = 7836, upload-time = "2026-08-29T23:48:57.257Z" }
+wheels = [
+    { url = "https://test-files.pythonhosted.org/packages/99/44/0875b937c911a3c83b0f99afdd49b397ea850888748c0f9b03cb5e0f0316/sanka_connector_markdown-0.1.0a9-py3-none-any.whl", hash = "sha256:d2b569674786aa90011b82791fbbdc0800108735f35ded55b5d9d48fc3715275", size = 8316, upload-time = "2026-08-29T23:48:56.209Z" },
+]
 
 [[package]]
 name = "sanka-connector-postgres"
-version = "0.1.0a10"
-source = { git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-postgres&rev=500376483851d8eb89f1a94c72561f7e684f35ed#500376483851d8eb89f1a94c72561f7e684f35ed" }
+version = "0.1.0a9"
+source = { registry = "https://test.pypi.org/simple" }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "sanka-connector-sdk" },
 ]
+sdist = { url = "https://test-files.pythonhosted.org/packages/c2/72/915ff573565de40070b1f2dfac33f5ca43e43be285a54b3cd9add02bbdd0/sanka_connector_postgres-0.1.0a9.tar.gz", hash = "sha256:cf7b885f24c85fbd8d8b3ad79801ccb28a349a9a5092dc13d5d45fdc1fae59b4", size = 21524, upload-time = "2026-08-29T23:50:38.148Z" }
+wheels = [
+    { url = "https://test-files.pythonhosted.org/packages/29/cf/d30aeb313d9518f254746a3e548ef6a08c2f03df7a7109bafd0fa59d2e59/sanka_connector_postgres-0.1.0a9-py3-none-any.whl", hash = "sha256:bc16b4dd9c8d5e82609ce824755e006378e90fa75132b8d79255f8cdb9bc47a6", size = 19670, upload-time = "2026-08-29T23:50:37.089Z" },
+]
 
 [[package]]
 name = "sanka-connector-sdk"
-version = "0.1.0a10"
-source = { git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-sdk&rev=500376483851d8eb89f1a94c72561f7e684f35ed#500376483851d8eb89f1a94c72561f7e684f35ed" }
+version = "0.1.0a9"
+source = { registry = "https://test.pypi.org/simple" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/69/43/4dc09ee3b9f1fae1b2dcbada940fecd6a86f77c103f71b4930803aa5e644/sanka_connector_sdk-0.1.0a9.tar.gz", hash = "sha256:e4ba4557234b850c333b2f26e1c8af84ec2976ecbbbcf4d29d8ad90508289a18", size = 11703, upload-time = "2026-08-29T23:38:31.758Z" }
+wheels = [
+    { url = "https://test-files.pythonhosted.org/packages/eb/4c/af797f300613aa9e903085da82e71ff69e5dc9b84238648e9da171bbde81/sanka_connector_sdk-0.1.0a9-py3-none-any.whl", hash = "sha256:53ae68820801b50983442c70212c70c2443e0f50e71edd14ff71581bd6cbce65", size = 16145, upload-time = "2026-08-29T23:38:29.915Z" },
+]
 
 [[package]]
 name = "sanka-connector-sqlite"
-version = "0.1.0a10"
-source = { git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-sqlite&rev=500376483851d8eb89f1a94c72561f7e684f35ed#500376483851d8eb89f1a94c72561f7e684f35ed" }
+version = "0.1.0a9"
+source = { registry = "https://test.pypi.org/simple" }
 dependencies = [
     { name = "sanka-connector-sdk" },
+]
+sdist = { url = "https://test-files.pythonhosted.org/packages/e8/80/089c7a8daeace531ef6feef093b990a36ad16154583ef62f04165027596b/sanka_connector_sqlite-0.1.0a9.tar.gz", hash = "sha256:f98fadd13c49c12e789a0f48b0d91c5a8af039280076e1f3bb278e73477e9539", size = 11446, upload-time = "2026-08-29T23:55:26.157Z" }
+wheels = [
+    { url = "https://test-files.pythonhosted.org/packages/90/76/5ab52c27c051c3f366fcfc9f3d52033eb8c0934bb46ca63d3bc19c6b7f34/sanka_connector_sqlite-0.1.0a9-py3-none-any.whl", hash = "sha256:e57b4375861a58ad7368c15c6ed11ee0c5ae506c1ab54ae17a63eb591c770b4d", size = 10584, upload-time = "2026-08-29T23:55:24.682Z" },
 ]
 
 [[package]]
@@ -1407,7 +1431,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'compatibility'", specifier = ">=0.115,<1" },
     { name = "httpx", marker = "extra == 'compatibility'", specifier = ">=0.27,<1" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "sanka-connector-sdk", git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-sdk&rev=500376483851d8eb89f1a94c72561f7e684f35ed" },
+    { name = "sanka-connector-sdk", specifier = ">=0.1.0a9,<0.2", index = "https://test.pypi.org/simple" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'compatibility'", specifier = ">=0.30,<1" },
 ]
 provides-extras = ["compatibility"]
@@ -1470,11 +1494,11 @@ dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.12" },
-    { name = "sanka-connector-clickhouse", git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-clickhouse&rev=500376483851d8eb89f1a94c72561f7e684f35ed" },
-    { name = "sanka-connector-csv", git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-csv&rev=500376483851d8eb89f1a94c72561f7e684f35ed" },
-    { name = "sanka-connector-markdown", git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-markdown&rev=500376483851d8eb89f1a94c72561f7e684f35ed" },
-    { name = "sanka-connector-postgres", git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-postgres&rev=500376483851d8eb89f1a94c72561f7e684f35ed" },
-    { name = "sanka-connector-sqlite", git = "https://github.com/sankaHQ/sanka-connectors?subdirectory=packages%2Fsanka-connector-sqlite&rev=500376483851d8eb89f1a94c72561f7e684f35ed" },
+    { name = "sanka-connector-clickhouse", specifier = "==0.1.0a9", index = "https://test.pypi.org/simple" },
+    { name = "sanka-connector-csv", specifier = "==0.1.0a9", index = "https://test.pypi.org/simple" },
+    { name = "sanka-connector-markdown", specifier = "==0.1.0a9", index = "https://test.pypi.org/simple" },
+    { name = "sanka-connector-postgres", specifier = "==0.1.0a9", index = "https://test.pypi.org/simple" },
+    { name = "sanka-connector-sqlite", specifier = "==0.1.0a9", index = "https://test.pypi.org/simple" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "tortoise-orm", specifier = ">=1.1,<2" },
     { name = "types-pyyaml", specifier = ">=6" },
