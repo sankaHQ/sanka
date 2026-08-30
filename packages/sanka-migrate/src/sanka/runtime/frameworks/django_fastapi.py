@@ -29,6 +29,7 @@ import importlib
 import importlib.util
 import inspect
 import json
+import keyword
 import os
 import re
 import subprocess
@@ -46,8 +47,7 @@ from sanka.runtime.frameworks.generated_environment import (
 from sanka.runtime.frameworks.generated_integrity import (
     GeneratedIntegrityError,
     attest_generated_bundle,
-    read_generated_manifest,
-    verify_generated_bundle,
+    freeze_generated_bundle,
 )
 from sanka.runtime.frameworks.model import (
     ApiRootIR,
@@ -172,13 +172,150 @@ def scan_django(
         if not isinstance(scan_payload, dict):
             raise TypeError("scan payload is not an object")
         scan = FrameworkScan.from_dict(scan_payload)
+        _validate_untrusted_scan(scan, expected_settings=selected_settings)
     except (KeyError, TypeError, ValueError, UntrustedFrameworkError) as error:
         raise FrameworkMigrationError(str(error)) from error
-    expected = scan.with_hash().scan_hash
-    if not scan.scan_hash or scan.scan_hash != expected:
-        raise FrameworkMigrationError("isolated Django scan returned an invalid content hash")
+    # A dynamic source process is not an authenticity boundary. Discard its
+    # claimed hash and any source-bearing serializer fields before the trusted
+    # parent persists the IR or permits it to reach code generation.
+    scan = _strip_executable_scan_fields(scan)
     _write_json(_artifact_path(root_path, artifact_dir, SCAN_FILE), scan.to_dict())
     return scan
+
+
+_PYTHON_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DOTTED_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+_MAX_SCAN_ITEMS = 100_000
+_MAX_SCAN_STRING = 65_536
+_MAX_LOOKUP_REGEX = 4096
+_SAFE_REGEX_LITERAL_ESCAPES = frozenset(r"\.^$*+?{}[]|()-@")
+
+
+def _validate_untrusted_scan(scan: FrameworkScan, *, expected_settings: str) -> None:
+    """Validate worker data as untrusted IR before it can reach code generation."""
+
+    if scan.settings_module != expected_settings:
+        raise ValueError("isolated Django scan returned a different settings module")
+    if scan.source != "." or scan.framework != "django-rest-framework":
+        raise ValueError("isolated Django scan returned an unexpected framework identity")
+    collections = (
+        scan.routes,
+        scan.serializers,
+        scan.models,
+        scan.permissions,
+        scan.authentication,
+        scan.serializer_details,
+        scan.api_roots,
+        scan.view_details,
+        scan.middleware,
+        scan.skipped_routes,
+    )
+    if any(len(items) > _MAX_SCAN_ITEMS for items in collections):
+        raise ValueError("isolated Django scan exceeds the item-count safety limit")
+
+    def bounded(value: Any, label: str) -> str:
+        text = str(value)
+        if len(text.encode("utf-8")) > _MAX_SCAN_STRING or "\x00" in text:
+            raise ValueError(f"isolated Django scan contains an unsafe {label}")
+        return text
+
+    def identifier(value: Any, label: str, *, dotted: bool = False) -> str:
+        text = bounded(value, label)
+        pattern = _DOTTED_IDENTIFIER if dotted else _PYTHON_IDENTIFIER
+        if not pattern.fullmatch(text) or any(keyword.iskeyword(part) for part in text.split(".")):
+            raise ValueError(f"isolated Django scan contains an unsafe {label}: {text!r}")
+        return text
+
+    identifier(scan.settings_module, "settings module", dotted=True)
+    identifier(scan.root_urlconf, "root URL configuration", dotted=True)
+    for route in scan.routes:
+        if route.method not in {"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}:
+            raise ValueError("isolated Django scan contains an unsupported HTTP method")
+        if not bounded(route.path, "route path").startswith("/"):
+            raise ValueError("isolated Django scan contains an unsafe route path")
+        operation = identifier(route.operation, "route operation")
+        identifier(route.view, "route view", dotted=True)
+        if route.native and operation not in {*_SUPPORTED_VIEWSET_ACTIONS, "get"}:
+            raise ValueError("isolated Django scan contains an unsupported native operation")
+    for serializer in scan.serializer_details:
+        if serializer.create_style not in {"default", "carryover"}:
+            raise ValueError("isolated Django scan contains an unsupported create style")
+        if serializer.create_source is not None or serializer.create_imports:
+            raise ValueError("isolated Django scan returned executable serializer source")
+        identifier(serializer.model_module, "model module", dotted=True)
+        identifier(serializer.model_class, "model class", dotted=True)
+        identifier(serializer.pk_attname, "primary-key attribute")
+        identifier(serializer.lookup, "lookup attribute")
+        names: set[str] = set()
+        for field in serializer.fields:
+            identifier(field.name, "serializer field")
+            column = identifier(field.attname or field.name, "model field attribute")
+            if column in names:
+                raise ValueError("isolated Django scan contains colliding model field attributes")
+            names.add(column)
+            if field.child is not None:
+                _validate_untrusted_scan(
+                    replace_dataclass(
+                        scan,
+                        serializer_details=(field.child,),
+                        routes=(),
+                        api_roots=(),
+                        view_details=(),
+                        skipped_routes=(),
+                    ),
+                    expected_settings=expected_settings,
+                )
+        for alias, module, attribute in serializer.create_imports:
+            identifier(alias, "create import alias")
+            identifier(module, "create import module", dotted=True)
+            if attribute is not None:
+                identifier(attribute, "create import attribute")
+    for view in scan.view_details:
+        bounded(view.name, "view name")
+        if view.lookup_regex is not None:
+            lookup_regex = bounded(view.lookup_regex, "view lookup regex")
+            if len(
+                lookup_regex.encode("utf-8")
+            ) > _MAX_LOOKUP_REGEX or not _regex_is_single_path_segment(lookup_regex):
+                raise ValueError("isolated Django scan contains an unsafe view lookup regex")
+        auth = view.auth
+        if auth is None:
+            continue
+        for value, label in (
+            (auth.token_key_column, "token key column"),
+            (auth.token_user_column, "token user column"),
+            (auth.owner_field, "owner field"),
+            (auth.owner_attname, "owner attribute"),
+            (auth.inject_owner, "injected owner field"),
+            (auth.inject_owner_attname, "injected owner attribute"),
+        ):
+            if value is not None:
+                identifier(value, label)
+
+
+def _strip_executable_scan_fields(scan: FrameworkScan) -> FrameworkScan:
+    """Return parent-owned IR that cannot contain executable source fragments."""
+
+    def sanitize_serializer(serializer: SerializerIR) -> SerializerIR:
+        fields = tuple(
+            replace_dataclass(
+                field,
+                child=sanitize_serializer(field.child) if field.child is not None else None,
+            )
+            for field in serializer.fields
+        )
+        return replace_dataclass(
+            serializer,
+            fields=fields,
+            create_source=None,
+            create_imports=(),
+        )
+
+    return replace_dataclass(
+        scan,
+        serializer_details=tuple(sanitize_serializer(item) for item in scan.serializer_details),
+        scan_hash="",
+    ).with_hash()
 
 
 def _scan_django_in_process(root_path: Path, selected_settings: str) -> FrameworkScan:
@@ -445,7 +582,8 @@ def write_bench_candidate(
     the entrypoint is the bench's fixed ``target_app.py`` and ``source_root``
     is the workspace root itself. The bench fixture intentionally retains
     Django for ORM access, so this projection uses its installed Django rather
-    than the normal plan's independently installed async SQL engine.
+    than the normal plan's independently installed async SQL engine. Source
+    function bodies are never copied into the candidate.
     """
     root_path = Path(root).resolve()
     plan = load_fastapi_plan(root_path, artifact_dir=artifact_dir)
@@ -468,7 +606,6 @@ def write_bench_candidate(
         entrypoint="target_app.py",
         source_root=".",
         sql_engine="django",
-        preserve_carryover=True,
     )
     _write_text(
         destination_path / "candidate.yaml",
@@ -582,117 +719,10 @@ def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
     return payload
 
 
-def _carryover_function_name(ir: SerializerIR) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", ir.name.lower()).strip("_")
-    return f"create_{slug}"
-
-
-def _create_payload(ir: SerializerIR, *, preserve_carryover: bool = False) -> dict[str, Any]:
+def _create_payload(ir: SerializerIR) -> dict[str, Any]:
     if ir.create_style == "carryover":
-        if preserve_carryover:
-            return {"style": "carryover", "function": _carryover_function_name(ir)}
         return {"style": "nested"}
     return {"style": "default"}
-
-
-# fmt: off
-_USER_LOGIC_HEADER = """\
-# Generated by Sanka under the license selected for this generated application.
-\"\"\"Author-owned write logic carried over verbatim from the source serializers.
-
-Each function below is the application's own ``create()`` method, re-emitted
-with its DRF exception type swapped for the native shim. The logic — including
-transaction boundaries and business rules — runs unchanged against the
-retained Django ORM.
-\"\"\"
-
-from __future__ import annotations
-
-
-def _normalize_detail(detail):
-    if isinstance(detail, str):
-        return [detail]
-    return detail
-
-
-class ValidationError(Exception):
-    def __init__(self, detail):
-        self.detail = _normalize_detail(detail)
-        super().__init__(self.detail)
-
-
-class _SerializersShim:
-    ValidationError = ValidationError
-
-
-_SERIALIZERS_SHIM = _SerializersShim()
-"""
-# fmt: on
-
-
-def _render_user_logic(resources: dict[str, dict[str, Any]], scan: FrameworkScan) -> str | None:
-    serializer_by_name = {item.name: item for item in scan.serializer_details}
-    sections: list[tuple[str, str]] = []
-    for resource in resources.values():
-        create = resource.get("create") or {}
-        if create.get("style") != "carryover":
-            continue
-        ir = serializer_by_name[cast(str, resource["serializer"])]
-        if ir.create_source is None:
-            raise FrameworkMigrationError(
-                f"serializer {ir.name} lost its carried create() source; run `sanka scan`"
-            )
-        function_name = cast(str, create["function"])
-        sections.append((function_name, _transform_carryover(ir, function_name)))
-    if not sections:
-        return None
-    body = "\n\n".join(code for _, code in sorted(sections))
-    return f"{_USER_LOGIC_HEADER}\n\n{body}\n"
-
-
-def _transform_carryover(ir: SerializerIR, function_name: str) -> str:
-    tree = ast.parse(cast(str, ir.create_source))
-    func = tree.body[0]
-    if not isinstance(func, ast.FunctionDef):
-        raise FrameworkMigrationError(f"carried create() for {ir.name} is not a function")
-    func.name = function_name
-    func.args.args = func.args.args[1:]
-    preamble: list[ast.stmt] = []
-    for alias, module, attr in ir.create_imports:
-        if module == "__sanka_shim__":
-            target = "_SERIALIZERS_SHIM" if attr == "serializers" else "ValidationError"
-            preamble.append(
-                ast.Assign(
-                    targets=[ast.Name(id=alias, ctx=ast.Store())],
-                    value=ast.Name(id=target, ctx=ast.Load()),
-                )
-            )
-        elif attr is None and module == "django.db.transaction":
-            preamble.append(
-                ast.ImportFrom(
-                    module="django.db",
-                    names=[
-                        ast.alias(
-                            name="transaction",
-                            asname=None if alias == "transaction" else alias,
-                        )
-                    ],
-                    level=0,
-                )
-            )
-        else:
-            preamble.append(
-                ast.ImportFrom(
-                    module=module,
-                    names=[
-                        ast.alias(name=cast(str, attr), asname=None if alias == attr else alias)
-                    ],
-                    level=0,
-                )
-            )
-    func.body = preamble + func.body
-    ast.fix_missing_locations(tree)
-    return ast.unparse(ast.Module(body=[func], type_ignores=[]))
 
 
 def _allow_headers(generated: list[PlannedRoute]) -> dict[str, str]:
@@ -761,7 +791,6 @@ def _render_native_output(
     entrypoint: str,
     source_root: str,
     sql_engine: str,
-    preserve_carryover: bool = False,
 ) -> int:
     generated = [
         route
@@ -821,7 +850,7 @@ def _render_native_output(
                 "lookup": ir.lookup,
                 "lookup_regex": view_ir.lookup_regex if view_ir is not None else None,
                 "fields": [_field_payload(field) for field in ir.fields],
-                "create": _create_payload(ir, preserve_carryover=preserve_carryover),
+                "create": _create_payload(ir),
                 "update_drops": None if ir.update_drops is None else list(ir.update_drops),
                 "routes": [],
             },
@@ -905,11 +934,6 @@ def _render_native_output(
         )
     except ValueError as error:
         raise FrameworkMigrationError(str(error)) from error
-    user_logic = _render_user_logic(resources, scan) if preserve_carryover else None
-    if user_logic is not None:
-        manifest["has_user_logic"] = True
-        generated_names.append("sanka_user_logic.py")
-        _write_text(output_path / "sanka_user_logic.py", user_logic)
     generated_files = [entrypoint, *generated_names]
     manifest["generated_files"] = generated_files
     _write_text(output_path / entrypoint, _render_native_app(manifest))
@@ -953,8 +977,7 @@ def verify_fastapi_migration(
     plan_path = _artifact_path(root_path, artifact_dir, PLAN_FILE).resolve()
     manifest_path = output_path / GENERATED_MANIFEST
     try:
-        manifest = read_generated_manifest(manifest_path)
-        verify_generated_bundle(output_path, manifest)
+        frozen_output, manifest = freeze_generated_bundle(output_path)
     except GeneratedIntegrityError as error:
         raise FrameworkMigrationError(str(error)) from error
     if manifest.get("source_scan_hash") != scan.scan_hash:
@@ -975,15 +998,20 @@ def verify_fastapi_migration(
     }
     missing = sorted(expected - actual)
     extra = sorted(actual - expected)
-    _compile_generated_files(output_path, manifest)
+    _compile_generated_files(frozen_output, manifest)
     probes: list[dict[str, Any]] = []
     generated_environment: GeneratedEnvironment | None = None
     if probe_http and not missing and not extra:
         if plan.mode == NATIVE_STRATEGY:
             generated_environment = ensure_generated_environment(output_path)
+        execution_output = (
+            generated_environment.bundle_root
+            if generated_environment is not None
+            else frozen_output
+        )
         probes = _probe_read_only_routes(
             root_path,
-            output_path,
+            execution_output,
             manifest,
             cases=_load_verification_cases(root_path, cases),
             target_python=(
@@ -1011,6 +1039,8 @@ def verify_fastapi_migration(
         },
         "http": {
             "enabled": probe_http,
+            "evidence": "observational",
+            "source_authenticated": False,
             "safe_routes": len(
                 [
                     route
@@ -2154,8 +2184,6 @@ def _build_serializer_ir(
             has_writable_nested = True
 
     create_style = "default"
-    create_source: str | None = None
-    create_imports: tuple[tuple[str, str, str | None], ...] = ()
     update_drops: tuple[str, ...] | None = None
     if analyze_writes:
         create_overridden = serializer_class.create is not serializers_module.ModelSerializer.create
@@ -2166,7 +2194,6 @@ def _build_serializer_ir(
                 supported = False
             else:
                 create_style = "carryover"
-                create_source, create_imports = carryover
         elif has_writable_nested:
             # DRF's default create() raises on writable nested fields; an
             # honest native migration needs the author's own create logic.
@@ -2196,8 +2223,6 @@ def _build_serializer_ir(
         lookup=lookup,
         fields=tuple(fields),
         create_style=create_style,
-        create_source=create_source,
-        create_imports=create_imports,
         update_drops=update_drops,
         supported=supported,
     )
@@ -2500,52 +2525,93 @@ def _replace_named_regex_groups(value: str) -> tuple[str, bool, dict[str, str]]:
 
 
 def _regex_is_single_path_segment(expression: str) -> bool:
-    """Conservatively prove a regex cannot consume a slash."""
+    """Admit only single-atom, linear-time regexes for generated route matching.
+
+    Django lets applications provide arbitrary ``lookup_value_regex`` values, but
+    carrying an arbitrary expression into Starlette would also carry its
+    backtracking behavior.  A single character atom with a simple repetition is
+    sufficient for the common slug, identifier, and ``[^/]+`` forms and cannot
+    contain nested or overlapping repetitions.
+    """
     if not expression:
         return False
-    index = 0
-    while index < len(expression):
-        char = expression[index]
-        if char == "\\":
-            if index + 1 >= len(expression):
-                return False
-            escaped = expression[index + 1]
-            if escaped == "/" or escaped in {"D", "S", "W"} or escaped.isdigit():
-                return False
-            index += 2
-            continue
-        if char == "/" or char == ".":
+
+    value = expression
+    if value.startswith("(?:"):
+        if not value.endswith(")"):
             return False
-        if char == "[":
-            cursor = index + 1
-            negated = cursor < len(expression) and expression[cursor] == "^"
-            if negated:
-                cursor += 1
-            has_slash = False
-            while cursor < len(expression) and expression[cursor] != "]":
-                if expression[cursor] == "\\":
-                    if cursor + 1 >= len(expression):
-                        return False
-                    escaped = expression[cursor + 1]
-                    if escaped in {"D", "S", "W"} or escaped.isdigit():
-                        return False
-                    if escaped == "/":
-                        has_slash = True
-                    cursor += 2
-                    continue
-                if expression[cursor] == "/":
-                    has_slash = True
-                cursor += 1
-            if cursor >= len(expression):
+        value = value[3:-1]
+    if not value:
+        return False
+
+    atom_end = 0
+    if value.startswith("["):
+        cursor = 1
+        negated = cursor < len(value) and value[cursor] == "^"
+        if negated:
+            cursor += 1
+        content_start = cursor
+        tokens: list[tuple[str | None, bool]] = []
+        while cursor < len(value) and value[cursor] != "]":
+            char = value[cursor]
+            if char == "\\":
+                if cursor + 1 >= len(value):
+                    return False
+                escaped = value[cursor + 1]
+                if escaped in {"D", "S", "W"} or escaped.isdigit():
+                    return False
+                if escaped in {"d", "s", "w"}:
+                    tokens.append((None, False))
+                elif escaped not in _SAFE_REGEX_LITERAL_ESCAPES:
+                    # Reject hex, Unicode, named, anchor, and other semantic escapes.
+                    return False
+                else:
+                    tokens.append((escaped, False))
+                cursor += 2
+                continue
+            if char in {"[", "\n", "\r"}:
                 return False
-            if (negated and not has_slash) or (not negated and has_slash):
-                return False
-            index = cursor + 1
-            continue
-        if expression.startswith("(?", index) and not expression.startswith("(?:", index):
+            tokens.append((char, char == "-"))
+            cursor += 1
+        if cursor == content_start or cursor >= len(value):
             return False
-        index += 1
-    return True
+        slash_is_listed = any(token == "/" for token, _is_range in tokens)
+        for index, (_token, is_range) in enumerate(tokens):
+            if not is_range or index in {0, len(tokens) - 1}:
+                continue
+            left, left_is_range = tokens[index - 1]
+            right, right_is_range = tokens[index + 1]
+            if left is None or right is None or left_is_range or right_is_range:
+                return False
+            if ord(left) > ord(right):
+                return False
+            slash_is_listed = slash_is_listed or ord(left) <= ord("/") <= ord(right)
+        class_matches_slash = not slash_is_listed if negated else slash_is_listed
+        if class_matches_slash:
+            return False
+        atom_end = cursor + 1
+    elif value.startswith("\\"):
+        if len(value) < 2:
+            return False
+        escaped = value[1]
+        if escaped not in {"d", "s", "w"} and escaped not in _SAFE_REGEX_LITERAL_ESCAPES:
+            return False
+        atom_end = 2
+    elif value[0].isalnum() or value[0] in {"_", "-", "@"}:
+        atom_end = 1
+    else:
+        return False
+
+    repetition = value[atom_end:]
+    if repetition in {"", "+"}:
+        return True
+    match = re.fullmatch(r"\{(\d+)(?:,(\d*))?\}", repetition)
+    if match is None:
+        return False
+    minimum = int(match.group(1))
+    maximum_text = match.group(2)
+    maximum = int(maximum_text) if maximum_text else None
+    return minimum >= 1 and minimum <= 4096 and (maximum is None or minimum <= maximum <= 4096)
 
 
 def _to_fastapi_path(raw: str) -> tuple[str, bool]:
@@ -2723,7 +2789,9 @@ def _probe_read_only_routes(
     except UntrustedFrameworkError as error:
         raise FrameworkMigrationError(str(error)) from error
     if target_python is not None:
-        target_responses = _native_target_probe_responses(output, target_python, probes)
+        target_responses = _native_target_probe_responses(
+            output, target_python, probes, source_root=root
+        )
     else:
         try:
             target_payload = run_untrusted_framework_worker(
@@ -2796,12 +2864,33 @@ def _decode_worker_responses(payload: dict[str, Any], *, expected: int) -> list[
         if not isinstance(item, dict):
             raise FrameworkMigrationError("isolated framework worker returned invalid responses")
         try:
+            status = int(item["status"])
+            content_type = str(item["content_type"])
+            body = base64.b64decode(str(item["body"]), validate=True)
+            raw_headers = item["headers"]
+            if status < 100 or status > 599:
+                raise ValueError("invalid HTTP status")
+            if len(content_type.encode("utf-8")) > 4_096 or "\x00" in content_type:
+                raise ValueError("invalid content type")
+            if len(body) > 16 * 1024 * 1024:
+                raise ValueError("response body exceeds the worker boundary limit")
+            if not isinstance(raw_headers, dict) or len(raw_headers) > 64:
+                raise ValueError("invalid response headers")
+            headers = {str(key).lower(): str(value) for key, value in raw_headers.items()}
+            if any(
+                len(key.encode("utf-8")) > 256
+                or len(value.encode("utf-8")) > 8_192
+                or "\x00" in key
+                or "\x00" in value
+                for key, value in headers.items()
+            ):
+                raise ValueError("invalid response headers")
             responses.append(
                 {
-                    "status": int(item["status"]),
-                    "content_type": str(item["content_type"]),
-                    "body": base64.b64decode(str(item["body"]), validate=True),
-                    "headers": dict(item["headers"]),
+                    "status": status,
+                    "content_type": content_type,
+                    "body": body,
+                    "headers": headers,
                 }
             )
         except (KeyError, TypeError, ValueError) as error:
@@ -2879,6 +2968,8 @@ def _native_target_probe_responses(
     output: Path,
     target_python: Path,
     probes: list[dict[str, Any]],
+    *,
+    source_root: Path,
 ) -> list[dict[str, Any]]:
     environment = {
         key: value
@@ -2898,6 +2989,7 @@ def _native_target_probe_responses(
         }
     }
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["SANKA_SOURCE_ROOT"] = str(source_root)
     result = subprocess.run(
         [str(target_python), "-I", "-B", "-c", _TARGET_PROBE_SCRIPT, str(output)],
         cwd=output,
@@ -3175,7 +3267,7 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
             )
         var = resource_var[view]
         func = _unique_ident(
-            f"{_OPERATION_FUNCS.get(operation, operation)}_{object_names[view]}",
+            f"{_python_ident(_OPERATION_FUNCS.get(operation, operation))}_{object_names[view]}",
             used_funcs,
         )
         path_parameters = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", path)
@@ -3447,7 +3539,10 @@ from fastapi.responses import Response, StreamingResponse
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = json.loads((HERE / "sanka-manifest.json").read_text(encoding="utf-8"))
-SOURCE_ROOT = (HERE / MANIFEST["source_root"]).resolve()
+SOURCE_ROOT = Path(
+    os.environ.get("SANKA_SOURCE_ROOT")
+    or (HERE / MANIFEST["source_root"]).resolve()
+).resolve()
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 os.environ["DJANGO_SETTINGS_MODULE"] = MANIFEST["settings_module"]

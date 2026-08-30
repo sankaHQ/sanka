@@ -209,7 +209,7 @@ def test_nested_fixture_generates_sql_nested_output(nested_project: Path) -> Non
     assert (output / "models.py").is_file()
 
 
-def test_bench_candidate_preserves_django_carryover(nested_project: Path) -> None:
+def test_bench_candidate_never_emits_source_carryover(nested_project: Path) -> None:
     _generate(nested_project)
     applied = _run_cli(
         [
@@ -228,11 +228,9 @@ def test_bench_candidate_preserves_django_carryover(nested_project: Path) -> Non
     overlay = nested_project / "candidate" / "overlay"
     manifest = json.loads((overlay / "sanka-manifest.json").read_text(encoding="utf-8"))
     assert manifest["sql_engine"] == "django"
-    assert manifest["has_user_logic"] is True
-    assert manifest["resources"][0]["create"]["style"] == "carryover"
-    user_logic = (overlay / "sanka_user_logic.py").read_text(encoding="utf-8")
-    assert "transaction.atomic" in user_logic
-    assert "ValidationError" in user_logic
+    assert not manifest.get("has_user_logic")
+    assert manifest["resources"][0]["create"]["style"] == "nested"
+    assert not (overlay / "sanka_user_logic.py").exists()
     assert (overlay / "sanka_settings.py").is_file()
 
 

@@ -2,16 +2,27 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import stat
+from multiprocessing import get_context
+from multiprocessing.connection import Connection
 from pathlib import Path
 
 import pytest
 
+from sanka.runtime.private_sqlite import connect_private_sqlite
 from sanka.runtime.state import LedgerEntry, RunStatus, SqliteStateStore, StateError
 
 
 def _store(tmp_path: Path) -> SqliteStateStore:
     return SqliteStateStore(tmp_path / "state.db")
+
+
+def _hold_private_state_lock(path: str, control: Connection) -> None:
+    connection = connect_private_sqlite(path)
+    control.send("ready")
+    control.recv()
+    connection.close()
 
 
 def test_run_lifecycle_and_lookup(tmp_path: Path) -> None:
@@ -82,6 +93,70 @@ def test_state_directory_symlink_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(OSError, match="symbolic link"):
         SqliteStateStore(link / "state.db")
     assert not (target / "state.db").exists()
+
+
+def test_state_connection_never_opens_canonical_path(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.db"
+    connection = connect_private_sqlite(state_path)
+    opened_path = Path(str(connection.execute("PRAGMA database_list").fetchone()[2]))
+    connection.execute("CREATE TABLE bound (value TEXT)")
+    connection.commit()
+    connection.close()
+
+    assert state_path.exists()
+    assert opened_path != state_path
+
+
+def test_second_process_cannot_open_the_same_private_state(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.db"
+    context = get_context("spawn")
+    parent_control, child_control = context.Pipe()
+    process = context.Process(
+        target=_hold_private_state_lock,
+        args=(str(state_path), child_control),
+    )
+    process.start()
+    try:
+        assert parent_control.recv() == "ready"
+        with pytest.raises(OSError, match="already open in another process"):
+            connect_private_sqlite(state_path)
+    finally:
+        parent_control.send("stop")
+        process.join(timeout=10)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+    assert process.exitcode == 0
+
+
+def test_private_state_rejects_external_generation_change(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.db"
+    connection = connect_private_sqlite(state_path)
+    connection.execute("CREATE TABLE owned (value TEXT)")
+    connection.commit()
+
+    with sqlite3.connect(state_path) as external:
+        external.execute("CREATE TABLE external (value TEXT)")
+
+    connection.execute("INSERT INTO owned VALUES ('pending')")
+    with pytest.raises(OSError, match="changed outside this process"):
+        connection.commit()
+    connection.close()
+
+
+def test_private_state_rejects_replaced_lock_inode(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.db"
+    connection = connect_private_sqlite(state_path)
+    connection.execute("CREATE TABLE owned (value TEXT)")
+    connection.commit()
+    lock_path = tmp_path / ".state.db.sanka.lock"
+    lock_path.unlink()
+    lock_path.write_bytes(b"replacement")
+
+    connection.execute("INSERT INTO owned VALUES ('pending')")
+    with pytest.raises(OSError, match="lock changed outside this process"):
+        connection.commit()
+    connection.close()
 
 
 def test_checkpoints_round_trip(tmp_path: Path) -> None:

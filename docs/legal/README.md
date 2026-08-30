@@ -1,6 +1,5 @@
 # Legal documents
 
-No public commercial-license template is published in this repository.
 Commercial licensing is available by contacting Sanka at `hey@sanka.com`.
 The contributor-agreement files are inactive planning drafts retained for
 possible future evaluation; no CLA is required and no CLA automation is active.
@@ -16,5 +15,4 @@ Contributions use the license applicable to the repository and files they
 modify: AGPL-3.0-only for this repository's runtime and CLI code, and
 Apache-2.0 for its MCP package, scripts, tests, and documentation. The
 Connector SDK and provider packages are separately distributed under
-Apache-2.0 from `sankaHQ/sanka-connectors`. Commercial licensing is available
-by contacting Sanka at `hey@sanka.com`.
+Apache-2.0 from `sankaHQ/sanka-connectors`.

@@ -14,6 +14,7 @@ import pytest
 from sanka.cli import main
 from sanka.runtime.engine import CandidateBudget, ExecutionError, MigrationEngine, PlanMismatchError
 from sanka.runtime.execution import exact_candidate_hash
+from sanka.runtime.private_sqlite import connect_private_sqlite
 from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
@@ -182,7 +183,7 @@ async def test_apply_rehashes_persisted_plan_before_resolving_destination(tmp_pa
     tampered["candidateHash"] = exact_candidate_hash(
         {tampered["routes"][0]["routeKey"]: tampered["routes"][0]["candidateIds"]}
     )
-    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+    with connect_private_sqlite(tmp_path / "state" / "state.db") as connection:
         connection.execute(
             "UPDATE runs SET plan_json = ? WHERE id = ?",
             (json.dumps(tampered), run_id),
@@ -201,7 +202,7 @@ async def test_apply_rehashes_persisted_spec_before_resolving_destination(tmp_pa
     plan = await engine.plan(run_id)
 
     tampered = _spec(content, tmp_path / "redirected.db").to_dict()
-    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+    with connect_private_sqlite(tmp_path / "state" / "state.db") as connection:
         connection.execute(
             "UPDATE runs SET spec_json = ? WHERE id = ?",
             (json.dumps(tampered), run_id),
@@ -225,7 +226,7 @@ async def test_plan_binds_connection_reference_and_conflict_policy(tmp_path: Pat
         target=EndpointSpec(type="sqlite", connection=str(tmp_path / "redirected.db")),
         strategy={"conflict_policy": "create"},
     )
-    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+    with connect_private_sqlite(tmp_path / "state" / "state.db") as connection:
         connection.execute(
             "UPDATE runs SET spec_json = ?, spec_hash = ? WHERE id = ?",
             (json.dumps(tampered.to_dict()), tampered.spec_hash, run_id),
@@ -268,7 +269,7 @@ async def test_verify_rehashes_persisted_plan(tmp_path: Path) -> None:
 
     tampered = plan.to_payload()
     tampered["warnings"].append("tampered")
-    with sqlite3.connect(tmp_path / "state" / "state.db") as connection:
+    with connect_private_sqlite(tmp_path / "state" / "state.db") as connection:
         connection.execute(
             "UPDATE runs SET plan_json = ? WHERE id = ?",
             (json.dumps(tampered), run_id),

@@ -235,6 +235,12 @@ Sanka compares JSON structurally and also checks status, content type, `Allow`,
 OPTIONS; Sanka refuses to replay writes automatically against a developer's
 database.
 
+These source responses are observations from the supplied application, not an
+authentication mechanism. The sandbox limits what dynamically executed source
+code can do to the operator's host, but an adversarial source application can
+still misrepresent its own behavior. Generated code and benchmark candidates
+never embed Python source returned by the dynamic worker.
+
 Automatic HTTP probes are deliberately read-only. Parameterized and mutating
 requests require project-specific fixtures before they can be claimed as
 behaviorally verified. `sanka verify --no-http` runs integrity and route checks

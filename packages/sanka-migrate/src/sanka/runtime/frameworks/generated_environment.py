@@ -14,8 +14,7 @@ from pathlib import Path
 
 from sanka.runtime.frameworks.generated_integrity import (
     GeneratedIntegrityError,
-    read_generated_manifest,
-    verify_generated_bundle,
+    freeze_generated_bundle,
 )
 from sanka.runtime.safe_local_io import absolute_path, safe_read_text, safe_write_text
 
@@ -27,6 +26,7 @@ class GeneratedEnvironmentError(RuntimeError):
 @dataclass(frozen=True)
 class GeneratedEnvironment:
     root: Path
+    bundle_root: Path
     python: Path
     pyproject: Path
     lockfile: Path
@@ -40,11 +40,10 @@ def ensure_generated_environment(
     """Create a disposable environment from attested generated metadata."""
     output = absolute_path(output)
     try:
-        manifest = read_generated_manifest(output / "sanka-manifest.json")
-        verify_generated_bundle(output, manifest)
+        frozen_output, _manifest = freeze_generated_bundle(output)
     except GeneratedIntegrityError as error:
         raise GeneratedEnvironmentError(str(error)) from error
-    source_pyproject = output / "pyproject.toml"
+    source_pyproject = frozen_output / "pyproject.toml"
     uv = shutil.which("uv")
     if uv is None:
         raise GeneratedEnvironmentError(
@@ -149,6 +148,7 @@ def ensure_generated_environment(
         )
     return GeneratedEnvironment(
         root=environment_root,
+        bundle_root=frozen_output,
         python=python_path,
         pyproject=pyproject,
         lockfile=lockfile,

@@ -218,6 +218,11 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("--to", choices=("fastapi",), help="select an application plan")
     test.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     test.add_argument("--output", default=None, help="generated FastAPI output directory")
+    test.add_argument(
+        "--trust-source-code",
+        action="store_true",
+        help="allow unsandboxed compatibility tests only when no OS sandbox is available",
+    )
     test.add_argument("--json", action="store_true", help="print the test report as JSON")
     test.set_defaults(handler=_cmd_test)
 
@@ -464,6 +469,7 @@ async def _cmd_test(args: argparse.Namespace) -> int:
             args.root,
             artifact_dir=args.artifact_dir,
             output=args.output,
+            allow_unsafe_source_execution=args.trust_source_code,
         )
     )
     if args.json:
@@ -925,13 +931,14 @@ def _print_framework_verify(report: dict[str, Any]) -> None:
     print("  manifest matches the current scan and reviewed plan ✓")
     if native:
         print("  generated serving path has no Django imports ✓")
-    print("Safe HTTP behavior")
+    print("Observed HTTP parity")
     if not http.get("enabled", True):
         print("  skipped with --no-http")
     else:
         print(f"  {http['passed']} / {http['probed']} source-vs-generated probes matched")
         print("  automatic coverage is limited to parameter-free GET/HEAD routes")
         print("  compared status, content type, body, Allow, Location, and WWW-Authenticate")
+        print("  source responses are observations, not authentication of source behavior")
         if http["safe_routes"] == 0:
             print("  no parameter-free GET/HEAD routes were available for automatic probing")
     if routes["missing"]:

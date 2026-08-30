@@ -54,10 +54,15 @@ def render_async_sql_files(
 
 
 def _ident(value: str) -> str:
+    import keyword
     import re
 
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_")
-    return slug or "Item"
+    if not slug:
+        return "Item"
+    if slug[0].isdigit() or keyword.iskeyword(slug):
+        return f"Sanka_{slug}"
+    return slug
 
 
 def _models_spec(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -282,7 +287,11 @@ def database_url() -> str:
         )
     path = Path(name)
     if not path.is_absolute():
-        path = (HERE / captured.get("source_root", ".")).resolve() / name
+        source_root = Path(
+            os.environ.get("SANKA_SOURCE_ROOT")
+            or (HERE / captured.get("source_root", ".")).resolve()
+        )
+        path = source_root / name
     return _sqlite_url(str(path))
 """
 
@@ -301,7 +310,10 @@ from asgiref.sync import sync_to_async
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = json.loads((HERE / "sanka-manifest.json").read_text(encoding="utf-8"))
-SOURCE_ROOT = (HERE / MANIFEST.get("source_root", ".")).resolve()
+SOURCE_ROOT = Path(
+    os.environ.get("SANKA_SOURCE_ROOT")
+    or (HERE / MANIFEST.get("source_root", ".")).resolve()
+).resolve()
 for _entry in (str(HERE), str(SOURCE_ROOT)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)

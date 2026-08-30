@@ -17,7 +17,11 @@ from typing import Any
 
 import pytest
 
-from sanka.runtime.frameworks.django_fastapi import _to_fastapi_path, _unsupported_middleware
+from sanka.runtime.frameworks.django_fastapi import (
+    _regex_is_single_path_segment,
+    _to_fastapi_path,
+    _unsupported_middleware,
+)
 from sanka.runtime.hashing import content_hash
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -333,12 +337,39 @@ def test_native_output_matches_drf_behavior_and_database(
         (r"^api/entries/(?P<code>[^/]+)/$", "/api/entries/{code}/", True),
         (r"^api/files/(?P<path>.+)/$", "/api/files/{path}/", False),
         (r"^api/files/(?P<path>[^a]+)/$", "/api/files/{path}/", False),
+        (r"^api/entries/(?P<code>(?:a+)+)/$", "/api/entries/{code}/", False),
     ],
 )
 def test_fastapi_path_conversion_balances_nested_named_groups(
     raw: str, expected: str, supported: bool
 ) -> None:
     assert _to_fastapi_path(raw) == (expected, supported)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [r"(?:[-\w.+@]+)", r"[^/]+", r"[0-9a-f]{32}", r"\d+", "a+"],
+)
+def test_lookup_regex_admits_only_linear_single_atom_forms(expression: str) -> None:
+    assert _regex_is_single_path_segment(expression)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        r"(?:a+)+",
+        r"(a|aa)+",
+        r".*",
+        r"[^a]+",
+        r"[a/]+",
+        r"[.-0]+",
+        r"\q",
+        r"\A",
+        r"(?:[-\w]+|x)",
+    ],
+)
+def test_lookup_regex_rejects_backtracking_or_cross_segment_forms(expression: str) -> None:
+    assert not _regex_is_single_path_segment(expression)
 
 
 def test_native_output_supports_unique_string_lookup_semantics(

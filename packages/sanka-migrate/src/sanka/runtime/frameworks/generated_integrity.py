@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import shutil
 import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,7 @@ from sanka.runtime.hashing import canonical_json
 from sanka.runtime.safe_local_io import (
     UnsafeLocalPathError,
     absolute_path,
+    safe_copy_regular_file,
     safe_read_bytes,
     safe_read_text,
     safe_write_text,
@@ -115,6 +119,31 @@ def read_generated_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise GeneratedIntegrityError("generated manifest must be a JSON object")
     return payload
+
+
+def freeze_generated_bundle(output: Path) -> tuple[Path, dict[str, Any]]:
+    """Copy an attested bundle to a private immutable execution snapshot."""
+
+    output = absolute_path(output)
+    manifest = read_generated_manifest(output / "sanka-manifest.json")
+    verify_generated_bundle(output, manifest)
+    integrity = manifest["integrity"]
+    names = [str(name) for name in dict(integrity["files"])]
+    frozen = Path(tempfile.mkdtemp(prefix="sanka-generated-bundle-")).resolve()
+    atexit.register(shutil.rmtree, frozen, ignore_errors=True)
+    try:
+        for name in names:
+            safe_copy_regular_file(output / _validated_name(name), frozen / name)
+        safe_write_text(
+            frozen / "sanka-manifest.json",
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
+        frozen_manifest = read_generated_manifest(frozen / "sanka-manifest.json")
+        verify_generated_bundle(frozen, frozen_manifest)
+    except BaseException:
+        shutil.rmtree(frozen, ignore_errors=True)
+        raise
+    return frozen, frozen_manifest
 
 
 def _validated_name(name: str) -> str:
