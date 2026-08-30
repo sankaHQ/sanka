@@ -21,7 +21,7 @@ Run these commands from the Django repository root and from the project's
 existing Python environment:
 
 ```bash
-python -m pip install sanka-cli
+python -m pip install sanka-cli sanka-migrate
 
 sanka scan
 sanka plan --to fastapi
@@ -30,9 +30,10 @@ sanka test
 sanka verify
 ```
 
-The distribution name is `sanka-migrate`; the primary console command is
-`sanka`. The older `sanka-migrate` console command remains an alias so existing
-automation does not break.
+The lightweight `sanka-cli` distribution owns the `sanka` console command. The
+`sanka-migrate` distribution owns the local engine and its explicit
+`sanka-migrate` command; after both packages are installed, `sanka` delegates
+these local lifecycle verbs to the engine.
 
 ## What each command proves
 

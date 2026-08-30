@@ -137,16 +137,21 @@ and verification levels.
 
 ## Data migration quick start
 
-Install from PyPI (Python ≥ 3.12). The `sanka` command ships with `sanka-cli`,
-which bundles this engine; installing only `sanka-migrate` provides the same
-subcommands as `sanka-migrate <command>`:
+Install from PyPI (Python ≥ 3.12). `sanka-cli` owns the lightweight `sanka`
+entry point, while this package owns the explicit `sanka-migrate` local-runtime
+command. Keep the runtime and connector providers opt-in:
 
 ```bash
+uv tool install sanka-cli
 uv tool install \
   --with sanka-connector-markdown \
   --with sanka-connector-sqlite \
-  sanka-cli
+  sanka-migrate
 ```
+
+When both tools are installed, `sanka` discovers `sanka-migrate` on `PATH` and
+delegates local lifecycle commands to it. You can also call `sanka-migrate`
+directly in automation.
 
 Migrate a Markdown folder into SQLite:
 
