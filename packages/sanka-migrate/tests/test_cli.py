@@ -49,11 +49,11 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
 
 
 def test_connect_reports_an_installed_provider(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["connect", "hubspot"]) == 0
+    assert main(["connect", "markdown"]) == 0
 
     output = capsys.readouterr().out
-    assert "hubspot: ready (source, destination)" in output
-    assert "provided by installed package sanka-connector-hubspot" in output
+    assert "markdown: ready (source)" in output
+    assert "provided by installed package sanka-connector-markdown" in output
 
 
 def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) -> None:
@@ -72,6 +72,21 @@ def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str])
     error = capsys.readouterr().err
     assert "no installed connector" in error
     assert "sanka-connector-not-a-provider" in error
+
+
+@pytest.mark.parametrize(
+    ("provider", "label"),
+    [("hubspot", "HubSpot"), ("salesforce", "Salesforce"), ("sendgrid", "SendGrid")],
+)
+def test_connect_routes_system_providers_to_the_hosted_api(
+    provider: str, label: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["connect", provider]) == 1
+
+    error = capsys.readouterr().err
+    assert label in error
+    assert "hosted System Migration API" in error
+    assert f"sanka-connector-{provider}" not in error
 
 
 # -- sanka-migrate validate ---------------------------------------------------

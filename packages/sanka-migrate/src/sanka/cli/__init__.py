@@ -14,7 +14,7 @@ destination connector, exiting non-zero when invalid records exist.
 
 Shorthand and provider selection::
 
-    sanka connect hubspot
+    sanka connect markdown
     sanka migrate ./content sqlite://content.db
 
 Django REST Framework to FastAPI compatibility flow::
@@ -228,7 +228,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "connect",
         help="select an installed connector and show its supported migration roles",
     )
-    connect.add_argument("provider", help="provider slug, e.g. hubspot or postgres")
+    connect.add_argument("provider", help="local provider slug, e.g. markdown or postgres")
     connect.add_argument("--json", action="store_true", help="print provider details as JSON")
     connect.set_defaults(handler=_cmd_connect)
 

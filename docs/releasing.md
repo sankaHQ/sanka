@@ -88,9 +88,8 @@ test dispatch.
 ## First-release bootstrap
 
 The abandoned `v0.1.0a1` candidate represented the package-per-connector model
-and must never be reused or published to production PyPI. Its one successful
-TestPyPI connector-SDK bootstrap is historical test data outside the supported
-package set. The replacement candidate starts at `v0.1.0a2`.
+and must never be reused or published to production PyPI. The replacement
+candidate starts at `v0.1.0a2`.
 
 Bootstrap the two supported projects one at a time on TestPyPI first:
 

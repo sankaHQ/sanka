@@ -88,20 +88,17 @@ Installed providers are discovered from their `sanka.connectors` entry points:
 sanka connect markdown
 ```
 
-Install only the providers a migration needs, for example
-`sanka-connector-hubspot` or `sanka-connector-postgres`. See the
+Install only the local providers a migration needs, for example
+`sanka-connector-markdown` or `sanka-connector-postgres`. See the
 [connector repository](https://github.com/sankaHQ/sanka-connectors) for the
 SDK and first-party package list.
 
-Advanced integrations can use the typed `sanka.runtime` modules directly.
+HubSpot, Salesforce, SendGrid, and other managed-system migrations use Sanka's
+hosted System Migration API. Running `sanka connect` for one of those providers
+explains that boundary instead of suggesting a local package installation.
+Credentials and provider clients stay in Sanka's managed service.
 
-## Destination date transforms
-
-The `hubspot_date_ms` mapping transform converts a source date to UTC-midnight
-epoch milliseconds for HubSpot date properties. It accepts ISO dates and
-datetimes, Unix timestamps, and Japanese year-month period labels such as
-`2026年04月期`. A year-month period resolves to the first day of that month;
-invalid months are rejected as mapping-value errors instead of being coerced.
+Advanced local integrations can use the typed `sanka.runtime` modules directly.
 
 ## Public research and assessment
 
@@ -115,7 +112,8 @@ sanka research compare crm-migration --platforms salesforce,hubspot
 sanka assess --source "SAP ECC" --destination "HubSpot"
 ```
 
-Research output includes per-claim vendor sources and terminal attribution.
+These research and assessment commands call the hosted API; they do not load
+local SaaS connectors. Research output includes per-claim vendor sources and terminal attribution.
 Use `--json` for the unwrapped API data payload. Filtered queries with no rows
 exit `2`; API or transport failures exit `1`. The default public API base is
 `https://api.sanka.com/v2/migrate`; set `SANKA_MIGRATE_API_BASE` only when

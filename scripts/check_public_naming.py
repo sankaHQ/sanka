@@ -27,6 +27,11 @@ EXPECTED_PROJECTS = {
     Path("packages/sanka-migrate/pyproject.toml"): "sanka-migrate",
     Path("packages/sanka-migrate-mcp/pyproject.toml"): "sanka-migrate-mcp",
 }
+HOSTED_CONNECTOR_PACKAGES = {
+    "sanka-connector-hubspot",
+    "sanka-connector-salesforce",
+    "sanka-connector-sendgrid",
+}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -89,6 +94,20 @@ def main() -> int:
     root_project = _load(ROOT / "pyproject.toml")["project"]
     if root_project["name"] != "sanka-migrate-workspace":
         errors.append("workspace project name must be sanka-migrate-workspace")
+
+    workspace = _load(ROOT / "pyproject.toml")
+    development_dependencies = {
+        str(value).split("=", 1)[0].lower()
+        for value in workspace.get("dependency-groups", {}).get("dev", [])
+    }
+    unexpected_hosted_packages = sorted(
+        development_dependencies.intersection(HOSTED_CONNECTOR_PACKAGES)
+    )
+    if unexpected_hosted_packages:
+        errors.append(
+            "hosted SaaS providers must not be local development dependencies: "
+            f"{unexpected_hosted_packages}"
+        )
 
     for relative_path, expected_name in EXPECTED_PROJECTS.items():
         document = _load(ROOT / relative_path)

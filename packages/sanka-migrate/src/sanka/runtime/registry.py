@@ -8,6 +8,12 @@ from importlib.metadata import entry_points
 from sanka_connector import ENTRY_POINT_GROUP, ConnectorRegistration
 from sanka_connector.protocols import DestinationConnector, SourceConnector
 
+HOSTED_SYSTEM_PROVIDERS = {
+    "hubspot": "HubSpot",
+    "salesforce": "Salesforce",
+    "sendgrid": "SendGrid",
+}
+
 
 class UnknownConnectorError(ValueError):
     """No installed connector exposes the requested type."""
@@ -15,19 +21,30 @@ class UnknownConnectorError(ValueError):
 
 class ConnectorRegistry:
     def __init__(self, registrations: dict[str, ConnectorRegistration]) -> None:
-        self._registrations = registrations
+        self._registrations = {
+            name: registration
+            for name, registration in registrations.items()
+            if name.strip().lower() not in HOSTED_SYSTEM_PROVIDERS
+            and registration.name.strip().lower() not in HOSTED_SYSTEM_PROVIDERS
+        }
 
     @classmethod
     def discover(cls) -> ConnectorRegistry:
         registrations: dict[str, ConnectorRegistration] = {}
         for entry in entry_points(group=ENTRY_POINT_GROUP):
+            # SaaS/system providers execute only in Sanka's hosted service. Do
+            # not import stale local distributions for those retired entry
+            # points, where credentials and provider clients do not belong.
+            if entry.name.strip().lower() in HOSTED_SYSTEM_PROVIDERS:
+                continue
             loaded = entry.load()
             if not isinstance(loaded, ConnectorRegistration):
                 raise TypeError(
                     f"entry point {entry.name!r} in group {ENTRY_POINT_GROUP!r} must resolve"
                     f" to a ConnectorRegistration, got {type(loaded).__name__}"
                 )
-            registrations[loaded.name] = loaded
+            if loaded.name.strip().lower() not in HOSTED_SYSTEM_PROVIDERS:
+                registrations[loaded.name] = loaded
         return cls(registrations)
 
     def names(self) -> list[str]:
@@ -56,6 +73,13 @@ class ConnectorRegistry:
         return registration.destination
 
     def _get(self, type_name: str) -> ConnectorRegistration:
+        normalized = type_name.strip().lower()
+        if normalized in HOSTED_SYSTEM_PROVIDERS:
+            provider = HOSTED_SYSTEM_PROVIDERS[normalized]
+            raise UnknownConnectorError(
+                f"{provider} system migrations run through Sanka's hosted System "
+                "Migration API, not a local connector; use the Sanka web app or hosted API"
+            )
         try:
             return self._registrations[type_name]
         except KeyError:

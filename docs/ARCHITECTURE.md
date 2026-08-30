@@ -2,7 +2,7 @@
 
 This repository owns the AGPL-3.0-only Sanka migration runtime and the
 standalone Apache-2.0 MCP package. The zero-dependency Connector SDK and
-first-party providers live in the separate
+local/offline providers live in the separate
 [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors)
 repository. This document pins the runtime-side decisions.
 
@@ -50,7 +50,7 @@ lifecycle behavior delegates to `sanka.runtime`, so there is one engine and
 one set of serialized contracts.
 
 Distribution names follow the public project brand: the runtime publishes as
-**`sanka-migrate`**, connector packages as **`sanka-connector-*`**, and the
+**`sanka-migrate`**, local connector packages as **`sanka-connector-*`**, and the
 standalone MCP as **`sanka-migrate-mcp`**. The primary CLI is `sanka-migrate`.
 The `sanka` import namespace, connector entry point, environment variables,
 and state paths follow the contract in `docs/public-naming.md`.
@@ -88,10 +88,9 @@ they bind every later phase:
   `sanka_connector.protocols`.
 - **Phase 2 (done)** — engine, SQLite state store, resumable execution,
   verification, CLI lifecycle commands, production mapping stack, and the
-  `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`, `salesforce`, and
-  `hubspot` connectors.
-- **Phase 2a (done)** — named-connection credential-provider resolution and a
-  SendGrid Marketing Contacts source whose immutable export job is the run's
-  high-water mark.
-- **Later** — managed OAuth connections, hosted execution, and AI-assisted
-  planning/remediation through Sanka's hosted product.
+  `markdown`, `csv`, `sqlite`, `postgres`, and `clickhouse` connectors.
+- **Hosted system migrations** — HubSpot, Salesforce, SendGrid, and other SaaS
+  providers execute through Sanka's separately governed hosted API and job
+  runtime. They are not discoverable local connectors.
+- **Later** — additional local code/data connectors and AI-assisted
+  planning/remediation, while preserving the local-versus-hosted boundary.

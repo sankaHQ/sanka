@@ -30,13 +30,13 @@ def test_public_facade_exports_runtime_types() -> None:
 
 def test_sanka_connect_selects_an_installed_provider(tmp_path: Path) -> None:
     with Sanka(state=tmp_path / "state.db") as client:
-        hubspot = client.connect("hubspot")
+        markdown = client.connect("markdown", "./content")
         postgres = client.connect("postgresql", "postgresql://localhost/example")
 
-    assert hubspot == Connection(
-        provider="hubspot",
-        roles=("source", "destination"),
-        connection=None,
+    assert markdown == Connection(
+        provider="markdown",
+        roles=("source",),
+        connection="./content",
         options={},
     )
     assert postgres.provider == "postgres"
@@ -53,6 +53,14 @@ def test_sanka_connect_rejects_an_unknown_provider(tmp_path: Path) -> None:
         pytest.raises(sanka.UnknownConnectorError, match="not-a-provider"),
     ):
         client.connect("not-a-provider")
+
+
+def test_sanka_connect_routes_system_providers_to_the_hosted_api(tmp_path: Path) -> None:
+    with (
+        Sanka(state=tmp_path / "state.db") as client,
+        pytest.raises(sanka.UnknownConnectorError, match="hosted System Migration API"),
+    ):
+        client.connect("hubspot")
 
 
 async def test_sanka_facade_runs_the_hash_bound_lifecycle(tmp_path: Path) -> None:

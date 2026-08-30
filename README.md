@@ -217,20 +217,22 @@ computed over the unresolved spec.
 | `sqlite` | ✅ | ✅ | Keyset pagination on PK/rowid; lazy tables, upserts, schema evolution |
 | `postgres` | ✅ | ✅ | Keyset pagination + snapshot bounds on all PK types; type-promotion ladder; SQLSTATE-mapped errors |
 | `clickhouse` | — | ✅ | `ReplacingMergeTree` + identity `ORDER BY`; batch inserts; `FINAL`-guarded count verification |
-| `salesforce` | ✅ | — | Production-ported: keyset SOQL pagination, snapshot bounds, owner directory, token refresh |
-| `hubspot` | ✅ | ✅ | Production-ported: batch writes + associations, schema provisioning (dry-run first), adaptive throttle/retry |
-| `sendgrid` | ✅ | — | Marketing Contacts export, export-job snapshot bounds, resumable paging without forwarding signed-download credentials |
 
 The Apache-2.0 `sanka-connector-sdk` has zero runtime dependencies. Each
-first-party provider is its own `sanka-connector-<provider>` distribution and
-installs only its client or driver stack. Connector packages never import the
-AGPL runtime; CI in the
+local/offline provider is its own `sanka-connector-<provider>` distribution
+and installs only its driver stack. Connector packages never import the AGPL
+runtime; CI in the
 [`sanka-connectors`](https://github.com/sankaHQ/sanka-connectors) repository
 enforces that boundary. Optional behaviors are typed
 capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
 `SupportsSchemaProvisioning`, …) that the engine discovers with
 `isinstance`. Installed providers register through the `sanka.connectors`
 entry-point group.
+
+SaaS and managed-system migrations, including HubSpot, Salesforce, and
+SendGrid, run through Sanka's hosted System Migration API. Their credentials,
+provider clients, execution controls, and audit evidence stay in Sanka's
+managed service rather than local connector packages.
 
 ## Use it as a library
 
@@ -361,7 +363,7 @@ boundary:
 | `packages/sanka-migrate/src/sanka/connector` — temporary compatibility import for `sanka_connector` | AGPL-3.0-only |
 | `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
 
-The standalone Connector SDK and first-party providers are Apache-2.0 in
+The standalone Connector SDK and local/offline providers are Apache-2.0 in
 [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors).
 
 Runtime code that Sanka owns or otherwise has permission to relicense is also
