@@ -49,6 +49,10 @@ def render_async_sql_files(
                 "import models as models_mod",
                 f"from {module_prefix} import models as models_mod",
             )
+            store = store.replace(
+                'modules={"models": ["models"]}',
+                f'modules={{"models": ["{module_prefix}.models"]}}',
+            )
         output_write("sanka_store.py", store)
         names.append("sanka_store.py")
     else:

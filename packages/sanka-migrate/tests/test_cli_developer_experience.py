@@ -87,6 +87,8 @@ def test_interactive_full_update_and_conflict_flow(
         "README.md",
     ):
         assert (output / name).is_file(), name
+    store = (output / "app/generated/sanka_store.py").read_text(encoding="utf-8")
+    assert 'modules={"models": ["app.generated.models"]}' in store
     imported = subprocess.run(
         [sys.executable, "-c", "from app.main import app; assert app"],
         cwd=output,
