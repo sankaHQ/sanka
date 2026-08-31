@@ -23,7 +23,8 @@ def main() -> int:
         raise ValueError("framework worker requires request and sandbox policy paths")
     request_path = Path(sys.argv[1])
     profile_value = sys.argv[2]
-    _apply_resource_limits()
+    unsafe = profile_value == "--unsafe"
+    _apply_resource_limits(unsafe=unsafe)
     if profile_value != "--unsafe":
         _apply_macos_sandbox(Path(profile_value))
     from sanka.runtime.frameworks import django_fastapi
@@ -76,7 +77,7 @@ def main() -> int:
     return 0
 
 
-def _apply_resource_limits() -> None:
+def _apply_resource_limits(*, unsafe: bool) -> None:
     if os.name != "posix":
         return
     import resource
@@ -97,7 +98,11 @@ def _apply_resource_limits() -> None:
     # unlinked files that no directory walk can observe.
     cap(resource.RLIMIT_FSIZE, 16 * 1024 * 1024)
     cap(resource.RLIMIT_NOFILE, 16)
-    if hasattr(resource, "RLIMIT_NPROC"):
+    if hasattr(resource, "RLIMIT_NPROC") and not unsafe:
+        # The macOS sandbox denies process creation independently. Linux counts
+        # threads and unrelated same-UID tasks against RLIMIT_NPROC, so no
+        # static value is a reliable worker-relative limit on the explicit
+        # --trust-source-code path; use a dedicated UID/cgroup for that policy.
         cap(resource.RLIMIT_NPROC, 1)
     if hasattr(resource, "RLIMIT_AS"):
         # Darwin commonly maps more virtual address space than this at
