@@ -13,7 +13,7 @@ SPDX-License-Identifier header in each source file is authoritative.
 
 The `sanka-migrate` wheel contains only AGPL runtime code and depends on the
 separately distributed Apache-2.0 `sanka-connector-sdk`. The SDK and first-party
-providers live at https://github.com/sankaHQ/sanka-connectors.
+providers live at https://github.com/sankaHQ/mods.
 
 Commercial licensing is available by contacting Sanka at hey@sanka.com.
 

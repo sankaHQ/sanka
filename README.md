@@ -24,17 +24,17 @@ sanka test
 sanka verify
 ```
 
-The package also includes the data-migration runtime. The zero-dependency
-Connector SDK and first-party provider packages live separately in
-[`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors), so
-the base runtime never installs unused database drivers or API clients.
+The package also includes the data-migration runtime. Extension SDKs and
+independently installable mods live separately in
+[`sankaHQ/mods`](https://github.com/sankaHQ/mods), so the base runtime never
+installs unused framework runtimes, database drivers, or API clients.
 
 ## Current release status
 
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| Connector SDK and providers | Apache-2.0 packages from [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors); install only the providers a migration needs |
+| Mods and Connector SDK | Apache-2.0 packages from [`sankaHQ/mods`](https://github.com/sankaHQ/mods); install only the capabilities a migration needs |
 | DRF → FastAPI recipe | Included in source candidate `v0.1.0a10`; the live PyPI project remains the publication authority. Native mode generates async FastAPI over existing SQL tables; compatibility mode is the strangler bridge. Both share scan, a hashed plan, separate FastAPI output, `sanka test` unit tests, and `sanka verify` integrity plus safe read-only probes |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
@@ -215,7 +215,7 @@ are rejected outright, and the plan hash is computed over the unresolved spec.
 | Error intelligence | Structured error taxonomy; per-record mapping failures become ledger entries instead of aborting the run |
 | Verification | Count reconciliation + destination readback per route |
 
-## Connectors
+## Mods and connectors
 
 | Connector | Source | Destination | Notes |
 |---|:---:|:---:|---|
@@ -229,12 +229,20 @@ The Apache-2.0 `sanka-connector-sdk` has zero runtime dependencies. Each
 local/offline provider is its own `sanka-connector-<provider>` distribution
 and installs only its driver stack. Connector packages never import the AGPL
 runtime; CI in the
-[`sanka-connectors`](https://github.com/sankaHQ/sanka-connectors) repository
-enforces that boundary. Optional behaviors are typed
+[`mods`](https://github.com/sankaHQ/mods) repository enforces that boundary.
+Optional behaviors are typed
 capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
 `SupportsSchemaProvisioning`, …) that the engine discovers with
 `isinstance`. Installed providers register through the `sanka.connectors`
 entry-point group.
+
+The `mods` repository is the Apache-2.0 extension layer for framework,
+database, language, library, and file-specific migration knowledge. Connector
+mods are the first stable interface. Sanka currently discovers installed
+connector mods; it does not silently download arbitrary packages during
+`scan` or `plan`. The mod resolver will select only reviewed matches from a
+shallow project fingerprint, materialize exact versions in isolation, and pin
+their artifact hashes into the plan.
 
 SaaS and managed-system migrations, including HubSpot, Salesforce, and
 SendGrid, run through Sanka's hosted System Migration API. Their credentials,
@@ -370,8 +378,8 @@ boundary:
 | `packages/sanka-migrate/src/sanka/connector` — temporary compatibility import for `sanka_connector` | AGPL-3.0-only |
 | `packages/sanka-migrate-mcp/` — `sanka-migrate-mcp`, credential-free research and assessment MCP tools | Apache-2.0 |
 
-The standalone Connector SDK and local/offline providers are Apache-2.0 in
-[`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors).
+The standalone Connector SDK and local/offline mods are Apache-2.0 in
+[`sankaHQ/mods`](https://github.com/sankaHQ/mods).
 
 Commercial licensing is available by
 [contacting Sanka](mailto:hey@sanka.com). See [LICENSE](LICENSE) for the full
@@ -401,7 +409,8 @@ provisions both); they skip cleanly otherwise. Architecture notes:
 
 No CLA is required. Contributions use the license already applicable to the
 modified files: AGPL-3.0-only for the runtime and Apache-2.0 for the MCP
-package, tests, scripts, and documentation. Connector SDK/provider
-contributions belong in the Apache-2.0 `sanka-connectors` repository.
+package, tests, scripts, and documentation. Extension SDK and mod contributions
+belong in the Apache-2.0 [`sankaHQ/mods`](https://github.com/sankaHQ/mods)
+repository.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the exact path map and contribution
 workflow.
