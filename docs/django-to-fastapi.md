@@ -35,6 +35,35 @@ The lightweight `sanka-cli` distribution owns the `sanka` console command. The
 `sanka-migrate` command; after both packages are installed, `sanka` delegates
 these local lifecycle verbs to the engine.
 
+## CLI and SDK execution model
+
+There is one local migration implementation. Human terminal commands reach it
+through `sanka`, while both `sanka-sdk` packages expose thin adapters over the
+explicit `sanka-migrate` executable:
+
+| Step | Human CLI | Python SDK | Node.js SDK |
+|---|---|---|---|
+| Scan | `sanka scan` | `migrate.scan()` | `await migrate.scan()` |
+| Plan | `sanka plan .` | `migrate.plan()` | `await migrate.plan()` |
+| Apply | `sanka apply --plan-hash ...` | `migrate.apply(plan_hash=...)` | `await migrate.apply({ planHash: ... })` |
+| Test | `sanka test` | `migrate.test()` | `await migrate.test()` |
+| Verify | `sanka verify` | `migrate.verify()` | `await migrate.verify()` |
+
+The SDK adapters execute `sanka-migrate <command> ... --json` as a local
+subprocess and parse its `sanka-cli/v1` envelope. They are non-interactive,
+require a separately installed `sanka-migrate` executable, and do not call the
+hosted Sanka API or require an API token. Only arguments supplied by the caller
+are forwarded, so framework detection, defaults, validation, and future recipe
+selection remain owned by the runtime.
+
+The plan hash has the same safety meaning on every surface: `apply` must receive
+the exact hash returned by `plan`. `test` and `verify` also keep the same
+environment boundary; dependencies are installed and executed in the generated
+target environment rather than the CLI or SDK environment. See the
+[Python SDK README](https://github.com/sankaHQ/sanka-python#local-migration)
+and [Node.js SDK README](https://github.com/sankaHQ/sanka-node#local-migration)
+for language-specific examples and error handling.
+
 ## What each command proves
 
 ### `sanka scan`

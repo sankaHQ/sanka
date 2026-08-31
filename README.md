@@ -24,6 +24,27 @@ sanka test
 sanka verify
 ```
 
+## CLI and SDK execution
+
+`sanka-migrate` is the local migration engine and the owner of command
+defaults, validation, plan hashes, generated artifacts, and the
+`sanka-cli/v1` JSON protocol. The other developer surfaces reuse that engine:
+
+| Surface | Entry point | Execution path |
+|---|---|---|
+| Human CLI | `sanka scan`, `sanka plan`, `sanka apply`, `sanka test`, `sanka verify` | The `sanka` CLI delegates local lifecycle commands to `sanka-migrate` |
+| Python SDK | `from sanka_sdk.migrate import SankaMigrate` | Runs `sanka-migrate <command> --json` locally |
+| Node.js SDK | `import { SankaMigrate } from "sanka-sdk/migrate"` | Runs `sanka-migrate <command> --json` locally from Node.js |
+| Hosted API SDK | `SankaClient` in Python or the default `Sanka` client in Node.js | Calls Sanka's hosted HTTP API with an API token |
+
+The local SDK adapters are tokenless and do not reimplement migration recipes
+or auto-install the runtime. They expose generic `scan()`, `plan()`, `apply()`,
+`test()`, and `verify()` methods; the runtime still detects the framework and
+uses the generated target's environment for test and verification dependencies.
+See the [CLI-to-SDK execution model](docs/django-to-fastapi.md#cli-and-sdk-execution-model),
+the [Python SDK](https://github.com/sankaHQ/sanka-python), and the
+[Node.js SDK](https://github.com/sankaHQ/sanka-node).
+
 The package also includes the data-migration runtime. Extension SDKs and
 independently installable extensions live separately in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions), so the base runtime never
