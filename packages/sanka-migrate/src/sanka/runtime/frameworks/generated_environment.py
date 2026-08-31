@@ -121,7 +121,7 @@ def _ensure_pip_environment(output: Path, pyproject: Path | None) -> GeneratedEn
         )
     environment_root = output / ".venv"
     try:
-        venv.EnvBuilder(with_pip=True).create(environment_root)
+        venv.EnvBuilder(with_pip=True, symlinks=os.name != "nt").create(environment_root)
         python_path = _environment_python(environment_root)
         command = [str(python_path), "-m", "pip", "install"]
         for path in requirements:
@@ -134,7 +134,7 @@ def _ensure_pip_environment(output: Path, pyproject: Path | None) -> GeneratedEn
             timeout=300,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except (OSError, subprocess.SubprocessError) as error:
         raise GeneratedEnvironmentError(
             f"could not prepare the generated app environment at {environment_root}: {error}"
         ) from error
