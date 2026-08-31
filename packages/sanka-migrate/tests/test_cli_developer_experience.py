@@ -27,18 +27,23 @@ from sanka.runtime.frameworks import (
 FIXTURE = Path(__file__).parent / "fixtures" / "drf_crud_project"
 
 
-def _scan(project: Path) -> None:
-    result = subprocess.run(
+def _run_cli(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             sys.executable,
             "-c",
-            "from sanka.cli import main; raise SystemExit(main(['scan', '.','--json']))",
+            "import sys; from sanka.cli import main; raise SystemExit(main(sys.argv[1:]))",
+            *args,
         ],
         cwd=project,
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def _scan(project: Path) -> None:
+    result = _run_cli(project, "scan", ".", "--json")
     assert result.returncode == 0, result.stderr
 
 
@@ -89,6 +94,26 @@ def test_interactive_full_update_and_conflict_flow(
         assert (output / name).is_file(), name
     store = (output / "app/generated/sanka_store.py").read_text(encoding="utf-8")
     assert 'modules={"models": ["app.generated.models"]}' in store
+    migrated = subprocess.run(
+        [sys.executable, "manage.py", "migrate", "--run-syncdb", "--verbosity", "0"],
+        cwd=scanned_project,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert migrated.returncode == 0, migrated.stderr
+    tested = _run_cli(scanned_project, "test", ".", "--json")
+    assert tested.returncode == 0, tested.stdout + tested.stderr
+    tested_payload = json.loads(tested.stdout)
+    assert tested_payload["missing_dependency"] is None
+    assert Path(tested_payload["python"]).resolve() == (output / ".venv/bin/python").resolve()
+    verified = _run_cli(scanned_project, "verify", ".", "--json")
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    verified_payload = json.loads(verified.stdout)
+    assert (
+        Path(verified_payload["data"]["paths"]["python"]).resolve()
+        == (output / ".venv/bin/python").resolve()
+    )
     imported = subprocess.run(
         [sys.executable, "-c", "from app.main import app; assert app"],
         cwd=output,

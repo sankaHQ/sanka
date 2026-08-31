@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    if hasattr(args, "root_option"):
+        args.root = args.root_option or args.root or "."
     try:
         return int(asyncio.run(args.handler(args)))
     except CliUsageError as error:
@@ -347,11 +349,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "Prepare the generated uv or pip environment, write generated-app tests, and run "
             "them. This proves generated scope, not source parity."
         ),
-        epilog="Example: sanka test --root .\nNext: sanka verify",
+        epilog="Example: sanka test .\nNext: sanka verify .",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     common(test)
-    test.add_argument("--root", default=".", help="application repository root")
+    test.add_argument("root", nargs="?", default=None, help="application repository root")
+    test.add_argument(
+        "--root",
+        dest="root_option",
+        metavar="ROOT",
+        default=None,
+        help="application repository root",
+    )
     test.add_argument("--to", choices=("fastapi",), help="select an application plan")
     test.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     test.add_argument("--output", default=None, help="generated FastAPI output directory")
@@ -366,13 +375,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "comparisons. Reports exactly what was verified."
         ),
         epilog=(
-            "Example: sanka verify --root .\n"
+            "Example: sanka verify .\n"
             "Use --no-http only when structural verification is sufficient."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     common(verify)
-    verify.add_argument("--root", default=".", help="application repository root")
+    verify.add_argument("root", nargs="?", default=None, help="application repository root")
+    verify.add_argument(
+        "--root",
+        dest="root_option",
+        metavar="ROOT",
+        default=None,
+        help="application repository root",
+    )
     verify.add_argument("--to", choices=("fastapi",), help="select an application plan")
     verify.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     verify.add_argument("--output", default=None, help="generated FastAPI output directory")
