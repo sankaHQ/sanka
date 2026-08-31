@@ -225,7 +225,7 @@ def _render_requirements(sql_engine: str, vendor: str, *, database_required: boo
         lines.append("tortoise-orm>=1.1,<2")
         lines.append("asyncpg>=0.29,<1" if vendor == "postgresql" else "aiosqlite>=0.20,<1")
     elif sql_engine == "sqlalchemy":
-        lines.append("sqlalchemy>=2.0,<3")
+        lines.append("sqlalchemy[asyncio]>=2.0,<3")
         lines.append("asyncpg>=0.29,<1" if vendor == "postgresql" else "aiosqlite>=0.20,<1")
     else:
         lines.append("psycopg[binary]>=3.2,<4")

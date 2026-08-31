@@ -3287,6 +3287,7 @@ def _native_target_probe_responses(
 
 
 _TARGET_PROBE_SCRIPT = r"""import base64
+import contextlib
 import importlib
 import json
 import sys
@@ -3294,24 +3295,25 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-manifest = json.loads(Path("sanka-manifest.json").read_text(encoding="utf-8"))
-module = Path(manifest.get("entrypoint", "app.py")).with_suffix("").as_posix().replace("/", ".")
-app = importlib.import_module(module).app
+with contextlib.redirect_stdout(sys.stderr):
+    manifest = json.loads(Path("sanka-manifest.json").read_text(encoding="utf-8"))
+    module = Path(manifest.get("entrypoint", "app.py")).with_suffix("").as_posix().replace("/", ".")
+    app = importlib.import_module(module).app
 
-probes = json.load(sys.stdin)
-results = []
-with TestClient(app) as client:
-    for case in probes:
-        response = client.request(case["method"], case["path"], headers=case["headers"])
-        results.append({
-            "status": response.status_code,
-            "content_type": response.headers.get("content-type", "").split(";", 1)[0],
-            "body": base64.b64encode(response.content).decode("ascii"),
-            "headers": {
-                name: response.headers.get(name, "")
-                for name in ("allow", "location", "www-authenticate")
-            },
-        })
+    probes = json.load(sys.stdin)
+    results = []
+    with TestClient(app) as client:
+        for case in probes:
+            response = client.request(case["method"], case["path"], headers=case["headers"])
+            results.append({
+                "status": response.status_code,
+                "content_type": response.headers.get("content-type", "").split(";", 1)[0],
+                "body": base64.b64encode(response.content).decode("ascii"),
+                "headers": {
+                    name: response.headers.get(name, "")
+                    for name in ("allow", "location", "www-authenticate")
+                },
+            })
 json.dump(results, sys.stdout)
 """
 
