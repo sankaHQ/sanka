@@ -18,7 +18,7 @@ python -m pip install sanka-cli
 cd my-django-app
 
 sanka scan
-sanka plan --to fastapi
+sanka plan .                       # guided full/update/minimal selection
 sanka apply --plan-hash sha256:<hash-from-plan>
 sanka test
 sanka verify
@@ -113,7 +113,8 @@ routers and `@action` decorators:
 ```bash
 sanka scan                         # writes .sanka/scan.json
 sanka scan --json                  # also prints the application IR
-sanka plan --to fastapi            # native plan by default; --strategy compatibility for the bridge
+sanka plan .                        # guided target, generation, strategy, ORM, and package choices
+sanka plan . --to fastapi --generation full --output ./fastapi-app --strategy native --package-manager uv
 sanka apply --plan-hash sha256:…    # exact hash printed by plan; writes generated output
 sanka test                          # writes and runs test_generated.py against that app
 sanka verify                       # integrity + route parity + safe HTTP probes
@@ -122,9 +123,11 @@ sanka verify                       # integrity + route parity + safe HTTP probes
 `sanka test` is a unit suite for the generated FastAPI app (OpenAPI, list,
 404, validation, and a SQLite-isolated write round-trip). It does not compare
 FastAPI to DRF; that is `sanka verify`. Write tests copy SQLite first so the
-source database is not mutated. Apply writes the generated app's own
-`pyproject.toml`; test and verify use `uv` to lock it and prepare
-`.sanka/output/fastapi/.venv`. FastAPI, Tortoise/SQLAlchemy/psycopg, and their
+source database is not mutated. Full generation creates a structured app;
+minimal generation keeps the flat output; update generation fingerprints a
+previous Sanka target and refuses user-file conflicts. Test and verify prepare
+the target `.venv` with the planned `uv` or `pip` workflow. FastAPI,
+Tortoise/SQLAlchemy/psycopg, and their
 drivers therefore stay with the destination app instead of leaking into the
 Sanka or Django environment.
 

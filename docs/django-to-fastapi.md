@@ -24,7 +24,7 @@ existing Python 3.12+ environment:
 python -m pip install sanka-cli sanka-migrate
 
 sanka scan
-sanka plan --to fastapi
+sanka plan .
 sanka apply --plan-hash sha256:<hash-from-plan>  # exact hash printed by plan
 sanka test
 sanka verify
@@ -63,12 +63,20 @@ The scan records:
 The canonical artifact is `.sanka/scan.json`. `sanka scan --json` prints the
 same machine-readable application IR for agents and other tools.
 
-### `sanka plan --to fastapi`
+### `sanka plan .`
 
-The plan classifies every discovered route, records the selected strategy
-(`--strategy native` is the default; `--strategy compatibility` selects the
-bridge), records the async SQL engine (`--orm tortoise` is the default and
-recommended; `sqlalchemy` and `psycopg` are the other choices), lists
+In a terminal, plan displays FastAPI even when it is the only target, then
+selects full, update, or minimal generation, output path, strategy, a
+scan-relevant ORM, and `uv` or `pip`. Explicit flags skip their prompts:
+
+```bash
+sanka plan . --to fastapi --generation full --output ./fastapi-app \
+  --strategy native --orm tortoise --package-manager uv
+```
+
+JSON and non-TTY runs never prompt. The plan classifies every discovered
+route, records the selected strategy (`native` or `compatibility`), records
+the async SQL engine only when generated routes need database access, lists
 retained components and manual adaptations, and binds the result to the
 exact scan hash. The canonical artifact is `.sanka/plan-fastapi.json`.
 
@@ -125,9 +133,11 @@ Planning never modifies application source or destination code.
 ### `sanka apply`
 
 Apply requires the reviewed plan hash and refuses stale or modified plans. It
-writes a standalone generated application to
-`.sanka/output/fastapi` by default and refuses to overwrite a non-empty output
-without `--force`.
+writes the exact target and generation mode recorded by plan. Full mode emits
+a structured standalone app, minimal mode retains the compact flat output,
+and update mode changes only planned Sanka-owned files while preserving
+unrelated files. Target drift and user-edited generated files require a new
+plan or an explicit reviewed `--force`.
 
 The generated native application contains:
 
@@ -141,9 +151,10 @@ The generated native application contains:
 | `requirements.txt` | Target server dependencies (FastAPI + the chosen SQL engine) |
 | `README.md` | Run guidance |
 
-`sanka apply` prompts for the SQL engine when stdin is a TTY and `--orm` was
-not passed. Non-interactive runs use the engine recorded in the plan
-(Tortoise unless `sanka plan --to fastapi --orm …` chose otherwise).
+ORM choice happens during plan. Apply uses the reviewed engine and rejects a
+different `--orm` value. If scan proves no generated route needs persistence,
+Sanka omits ORM dependencies, database configuration, environment variables,
+and lifespan hooks.
 `psycopg` is refused unless scan captured a PostgreSQL database.
 
 Generated Tortoise applications require Tortoise ORM 1.1 or later. Their
@@ -184,8 +195,9 @@ every route and hard gate.
 
 ### `sanka test`
 
-After apply, Sanka writes `test_generated.py` beside the FastAPI app and runs
-it with `python -m unittest`. The tests import the generated app through
+After apply, Sanka writes `test_generated.py` beside a minimal app or under
+`tests/` for a full app and runs it with `python -m unittest`. It prepares the
+generated environment with the planned `uv` or `pip` workflow. The tests import the generated app through
 FastAPI's `TestClient` (lifespan included) and cover:
 
 - OpenAPI is served and lists every generated route;

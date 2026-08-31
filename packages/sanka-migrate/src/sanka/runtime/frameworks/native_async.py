@@ -28,26 +28,47 @@ def render_async_sql_files(
     entrypoint: str,
     manifest: dict[str, Any],
     sql_engine: str,
+    database_required: bool = True,
+    module_prefix: str = "",
 ) -> list[str]:
     """Write store/runtime/models. Returns generated Python file names."""
     del entrypoint
-    if sql_engine not in (*SQL_ENGINES, BENCH_DJANGO_ENGINE):
+    if sql_engine not in (*SQL_ENGINES, BENCH_DJANGO_ENGINE, "none"):
         raise ValueError(f"unknown SQL engine: {sql_engine}")
     vendor = str((manifest.get("database") or {}).get("vendor") or "")
     if sql_engine == "psycopg" and vendor != "postgresql":
         raise ValueError(
             "psycopg requires PostgreSQL; this project's database is " + (vendor or "unknown")
         )
-    names = ["sanka_native.py", "sanka_store.py"]
-    output_write("sanka_store.py", _render_store(sql_engine))
-    if sql_engine not in ("psycopg", BENCH_DJANGO_ENGINE):
+    names = ["sanka_native.py"]
+    runtime = _RUNTIME
+    if database_required:
+        store = _render_store(sql_engine)
+        if module_prefix:
+            store = store.replace(
+                "import models as models_mod",
+                f"from {module_prefix} import models as models_mod",
+            )
+        output_write("sanka_store.py", store)
+        names.append("sanka_store.py")
+    else:
+        runtime = runtime.replace("import sanka_store as store\n", "")
+        runtime = runtime.replace(
+            "Persistence is async SQL via sanka_store —\nDjango is not imported.",
+            "No generated route requires persistence, so database helpers are omitted.",
+        )
+    if module_prefix:
+        runtime = runtime.replace(
+            "import sanka_store as store", f"from {module_prefix} import sanka_store as store"
+        )
+    if database_required and sql_engine not in ("psycopg", BENCH_DJANGO_ENGINE):
         output_write("models.py", _render_models(sql_engine, manifest))
         names.append("models.py")
-    if sql_engine == BENCH_DJANGO_ENGINE:
+    if database_required and sql_engine == BENCH_DJANGO_ENGINE:
         output_write("sanka_settings.py", _render_django_settings(manifest))
         names.append("sanka_settings.py")
-    output_write("sanka_native.py", _RUNTIME)
-    requirements = _render_requirements(sql_engine, vendor)
+    output_write("sanka_native.py", runtime)
+    requirements = _render_requirements(sql_engine, vendor, database_required=database_required)
     output_write("requirements.txt", requirements)
     output_write("pyproject.toml", render_generated_pyproject(requirements))
     return names
@@ -194,8 +215,10 @@ def _sqlalchemy_column(column: dict[str, Any]) -> str:
     return f"mapped_column(String({max_length}), {nullable})"
 
 
-def _render_requirements(sql_engine: str, vendor: str) -> str:
+def _render_requirements(sql_engine: str, vendor: str, *, database_required: bool = True) -> str:
     lines = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1"]
+    if not database_required:
+        return "\n".join(lines) + "\n"
     if sql_engine == BENCH_DJANGO_ENGINE:
         lines.append("django>=5.2,<7")
     elif sql_engine == "tortoise":
@@ -269,6 +292,7 @@ HERE = Path(__file__).resolve().parent
 def database_url() -> str:
     env = os.environ.get("SANKA_DATABASE_URL") or os.environ.get("SANKA_TEST_DB")
     captured = json.loads((HERE / "sanka-manifest.json").read_text(encoding="utf-8"))
+    project_root = HERE.parents[1] if captured.get("generation_mode") == "full" else HERE
     database = captured.get("database") or {}
     vendor = str(database.get("vendor") or "sqlite")
     if env and "://" in env:
@@ -282,7 +306,7 @@ def database_url() -> str:
         )
     path = Path(name)
     if not path.is_absolute():
-        path = (HERE / captured.get("source_root", ".")).resolve() / name
+        path = (project_root / captured.get("source_root", ".")).resolve() / name
     return _sqlite_url(str(path))
 """
 
@@ -301,7 +325,8 @@ from asgiref.sync import sync_to_async
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = json.loads((HERE / "sanka-manifest.json").read_text(encoding="utf-8"))
-SOURCE_ROOT = (HERE / MANIFEST.get("source_root", ".")).resolve()
+PROJECT_ROOT = HERE.parents[1] if MANIFEST.get("generation_mode") == "full" else HERE
+SOURCE_ROOT = (PROJECT_ROOT / MANIFEST.get("source_root", ".")).resolve()
 for _entry in (str(HERE), str(SOURCE_ROOT)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)

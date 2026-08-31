@@ -354,6 +354,21 @@ class PlannedRoute:
 
 
 @dataclass(frozen=True, slots=True)
+class FileOperation:
+    path: str
+    action: str
+    expected_hash: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> FileOperation:
+        return cls(
+            path=str(payload["path"]),
+            action=str(payload["action"]),
+            expected_hash=str(payload.get("expected_hash") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class FrameworkPlan:
     schema_version: int
     source_framework: str
@@ -366,6 +381,14 @@ class FrameworkPlan:
     retained: tuple[str, ...]
     default_output: str
     sql_engine: str = "tortoise"
+    generation_mode: str = "minimal"
+    target_generation_mode: str = ""
+    package_manager: str = "uv"
+    database_required: bool = True
+    target_fingerprint: str = ""
+    file_operations: tuple[FileOperation, ...] = ()
+    capabilities: tuple[str, ...] = ()
+    omissions: tuple[str, ...] = ()
     plan_hash: str = field(default="")
 
     @property
@@ -417,6 +440,18 @@ class FrameworkPlan:
         if self.schema_version < 2:
             for route in payload["routes"]:
                 route.pop("adaptation_reasons", None)
+        if self.schema_version < 3:
+            for key in (
+                "generation_mode",
+                "target_generation_mode",
+                "package_manager",
+                "database_required",
+                "target_fingerprint",
+                "file_operations",
+                "capabilities",
+                "omissions",
+            ):
+                payload.pop(key, None)
         return payload
 
     def with_hash(self) -> FrameworkPlan:
@@ -447,5 +482,15 @@ class FrameworkPlan:
             retained=tuple(payload.get("retained", [])),
             default_output=str(payload["default_output"]),
             sql_engine=str(payload.get("sql_engine") or "tortoise"),
+            generation_mode=str(payload.get("generation_mode") or "minimal"),
+            target_generation_mode=str(payload.get("target_generation_mode") or ""),
+            package_manager=str(payload.get("package_manager") or "uv"),
+            database_required=bool(payload.get("database_required", True)),
+            target_fingerprint=str(payload.get("target_fingerprint") or ""),
+            file_operations=tuple(
+                FileOperation.from_dict(item) for item in payload.get("file_operations", ())
+            ),
+            capabilities=tuple(str(item) for item in payload.get("capabilities", ())),
+            omissions=tuple(str(item) for item in payload.get("omissions", ())),
             plan_hash=str(payload.get("plan_hash", "")),
         )

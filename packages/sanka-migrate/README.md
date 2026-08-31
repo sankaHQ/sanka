@@ -32,7 +32,7 @@ alone provides the same subcommands as `sanka-migrate <command>`:
 
 ```bash
 sanka scan
-sanka plan --to fastapi
+sanka plan .
 sanka apply --plan-hash sha256:<hash-from-plan>
 sanka test
 sanka verify
@@ -41,16 +41,19 @@ sanka verify
 This recipe is included in source candidate `v0.1.0a10`; the live
 [PyPI project](https://pypi.org/project/sanka-migrate/) remains the publication authority.
 Sanka resolves the live Django URL graph, including DRF router routes and custom actions.
-Apply creates a separate FastAPI application in `.sanka/output/fastapi`; it
-does not overwrite the Django source. Native mode serves async FastAPI over
+The guided plan selects full, update, or minimal generation, output path,
+native or compatibility strategy, a scan-relevant ORM, and `uv` or `pip`.
+Explicit flags provide the same deterministic non-interactive contract. Apply
+creates or safely updates a separate FastAPI application; it does not
+overwrite the Django source. Native mode serves async FastAPI over
 the existing SQL tables. Native readiness counts generated routes only,
 reports dropped format-suffix aliases separately, and includes structured
 per-route adaptation reasons in JSON plans. Compatibility mode forwards to
 the current DRF handlers in-process.
 
-`sanka test` then writes `test_generated.py` beside that app. The generated
-app owns a `pyproject.toml`; Sanka uses `uv` to lock it, prepares
-`.sanka/output/fastapi/.venv`, and runs the suite with the generated
+`sanka test` then writes `test_generated.py` (under `tests/` in full mode).
+The generated app owns its dependency metadata; Sanka prepares `.venv` with
+the selected `uv` or `pip` workflow and runs the suite with the generated
 environment's Python. The suite checks OpenAPI, list/404/empty-create status
 codes, and (on SQLite) a create → retrieve → delete round-trip against an
 isolated database copy. `sanka verify` compares source behavior from the Django
