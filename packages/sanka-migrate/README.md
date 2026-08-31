@@ -59,6 +59,49 @@ codes, and (on SQLite) a create → retrieve → delete round-trip against an
 isolated database copy. `sanka verify` compares source behavior from the Django
 environment with target behavior from that isolated generated environment.
 
+## SDK and automation contract
+
+`sanka-migrate` owns local execution and the machine protocol. The interactive
+`sanka` command delegates these lifecycle verbs to it, while the Python and
+Node.js SDK adapters invoke it directly in non-interactive JSON mode:
+
+| Lifecycle step | CLI | Python SDK | Node.js SDK |
+|---|---|---|---|
+| Inspect the source | `sanka scan` | `migrate.scan()` | `await migrate.scan()` |
+| Create a reviewed plan | `sanka plan` | `migrate.plan()` | `await migrate.plan()` |
+| Apply the exact plan hash | `sanka apply` | `migrate.apply(plan_hash=...)` | `await migrate.apply({ planHash: ... })` |
+| Test generated code | `sanka test` | `migrate.test()` | `await migrate.test()` |
+| Verify migration evidence | `sanka verify` | `migrate.verify()` | `await migrate.verify()` |
+
+Pass `--json` to `scan`, `plan`, `apply`, `test`, or `verify` for exactly one
+`sanka-cli/v1` JSON document on standard output. The stable envelope contains:
+
+```text
+schema_version
+command
+outcome
+migration_state
+data
+artifacts
+limitations
+next_actions
+```
+
+Command-specific fields stay under `data`; clients must ignore unknown fields
+for forward compatibility. Exit `0` means success, `1` means the migration or
+verification failed, and `2` means command usage was invalid. When `--json` is
+present, all three outcomes use the same envelope, including argument-parser
+failures. Human colors, spinners, prompts, and summaries are disabled in this
+mode.
+
+The SDK adapters pass only caller-supplied functional options plus `--json`.
+They do not call the hosted Sanka API, require an API token, auto-install this
+runtime, or replace its framework detection and defaults. `test` and `verify`
+still prepare and use the generated target's environment. See the
+[DRF → FastAPI guide](../../docs/django-to-fastapi.md#cli-and-sdk-execution-model),
+[Python SDK](https://github.com/sankaHQ/sanka-python), and
+[Node.js SDK](https://github.com/sankaHQ/sanka-node).
+
 ## Python quick start
 
 The distribution name and import name are intentionally different:
