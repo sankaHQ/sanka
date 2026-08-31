@@ -736,8 +736,10 @@ def test_apply_sqlalchemy_and_rejects_psycopg_on_sqlite(crud_project: Path) -> N
     assert applied.returncode == 0, applied.stderr
     output = crud_project / ".sanka" / "output" / "fastapi"
     store = (output / "sanka_store.py").read_text(encoding="utf-8")
+    requirements = (output / "requirements.txt").read_text(encoding="utf-8")
     assert "sqlalchemy" in store
     assert "Tortoise" not in store
+    assert "sqlalchemy[asyncio]>=2.0,<3" in requirements
     refused = _run_cli(
         [
             "apply",

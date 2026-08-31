@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import venv
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,8 +21,8 @@ class GeneratedEnvironmentError(RuntimeError):
 class GeneratedEnvironment:
     root: Path
     python: Path
-    pyproject: Path
-    lockfile: Path
+    pyproject: Path | None
+    lockfile: Path | None
 
 
 def ensure_generated_environment(
@@ -28,9 +30,26 @@ def ensure_generated_environment(
     *,
     python: str | Path = sys.executable,
 ) -> GeneratedEnvironment:
-    """Sync ``output/.venv`` from the generated target's ``pyproject.toml``."""
+    """Prepare ``output/.venv`` with the package manager selected in the plan."""
     output = output.resolve()
     pyproject = output / "pyproject.toml"
+    manifest = output / "sanka-manifest.json"
+    package_manager = "uv"
+    if manifest.is_file():
+        try:
+            package_manager = str(
+                json.loads(manifest.read_text(encoding="utf-8")).get("package_manager") or "uv"
+            )
+        except (json.JSONDecodeError, OSError) as error:
+            raise GeneratedEnvironmentError(
+                f"could not read generated manifest: {manifest}"
+            ) from error
+    if package_manager not in {"uv", "pip"}:
+        raise GeneratedEnvironmentError(
+            f"unsupported generated package manager {package_manager!r}"
+        )
+    if package_manager == "pip":
+        return _ensure_pip_environment(output, pyproject if pyproject.is_file() else None)
     if not pyproject.is_file():
         raise GeneratedEnvironmentError(
             f"generated dependency metadata is missing: {pyproject}; rerun `sanka apply`"
@@ -67,7 +86,7 @@ def ensure_generated_environment(
             timeout=300,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except (OSError, subprocess.SubprocessError) as error:
         raise GeneratedEnvironmentError(
             f"could not prepare the generated app environment at {environment_root}: {error}"
         ) from error
@@ -87,6 +106,52 @@ def ensure_generated_environment(
         python=python_path,
         pyproject=pyproject,
         lockfile=lockfile,
+    )
+
+
+def _ensure_pip_environment(output: Path, pyproject: Path | None) -> GeneratedEnvironment:
+    requirements = [
+        path
+        for path in (output / "requirements.txt", output / "requirements-test.txt")
+        if path.is_file()
+    ]
+    if not requirements:
+        raise GeneratedEnvironmentError(
+            f"generated dependency metadata is missing in {output}; rerun `sanka apply`"
+        )
+    environment_root = output / ".venv"
+    try:
+        venv.EnvBuilder(with_pip=True, symlinks=os.name != "nt").create(environment_root)
+        python_path = _environment_python(environment_root)
+        command = [str(python_path), "-m", "pip", "install"]
+        for path in requirements:
+            command.extend(("-r", str(path)))
+        result = subprocess.run(
+            command,
+            cwd=output,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GeneratedEnvironmentError(
+            f"could not prepare the generated app environment at {environment_root}: {error}"
+        ) from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "pip install failed").strip()
+        raise GeneratedEnvironmentError(
+            f"could not install the generated app dependencies in {environment_root}:\n{detail}"
+        )
+    if not python_path.is_file():
+        raise GeneratedEnvironmentError(
+            f"pip did not create the expected generated environment at {environment_root}"
+        )
+    return GeneratedEnvironment(
+        root=environment_root,
+        python=python_path,
+        pyproject=pyproject,
+        lockfile=None,
     )
 
 

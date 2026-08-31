@@ -12,7 +12,11 @@ import pytest
 
 from sanka.cli import _print_framework_test, main
 from sanka.runtime.frameworks import load_fastapi_plan, load_framework_scan
-from sanka.runtime.frameworks.django_fastapi import _render_native_app, _stub_safe_path
+from sanka.runtime.frameworks.django_fastapi import (
+    _native_target_probe_responses,
+    _render_native_app,
+    _stub_safe_path,
+)
 from sanka.runtime.frameworks.fastapi_tests import _missing_generated_dependency
 
 FIXTURE = Path(__file__).parent / "fixtures" / "drf_project"
@@ -29,6 +33,35 @@ def drf_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _reviewed_apply_args(project: Path, *extra: str) -> list[str]:
     plan = load_fastapi_plan(project)
     return ["apply", "--root", str(project), "--plan-hash", plan.plan_hash, *extra]
+
+
+def test_native_probe_keeps_json_stdout_clean(tmp_path: Path) -> None:
+    output = tmp_path / "generated"
+    output.mkdir()
+    (output / "sanka-manifest.json").write_text(
+        json.dumps({"entrypoint": "app.py"}), encoding="utf-8"
+    )
+    (output / "app.py").write_text(
+        """from fastapi import FastAPI
+
+print("import log")
+app = FastAPI()
+
+@app.get("/health")
+def health():
+    print("request log")
+    return {"ok": True}
+""",
+        encoding="utf-8",
+    )
+
+    responses = _native_target_probe_responses(
+        output,
+        Path(sys.executable),
+        [{"method": "GET", "path": "/health", "headers": {}}],
+    )
+
+    assert responses[0]["status"] == 200
 
 
 def test_five_command_drf_to_fastapi_lifecycle(

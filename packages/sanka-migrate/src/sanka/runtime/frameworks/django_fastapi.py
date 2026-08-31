@@ -31,8 +31,10 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterable
 from dataclasses import replace as replace_dataclass
 from pathlib import Path
@@ -46,6 +48,7 @@ from sanka.runtime.frameworks.generated_environment import (
 from sanka.runtime.frameworks.model import (
     ApiRootIR,
     DatabaseIR,
+    FileOperation,
     FrameworkPlan,
     FrameworkRisk,
     FrameworkScan,
@@ -64,12 +67,16 @@ from sanka.runtime.frameworks.native_async import (
     render_generated_pyproject,
     resolve_sql_engine,
 )
+from sanka.runtime.hashing import content_hash
 
 DEFAULT_ARTIFACT_DIR = ".sanka"
 DEFAULT_FASTAPI_OUTPUT = ".sanka/output/fastapi"
 SCAN_FILE = "scan.json"
 PLAN_FILE = "plan-fastapi.json"
 GENERATED_MANIFEST = "sanka-manifest.json"
+PROJECT_MANIFEST = ".sanka/generated-manifest.json"
+GENERATION_MODES = ("full", "update", "minimal")
+PACKAGE_MANAGERS = ("uv", "pip")
 
 NATIVE_STRATEGY = "native"
 COMPATIBILITY_STRATEGY = "compatibility"
@@ -204,6 +211,186 @@ def load_framework_scan(
     return scan
 
 
+def _resolve_output(root: Path, output: str | Path) -> Path:
+    path = Path(output)
+    return (path if path.is_absolute() else root / path).resolve()
+
+
+def _planned_output_files(
+    *,
+    layout: str,
+    strategy: str,
+    database_required: bool,
+    sql_engine: str,
+) -> tuple[str, ...]:
+    native_runtime = ["sanka_native.py"]
+    if database_required:
+        native_runtime.append("sanka_store.py")
+    if database_required and sql_engine not in {"psycopg", "django"}:
+        native_runtime.append("models.py")
+    if database_required and sql_engine == "django":
+        native_runtime.append("sanka_settings.py")
+    runtime = native_runtime if strategy == NATIVE_STRATEGY else ["sanka_compat.py"]
+    metadata = ["README.md", "requirements.txt", "requirements-test.txt", "pyproject.toml"]
+    if layout == "minimal":
+        return tuple(sorted(["app.py", GENERATED_MANIFEST, *runtime, *metadata]))
+    generated = [f"app/generated/{name}" for name in runtime]
+    files = [
+        ".env.example",
+        ".gitignore",
+        PROJECT_MANIFEST,
+        GENERATED_MANIFEST,
+        "app/__init__.py",
+        "app/api/__init__.py",
+        "app/api/health.py",
+        "app/api/router.py",
+        "app/core/__init__.py",
+        "app/core/config.py",
+        "app/core/logging.py",
+        "app/generated/__init__.py",
+        f"app/generated/{GENERATED_MANIFEST}",
+        "app/main.py",
+        "tests/__init__.py",
+        *generated,
+        *metadata,
+    ]
+    if database_required:
+        files.append("app/core/database.py")
+    return tuple(sorted(files))
+
+
+def _text_hash(path: Path) -> str:
+    return content_hash(path.read_text(encoding="utf-8"))
+
+
+def _is_manifest_path(name: str) -> bool:
+    return name in (GENERATED_MANIFEST, PROJECT_MANIFEST) or name.endswith(f"/{GENERATED_MANIFEST}")
+
+
+def _target_fingerprint(output: Path, manifest: dict[str, Any]) -> str:
+    recorded = dict(manifest.get("generated_file_hashes") or {})
+    actual = {
+        name: _text_hash(output / name) if (output / name).is_file() else "missing"
+        for name in sorted(recorded)
+    }
+    return content_hash({"manifest": manifest, "files": actual})
+
+
+def _plan_file_operations(
+    output: Path,
+    expected_files: tuple[str, ...],
+    *,
+    generation_mode: str,
+) -> tuple[str, str, tuple[FileOperation, ...]]:
+    if generation_mode != "update":
+        return (
+            "",
+            "",
+            tuple(
+                FileOperation(
+                    path=name,
+                    action="conflict" if (output / name).exists() else "create",
+                    expected_hash=_text_hash(output / name) if (output / name).is_file() else "",
+                )
+                for name in expected_files
+            ),
+        )
+    manifest_path = output / GENERATED_MANIFEST
+    if not manifest_path.is_file():
+        raise FrameworkMigrationError(
+            f"update target is not a Sanka-generated project: {output}; "
+            "choose full or minimal generation"
+        )
+    manifest = _read_json(manifest_path, label="generated target manifest")
+    target_mode = str(manifest.get("generation_mode") or "minimal")
+    if target_mode not in {"full", "minimal"}:
+        raise FrameworkMigrationError(f"unsupported generated target mode: {target_mode}")
+    recorded = dict(manifest.get("generated_file_hashes") or {})
+    if not recorded:
+        raise FrameworkMigrationError(
+            "the generated target predates safe update metadata; regenerate it once with "
+            "full or minimal mode"
+        )
+    operations: list[FileOperation] = []
+    for name in expected_files:
+        path = output / name
+        expected_hash = str(recorded.get(name) or "")
+        if not path.exists():
+            action = "create"
+        elif _is_manifest_path(name):
+            action = "modify"
+            expected_hash = _text_hash(path)
+        elif not expected_hash or _text_hash(path) != expected_hash:
+            action = "conflict"
+        else:
+            action = "modify"
+        operations.append(FileOperation(path=name, action=action, expected_hash=expected_hash))
+    return target_mode, _target_fingerprint(output, manifest), tuple(operations)
+
+
+def _preview_update_operations(
+    plan: FrameworkPlan,
+    scan: FrameworkScan,
+    output: Path,
+    *,
+    source_root: Path,
+    layout: str,
+    sql_engine: str,
+) -> tuple[FileOperation, ...]:
+    target_manifest = _read_json(output / GENERATED_MANIFEST, label="generated target manifest")
+    recorded = dict(target_manifest.get("generated_file_hashes") or {})
+    old_routes = {
+        f"{str(route.get('method')).upper()} {route.get('path')}"
+        for route in target_manifest.get("routes", [])
+    }
+    new_routes = {
+        route.key
+        for route in plan.routes
+        if route.automatic and route.strategy != ROUTE_STRATEGY_DROPPED_ALIAS
+    }
+    removed_routes = old_routes - new_routes
+    entrypoint = str(target_manifest.get("entrypoint") or "app.py")
+    with tempfile.TemporaryDirectory(prefix="sanka-plan-") as temporary:
+        staged = Path(temporary)
+        _render_fastapi_output(
+            plan,
+            scan,
+            staged,
+            layout=layout,
+            source_root=os.path.relpath(source_root, output),
+            sql_engine=sql_engine,
+        )
+        operations: list[FileOperation] = []
+        for operation in plan.file_operations:
+            current = output / operation.path
+            recorded_hash = str(recorded.get(operation.path) or "")
+            if _is_manifest_path(operation.path):
+                recorded_hash = _text_hash(current) if current.is_file() else ""
+            if not current.exists():
+                action = "create"
+            elif not recorded_hash or _text_hash(current) != recorded_hash:
+                action = "conflict"
+            elif _is_manifest_path(operation.path) or operation.path == "README.md":
+                action = "modify"
+            elif operation.path == entrypoint and removed_routes:
+                action = "conflict"
+            else:
+                candidate = staged / operation.path
+                action = (
+                    "unchanged"
+                    if candidate.is_file() and _text_hash(candidate) == _text_hash(current)
+                    else "modify"
+                )
+            operations.append(
+                FileOperation(
+                    path=operation.path,
+                    action=action,
+                    expected_hash=_text_hash(current) if current.is_file() else "",
+                )
+            )
+    return tuple(operations)
+
+
 def plan_fastapi(
     root: str | Path = ".",
     *,
@@ -211,31 +398,53 @@ def plan_fastapi(
     output: str = DEFAULT_FASTAPI_OUTPUT,
     strategy: str = NATIVE_STRATEGY,
     sql_engine: str | None = None,
+    generation_mode: str = "minimal",
+    package_manager: str | None = None,
 ) -> FrameworkPlan:
     if strategy not in (NATIVE_STRATEGY, COMPATIBILITY_STRATEGY):
         raise FrameworkMigrationError(f"unknown plan strategy: {strategy}")
-    try:
-        engine = resolve_sql_engine(sql_engine)
-    except ValueError as error:
-        raise FrameworkMigrationError(str(error)) from error
+    if generation_mode not in GENERATION_MODES:
+        raise FrameworkMigrationError(
+            f"unknown generation mode: {generation_mode}; choose {', '.join(GENERATION_MODES)}"
+        )
+    if package_manager is not None and package_manager not in PACKAGE_MANAGERS:
+        raise FrameworkMigrationError(
+            f"unknown package manager: {package_manager}; choose {', '.join(PACKAGE_MANAGERS)}"
+        )
+    selected_package_manager = package_manager or "uv"
     root_path = Path(root).resolve()
     scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
     if strategy == NATIVE_STRATEGY:
+        routes = tuple(
+            _plan_native_route(route, middleware=scan.middleware) for route in scan.routes
+        )
+        database_required = any(route.strategy == ROUTE_STRATEGY_NATIVE_CRUD for route in routes)
+        try:
+            engine = resolve_sql_engine(sql_engine) if database_required else "none"
+        except ValueError as error:
+            raise FrameworkMigrationError(str(error)) from error
         if engine == "psycopg" and scan.database.vendor != "postgresql":
             raise FrameworkMigrationError(
                 "psycopg requires PostgreSQL; this project's database is "
                 + (scan.database.vendor or "unknown")
             )
-        routes = tuple(
-            _plan_native_route(route, middleware=scan.middleware) for route in scan.routes
-        )
         retained = (
-            "Existing Django tables (schema reused, not rewritten)",
-            f"Async SQL via {SQL_ENGINE_LABELS[engine]}",
+            (
+                "Existing Django tables (schema reused, not rewritten)"
+                if database_required
+                else "No source database is required by generated routes"
+            ),
+            (
+                f"Async SQL via {SQL_ENGINE_LABELS[engine]}"
+                if database_required
+                else "No database runtime required by generated routes"
+            ),
             "DRF removed; FastAPI async request layer (Django is not imported at serve time)",
             "Format-suffix alias routes dropped (disclosed contract change)",
         )
     else:
+        database_required = False
+        engine = "django"
         routes = tuple(
             PlannedRoute(
                 method=route.method,
@@ -253,8 +462,72 @@ def plan_fastapi(
             "Django authentication and permissions",
             "DRF handlers behind the generated compatibility bridge",
         )
+    output_path = _resolve_output(root_path, output)
+    target_generation_mode = ""
+    target_fingerprint = ""
+    layout = generation_mode
+    if generation_mode == "update":
+        manifest = _read_json(output_path / GENERATED_MANIFEST, label="generated target manifest")
+        target_strategy = str(manifest.get("mode") or "")
+        if target_strategy and target_strategy != strategy:
+            raise FrameworkMigrationError(
+                f"update target uses {target_strategy!r} strategy, not {strategy!r}; "
+                "generate a new target to change strategy"
+            )
+        layout = str(manifest.get("generation_mode") or "minimal")
+        if package_manager is None:
+            selected_package_manager = str(
+                manifest.get("package_manager") or selected_package_manager
+            )
+        if database_required:
+            target_engine = str(manifest.get("sql_engine") or "")
+            if (
+                sql_engine is not None
+                and target_engine in {"tortoise", "sqlalchemy", "psycopg"}
+                and engine != target_engine
+            ):
+                raise FrameworkMigrationError(
+                    f"update target uses ORM {target_engine!r}, not {engine!r}; "
+                    "generate a new target to change ORM"
+                )
+            if sql_engine is None and target_engine in {"tortoise", "sqlalchemy", "psycopg"}:
+                engine = target_engine
+    if selected_package_manager not in PACKAGE_MANAGERS:
+        raise FrameworkMigrationError(
+            f"unsupported generated package manager: {selected_package_manager}"
+        )
+    expected_files = _planned_output_files(
+        layout=layout,
+        strategy=strategy,
+        database_required=database_required,
+        sql_engine=engine,
+    )
+    target_generation_mode, target_fingerprint, file_operations = _plan_file_operations(
+        output_path,
+        expected_files,
+        generation_mode=generation_mode,
+    )
+    capabilities = [
+        "fastapi-routes",
+        "generated-app-tests",
+        f"{selected_package_manager}-environment",
+    ]
+    omissions: list[str] = []
+    if layout == "full":
+        capabilities.extend(("settings", "structured-logging", "request-context", "health-check"))
+    else:
+        omissions.append("full-project-infrastructure")
+    if database_required:
+        capabilities.extend(("database-configuration", "database-lifecycle", "persistence"))
+    else:
+        omissions.append("database-runtime")
+    if strategy == COMPATIBILITY_STRATEGY:
+        capabilities.append("django-compatibility-bridge")
+        omissions.append("drf-removal")
+    if any(not route.automatic for route in routes):
+        omissions.append("manual-route-adaptations")
     plan = FrameworkPlan(
-        schema_version=2,
+        schema_version=3,
         source_framework=scan.framework,
         target_framework="fastapi",
         mode=strategy,
@@ -265,7 +538,25 @@ def plan_fastapi(
         retained=retained,
         default_output=output,
         sql_engine=engine,
+        generation_mode=generation_mode,
+        target_generation_mode=target_generation_mode,
+        package_manager=selected_package_manager,
+        database_required=database_required,
+        target_fingerprint=target_fingerprint,
+        file_operations=file_operations,
+        capabilities=tuple(capabilities),
+        omissions=tuple(omissions),
     ).with_hash()
+    if generation_mode == "update" and (plan.mode != NATIVE_STRATEGY or plan.native_routes):
+        file_operations = _preview_update_operations(
+            plan,
+            scan,
+            output_path,
+            source_root=root_path,
+            layout=layout,
+            sql_engine=engine,
+        )
+        plan = replace_dataclass(plan, file_operations=file_operations, plan_hash="").with_hash()
     _write_json(_artifact_path(root_path, artifact_dir, PLAN_FILE), plan.to_dict())
     return plan
 
@@ -359,36 +650,117 @@ def apply_fastapi_plan(
         raise FrameworkMigrationError(
             f"reviewed plan hash {plan_hash!r} does not match current plan {plan.plan_hash!r}"
         )
-    try:
-        engine = resolve_sql_engine(sql_engine or plan.sql_engine)
-    except ValueError as error:
-        raise FrameworkMigrationError(str(error)) from error
+    if plan.database_required:
+        if sql_engine is not None and sql_engine != plan.sql_engine:
+            requirement = " (psycopg also requires PostgreSQL)" if sql_engine == "psycopg" else ""
+            raise FrameworkMigrationError(
+                f"ORM {sql_engine!r} does not match reviewed plan {plan.sql_engine!r}; "
+                f"run `sanka plan` again{requirement}"
+            )
+        try:
+            engine = resolve_sql_engine(plan.sql_engine)
+        except ValueError as error:
+            raise FrameworkMigrationError(str(error)) from error
+    else:
+        engine = plan.sql_engine
     output_value = str(output) if output is not None else plan.default_output
-    output_path = Path(output_value)
-    if not output_path.is_absolute():
-        output_path = root_path / output_path
-    output_path = output_path.resolve()
+    output_path = _resolve_output(root_path, output_value)
+    planned_output = _resolve_output(root_path, plan.default_output)
+    if output_path != planned_output:
+        raise FrameworkMigrationError(
+            f"output {output_path} does not match the reviewed target {planned_output}; "
+            "run `sanka plan` again"
+        )
     if output_path == root_path:
         raise FrameworkMigrationError("generated output cannot overwrite the source root")
-    if output_path.exists() and any(output_path.iterdir()) and not force:
+    updating = plan.generation_mode == "update"
+    if not updating and output_path.exists() and any(output_path.iterdir()) and not force:
         raise FrameworkMigrationError(
             f"output is not empty: {output_path}; pass --force to replace generated files"
         )
-    output_path.mkdir(parents=True, exist_ok=True)
     relative_source = os.path.relpath(root_path, output_path)
-    if plan.mode == NATIVE_STRATEGY:
-        scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
-        count = _render_native_output(
+    scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
+    layout = plan.target_generation_mode if updating else plan.generation_mode
+    if updating:
+        manifest = _read_json(output_path / GENERATED_MANIFEST, label="generated target manifest")
+        if _target_fingerprint(output_path, manifest) != plan.target_fingerprint:
+            raise FrameworkMigrationError(
+                "the generated target changed after planning; run `sanka plan` again"
+            )
+        for operation in plan.file_operations:
+            if not operation.expected_hash:
+                continue
+            path = output_path / operation.path
+            if not path.is_file() or _text_hash(path) != operation.expected_hash:
+                raise FrameworkMigrationError(
+                    f"target file changed after planning: {operation.path}; run `sanka plan` again"
+                )
+        conflicts = [item.path for item in plan.file_operations if item.action == "conflict"]
+        if conflicts and not force:
+            raise FrameworkMigrationError(
+                "generated target has user-modified files: "
+                + ", ".join(conflicts)
+                + "; review them or pass --force"
+            )
+        with tempfile.TemporaryDirectory(prefix="sanka-update-") as temporary:
+            staged = Path(temporary)
+            count = _render_fastapi_output(
+                plan,
+                scan,
+                staged,
+                layout=layout,
+                source_root=relative_source,
+                sql_engine=engine,
+            )
+            output_path.mkdir(parents=True, exist_ok=True)
+            actions = {item.path: item.action for item in plan.file_operations}
+            for source in sorted(path for path in staged.rglob("*") if path.is_file()):
+                relative = str(source.relative_to(staged))
+                if actions.get(relative) == "unchanged":
+                    continue
+                destination = output_path / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+    else:
+        output_path.mkdir(parents=True, exist_ok=True)
+        count = _render_fastapi_output(
             plan,
             scan,
             output_path,
-            entrypoint="app.py",
+            layout=layout,
             source_root=relative_source,
             sql_engine=engine,
         )
-    else:
-        count = _render_bridge_output(plan, output_path, source_root=relative_source)
     return output_path, count
+
+
+def _render_fastapi_output(
+    plan: FrameworkPlan,
+    scan: FrameworkScan,
+    output: Path,
+    *,
+    layout: str,
+    source_root: str,
+    sql_engine: str,
+) -> int:
+    if layout not in {"full", "minimal"}:
+        raise FrameworkMigrationError(f"unsupported output layout: {layout}")
+    if plan.mode == NATIVE_STRATEGY:
+        return _render_native_output(
+            plan,
+            scan,
+            output,
+            entrypoint="app/main.py" if layout == "full" else "app.py",
+            source_root=source_root,
+            sql_engine=sql_engine,
+            layout=layout,
+        )
+    return _render_bridge_output(
+        plan,
+        output,
+        source_root=source_root,
+        layout=layout,
+    )
 
 
 def write_bench_candidate(
@@ -668,16 +1040,30 @@ def _allow_headers(generated: list[PlannedRoute]) -> dict[str, str]:
     return allow
 
 
-def _render_bridge_output(plan: FrameworkPlan, output_path: Path, *, source_root: str) -> int:
+def _render_bridge_output(
+    plan: FrameworkPlan,
+    output_path: Path,
+    *,
+    source_root: str,
+    layout: str = "minimal",
+) -> int:
     automatic = [route for route in plan.routes if route.automatic]
-    manifest = {
+    full = layout == "full"
+    runtime_dir = output_path / "app" / "generated" if full else output_path
+    entrypoint = "app/main.py" if full else "app.py"
+    compat_path = "app/generated/sanka_compat.py" if full else "sanka_compat.py"
+    manifest: dict[str, Any] = {
         "schema_version": 1,
         "generator": "sanka",
         "mode": plan.mode,
         "source_scan_hash": plan.source_scan_hash,
         "plan_hash": plan.plan_hash,
         "settings_module": plan.settings_module,
-        "generated_files": ["app.py", "sanka_compat.py"],
+        "entrypoint": entrypoint,
+        "generation_mode": layout,
+        "package_manager": plan.package_manager,
+        "database_required": False,
+        "generated_files": [entrypoint, compat_path],
         "routes": [
             {
                 "method": route.method,
@@ -690,13 +1076,25 @@ def _render_bridge_output(plan: FrameworkPlan, output_path: Path, *, source_root
         ],
         "source_root": source_root,
     }
-    _write_text(output_path / "app.py", _render_app())
-    _write_text(output_path / "sanka_compat.py", _render_compatibility_runtime())
-    _write_text(output_path / "README.md", _render_generated_readme(plan))
+    module = "app.generated.sanka_compat" if full else "sanka_compat"
+    app_source = _render_app(module)
+    if full:
+        app_source += _render_full_app_setup()
+    _write_text(output_path / entrypoint, app_source)
+    _write_text(runtime_dir / "sanka_compat.py", _render_compatibility_runtime())
+    _write_text(
+        output_path / "README.md",
+        _render_generated_readme(plan, entrypoint=entrypoint),
+    )
     requirements = "fastapi>=0.115,<1\nuvicorn[standard]>=0.30,<1\n"
     _write_text(output_path / "requirements.txt", requirements)
     _write_text(output_path / "pyproject.toml", render_generated_pyproject(requirements))
-    _write_json(output_path / GENERATED_MANIFEST, manifest)
+    _write_text(output_path / "requirements-test.txt", "httpx>=0.27,<1\nhttpx2>=2,<3\n")
+    if full:
+        manifest["generated_files"].extend(
+            _render_full_support(output_path, database_required=False)
+        )
+    _finalize_generated_manifest(output_path, runtime_dir, manifest)
     return len(automatic)
 
 
@@ -709,6 +1107,7 @@ def _render_native_output(
     source_root: str,
     sql_engine: str,
     preserve_carryover: bool = False,
+    layout: str = "minimal",
 ) -> int:
     generated = [
         route
@@ -776,7 +1175,10 @@ def _render_native_output(
         resource["routes"].append(
             {"method": planned.method, "path": planned.path, "operation": planned.operation}
         )
-    manifest = {
+    full = layout == "full"
+    runtime_dir = output_path / "app" / "generated" if full else output_path
+    module_prefix = "app.generated" if full else ""
+    manifest: dict[str, Any] = {
         "schema_version": 1,
         "generator": "sanka",
         "mode": plan.mode,
@@ -784,6 +1186,9 @@ def _render_native_output(
         "plan_hash": plan.plan_hash,
         "settings_module": plan.settings_module,
         "sql_engine": sql_engine,
+        "generation_mode": layout,
+        "package_manager": plan.package_manager,
+        "database_required": plan.database_required,
         "database": {
             "vendor": scan.database.vendor,
             "name": scan.database.name,
@@ -843,12 +1248,19 @@ def _render_native_output(
         ],
         "source_root": source_root,
     }
+
+    def write_generated(name: str, text: str) -> None:
+        destination = output_path if name in {"requirements.txt", "pyproject.toml"} else runtime_dir
+        _write_text(destination / name, text)
+
     try:
         generated_names = render_async_sql_files(
-            lambda name, text: _write_text(output_path / name, text),
+            write_generated,
             entrypoint=entrypoint,
             manifest=manifest,
             sql_engine=sql_engine,
+            database_required=plan.database_required,
+            module_prefix=module_prefix,
         )
     except ValueError as error:
         raise FrameworkMigrationError(str(error)) from error
@@ -856,15 +1268,203 @@ def _render_native_output(
     if user_logic is not None:
         manifest["has_user_logic"] = True
         generated_names.append("sanka_user_logic.py")
-        _write_text(output_path / "sanka_user_logic.py", user_logic)
-    manifest["generated_files"] = [entrypoint, *generated_names]
-    _write_text(output_path / entrypoint, _render_native_app(manifest))
+        _write_text(runtime_dir / "sanka_user_logic.py", user_logic)
+    generated_paths = [f"app/generated/{name}" if full else name for name in generated_names]
+    manifest["generated_files"] = [entrypoint, *generated_paths]
+    app_source = _render_native_app(manifest, module_prefix=module_prefix)
+    if full:
+        app_source += _render_full_app_setup()
+    _write_text(output_path / entrypoint, app_source)
     _write_text(
         output_path / "README.md",
         _render_native_readme(plan, sql_engine, entrypoint=entrypoint),
     )
-    _write_json(output_path / GENERATED_MANIFEST, manifest)
+    _write_text(output_path / "requirements-test.txt", "httpx>=0.27,<1\nhttpx2>=2,<3\n")
+    if full:
+        manifest["generated_files"].extend(
+            _render_full_support(output_path, database_required=plan.database_required)
+        )
+    _finalize_generated_manifest(output_path, runtime_dir, manifest)
     return len(generated)
+
+
+def _render_full_support(output: Path, *, database_required: bool) -> list[str]:
+    package = "# Generated by Sanka.\n"
+    files = {
+        "app/__init__.py": package,
+        "app/api/__init__.py": package,
+        "app/api/health.py": _FULL_HEALTH,
+        "app/api/router.py": _FULL_ROUTER,
+        "app/core/__init__.py": package,
+        "app/core/config.py": _FULL_CONFIG,
+        "app/core/logging.py": _FULL_LOGGING,
+        "app/generated/__init__.py": package,
+        "tests/__init__.py": package,
+    }
+    if database_required:
+        files["app/core/database.py"] = _FULL_DATABASE
+    for name, source in files.items():
+        _write_text(output / name, source)
+    env = "APP_NAME=Sanka FastAPI\nAPP_ENV=development\nLOG_LEVEL=INFO\nLOG_FORMAT=console\n"
+    if database_required:
+        env += "SANKA_DATABASE_URL=<set-me>\n"
+    _write_text(output / ".env.example", env)
+    _write_text(output / ".gitignore", ".env\n.venv/\n__pycache__/\n.pytest_cache/\n")
+    return sorted(name for name in files if name.endswith(".py"))
+
+
+def _render_full_app_setup() -> str:
+    return """
+
+from app.api.router import router as api_router
+from app.core.logging import RequestContextMiddleware, configure_logging
+
+configure_logging()
+app.add_middleware(RequestContextMiddleware)
+app.include_router(api_router)
+"""
+
+
+def _finalize_generated_manifest(output: Path, runtime_dir: Path, manifest: dict[str, Any]) -> None:
+    project_manifest = output / PROJECT_MANIFEST
+    manifest_paths = {
+        output / GENERATED_MANIFEST,
+        runtime_dir / GENERATED_MANIFEST,
+        project_manifest,
+    }
+    owned = set(manifest.get("generated_files") or ())
+    owned.update(
+        {
+            ".env.example",
+            ".gitignore",
+            "README.md",
+            "pyproject.toml",
+            "requirements.txt",
+            "requirements-test.txt",
+        }
+    )
+    hashes = {
+        name: _text_hash(output / name)
+        for name in sorted(owned)
+        if (output / name).is_file() and (output / name) not in manifest_paths
+    }
+    manifest["generated_file_hashes"] = hashes
+    _write_json(output / GENERATED_MANIFEST, manifest)
+    if runtime_dir != output:
+        _write_json(runtime_dir / GENERATED_MANIFEST, manifest)
+        _write_json(project_manifest, manifest)
+
+
+_FULL_CONFIG = """# Generated by Sanka.
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Settings:
+    app_name: str = os.environ.get("APP_NAME", "Sanka FastAPI")
+    app_env: str = os.environ.get("APP_ENV", "development")
+    log_level: str = os.environ.get("LOG_LEVEL", "INFO")
+    log_format: str = os.environ.get("LOG_FORMAT", "console")
+
+
+settings = Settings()
+"""
+
+
+_FULL_HEALTH = """# Generated by Sanka.
+from fastapi import APIRouter
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+"""
+
+
+_FULL_ROUTER = """# Generated by Sanka.
+from fastapi import APIRouter
+
+from app.api.health import router as health_router
+
+router = APIRouter()
+router.include_router(health_router)
+"""
+
+
+_FULL_DATABASE = """# Generated by Sanka.
+from app.generated.sanka_store import close_db, init_db
+
+__all__ = ["close_db", "init_db"]
+"""
+
+
+_FULL_LOGGING = """# Generated by Sanka.
+from __future__ import annotations
+
+import contextvars
+import json
+import logging
+import sys
+import time
+import uuid
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.config import settings
+
+request_id = contextvars.ContextVar("request_id", default="")
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps(
+            {
+                "level": record.levelname,
+                "message": record.getMessage(),
+                "request_id": request_id.get(),
+            },
+            ensure_ascii=False,
+        )
+
+
+def configure_logging() -> None:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        JsonFormatter()
+        if settings.log_format == "json"
+        else logging.Formatter("%(levelname)s %(message)s")
+    )
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        handlers=[handler],
+        force=True,
+    )
+
+
+class RequestContextMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        value = request.headers.get("x-request-id") or uuid.uuid4().hex
+        token = request_id.set(value)
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = value
+            logging.getLogger("http").info(
+                "%s %s %s %.2fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                (time.perf_counter() - started) * 1000,
+            )
+            return response
+        finally:
+            request_id.reset(token)
+"""
 
 
 def verify_fastapi_migration(
@@ -968,7 +1568,9 @@ def verify_fastapi_migration(
                 str(generated_environment.python) if generated_environment is not None else None
             ),
             "lockfile": (
-                str(generated_environment.lockfile) if generated_environment is not None else None
+                str(generated_environment.lockfile)
+                if generated_environment is not None and generated_environment.lockfile is not None
+                else None
             ),
         },
         "generated_files": generated_files,
@@ -2486,8 +3088,10 @@ def _compile_generated_files(output: Path, manifest: dict[str, Any]) -> None:
 
 
 def _load_generated_app(output: Path) -> Any:
+    manifest = _read_json(output / GENERATED_MANIFEST, label="generated manifest")
+    entrypoint = output / str(manifest.get("entrypoint") or "app.py")
     module_name = f"_sanka_generated_{abs(hash(output))}"
-    spec = importlib.util.spec_from_file_location(module_name, output / "app.py")
+    spec = importlib.util.spec_from_file_location(module_name, entrypoint)
     if spec is None or spec.loader is None:
         raise FrameworkMigrationError("could not load the generated FastAPI application")
     if str(output) not in sys.path:
@@ -2683,26 +3287,33 @@ def _native_target_probe_responses(
 
 
 _TARGET_PROBE_SCRIPT = r"""import base64
+import contextlib
+import importlib
 import json
 import sys
+from pathlib import Path
 
 from fastapi.testclient import TestClient
-from app import app
 
-probes = json.load(sys.stdin)
-results = []
-with TestClient(app) as client:
-    for case in probes:
-        response = client.request(case["method"], case["path"], headers=case["headers"])
-        results.append({
-            "status": response.status_code,
-            "content_type": response.headers.get("content-type", "").split(";", 1)[0],
-            "body": base64.b64encode(response.content).decode("ascii"),
-            "headers": {
-                name: response.headers.get(name, "")
-                for name in ("allow", "location", "www-authenticate")
-            },
-        })
+with contextlib.redirect_stdout(sys.stderr):
+    manifest = json.loads(Path("sanka-manifest.json").read_text(encoding="utf-8"))
+    module = Path(manifest.get("entrypoint", "app.py")).with_suffix("").as_posix().replace("/", ".")
+    app = importlib.import_module(module).app
+
+    probes = json.load(sys.stdin)
+    results = []
+    with TestClient(app) as client:
+        for case in probes:
+            response = client.request(case["method"], case["path"], headers=case["headers"])
+            results.append({
+                "status": response.status_code,
+                "content_type": response.headers.get("content-type", "").split(";", 1)[0],
+                "body": base64.b64encode(response.content).decode("ascii"),
+                "headers": {
+                    name: response.headers.get(name, "")
+                    for name in ("allow", "location", "www-authenticate")
+                },
+            })
 json.dump(results, sys.stdout)
 """
 
@@ -2750,9 +3361,9 @@ def _response_bodies_match(
     return source == target
 
 
-def _render_app() -> str:
-    return """# Generated by Sanka. Replace bridge routes with native FastAPI handlers.
-from sanka_compat import create_app
+def _render_app(module: str = "sanka_compat") -> str:
+    return f"""# Generated by Sanka. Replace bridge routes with native FastAPI handlers.
+from {module} import create_app
 
 app = create_app()
 """
@@ -2795,11 +3406,22 @@ def _unique_ident(base: str, used: set[str]) -> str:
     return name
 
 
-def _render_native_app(manifest: dict[str, Any]) -> str:
+def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> str:
     """Emit decorator-style async FastAPI routes that call the shared native helpers."""
+    native_import = (
+        f"from {module_prefix} import sanka_native as native"
+        if module_prefix
+        else "import sanka_native as native"
+    )
     lines = [
-        "# Generated by Sanka. Async FastAPI over the existing SQL tables.",
-        "from contextlib import asynccontextmanager",
+        (
+            "# Generated by Sanka. Async FastAPI over the existing SQL tables."
+            if manifest.get("database_required", True)
+            else "# Generated by Sanka. Async FastAPI application."
+        ),
+        "from contextlib import asynccontextmanager"
+        if manifest.get("database_required", True)
+        else "",
         "",
         "from fastapi import FastAPI, Request",
         "from fastapi.responses import HTMLResponse, Response",
@@ -2807,20 +3429,7 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
         "from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware",
         "from starlette.middleware.trustedhost import TrustedHostMiddleware",
         "",
-        "import sanka_native as native",
-        "import sanka_store as store",
-        "",
-        "",
-        "@asynccontextmanager",
-        "async def lifespan(_app: FastAPI):",
-        "    await store.init_db()",
-        "    try:",
-        "        yield",
-        "    finally:",
-        "        await store.close_db()",
-        "",
-        "",
-        'app = FastAPI(title="Sanka native FastAPI application", lifespan=lifespan)',
+        native_import,
         "_DJANGO_DEFAULT_404 = "
         + _py_str(
             '\n<!doctype html>\n<html lang="en">\n<head>\n'
@@ -2847,6 +3456,35 @@ def _render_native_app(manifest: dict[str, Any]) -> str:
         "    return response",
         "",
     ]
+    if manifest.get("database_required", True):
+        store_import = (
+            "from app.core import database as store"
+            if module_prefix
+            else "import sanka_store as store"
+        )
+        lines[10:10] = [
+            store_import,
+            "",
+            "",
+            "@asynccontextmanager",
+            "async def lifespan(_app: FastAPI):",
+            "    await store.init_db()",
+            "    try:",
+            "        yield",
+            "    finally:",
+            "        await store.close_db()",
+            "",
+            "",
+            'app = FastAPI(title="Sanka native FastAPI application", lifespan=lifespan)',
+            "",
+        ]
+    else:
+        lines[10:10] = [
+            "",
+            "",
+            'app = FastAPI(title="Sanka native FastAPI application")',
+            "",
+        ]
     used_vars: set[str] = set()
     used_funcs: set[str] = set()
     used_converters: set[str] = set()
@@ -3123,15 +3761,22 @@ def _render_native_readme(
     plan: FrameworkPlan, sql_engine: str = "tortoise", *, entrypoint: str = "app.py"
 ) -> str:
     engine = sql_engine or "tortoise"
-    if engine == "django":
+    runtime_dir = "app/generated/" if "/" in entrypoint else ""
+    if not plan.database_required:
+        persistence = (
+            "No generated route requires database setup, so no database runtime is included."
+        )
+    elif engine == "django":
         persistence = (
             "Persistence uses the retained Django ORM through the async facade in "
-            "`sanka_store.py`. Generated `sanka_settings.py` removes DRF apps; Django is "
+            f"`{runtime_dir}sanka_store.py`. Generated `{runtime_dir}sanka_settings.py` "
+            "removes DRF apps; Django is "
             "loaded for ORM access only, never as the request server."
         )
     else:
         persistence = (
-            f"Persistence is async SQL (`{engine}`) in `sanka_store.py`, mapped onto the "
+            f"Persistence is async SQL (`{engine}`) in `{runtime_dir}sanka_store.py`, "
+            "mapped onto the "
             "existing Django tables. Django is not imported at serve time."
         )
     gaps = ""
@@ -3143,28 +3788,43 @@ def _render_native_readme(
             "inventory is `unsupported_routes` in `sanka-manifest.json`. For those "
             "routes the source application remains the specification.\n"
         )
+    module = Path(entrypoint).with_suffix("").as_posix().replace("/", ".")
+    test_location = "tests/test_generated.py" if "/" in entrypoint else "test_generated.py"
+    setup = (
+        f"uv sync\nuv run uvicorn {module}:app --reload"
+        if plan.package_manager == "uv"
+        else (
+            "python -m venv .venv\n"
+            ".venv/bin/python -m pip install -r requirements.txt "
+            "-r requirements-test.txt\n"
+            f".venv/bin/python -m uvicorn {module}:app --reload"
+        )
+    )
+    database_setup = (
+        "\nSet `SANKA_DATABASE_URL` for PostgreSQL (the scan never stores a password).\n"
+        "SQLite uses the captured database path, overridable with `SANKA_DATABASE_URL`\n"
+        "or `SANKA_TEST_DB`.\n"
+        if plan.database_required
+        else ""
+    )
     return f"""# Generated native FastAPI application
 
 Sanka generated this application from plan `{plan.plan_hash}`.
 
 Routes are declared with FastAPI decorators in `{entrypoint}` (`@app.get`,
-`@app.post`, ...). Shared DRF-parity validation lives in `sanka_native.py`.
+`@app.post`, ...). Shared DRF-parity validation lives in `{runtime_dir}sanka_native.py`.
 {persistence}
 {gaps}
+{database_setup}
 
-Set `SANKA_DATABASE_URL` for PostgreSQL (the scan never stores a password).
-SQLite uses the captured database path, overridable with `SANKA_DATABASE_URL`
-or `SANKA_TEST_DB`.
-
-`sanka test` writes `test_generated.py` here and runs it. SQLite write tests
+`sanka test` writes `{test_location}` and runs it. SQLite write tests
 use an isolated copy of the database.
 
 Format-suffix alias routes from the source router are dropped as a disclosed
 contract change; clients negotiate content types with headers instead.
 
 ```bash
-uv sync
-uv run python {entrypoint}
+{setup}
 ```
 """
 
@@ -3186,7 +3846,8 @@ from fastapi.responses import Response, StreamingResponse
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = json.loads((HERE / "sanka-manifest.json").read_text(encoding="utf-8"))
-SOURCE_ROOT = (HERE / MANIFEST["source_root"]).resolve()
+PROJECT_ROOT = HERE.parents[1] if MANIFEST.get("generation_mode") == "full" else HERE
+SOURCE_ROOT = (PROJECT_ROOT / MANIFEST["source_root"]).resolve()
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 os.environ["DJANGO_SETTINGS_MODULE"] = MANIFEST["settings_module"]
@@ -3279,7 +3940,18 @@ def create_app() -> FastAPI:
 """
 
 
-def _render_generated_readme(plan: FrameworkPlan) -> str:
+def _render_generated_readme(plan: FrameworkPlan, *, entrypoint: str = "app.py") -> str:
+    module = Path(entrypoint).with_suffix("").as_posix().replace("/", ".")
+    setup = (
+        f"uv sync\nuv run uvicorn {module}:app --reload"
+        if plan.package_manager == "uv"
+        else (
+            "python -m venv .venv\n"
+            ".venv/bin/python -m pip install -r requirements.txt "
+            "-r requirements-test.txt\n"
+            f".venv/bin/python -m uvicorn {module}:app --reload"
+        )
+    )
     return f"""# Generated FastAPI compatibility application
 
 Sanka generated this application from plan `{plan.plan_hash}`.
@@ -3290,11 +3962,10 @@ request into the existing Django application in-process so observable behavior
 stays stable. Replace bridge routes with native FastAPI handlers incrementally,
 keeping `sanka verify` green after each replacement.
 
-Run locally from the Django repository root:
+Run locally from the generated project root:
 
 ```bash
-python -m pip install -r {plan.default_output}/requirements.txt
-uvicorn --app-dir {plan.default_output} app:app --reload
+{setup}
 ```
 
 The generated application retains Django models, migrations, ORM,

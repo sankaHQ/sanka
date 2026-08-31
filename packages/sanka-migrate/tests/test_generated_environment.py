@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -91,3 +93,49 @@ def test_generated_environment_reports_sync_failure(
 
     with pytest.raises(GeneratedEnvironmentError, match="bad lock"):
         ensure_generated_environment(tmp_path)
+
+
+def test_generated_environment_supports_pip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "sanka-manifest.json").write_text(
+        json.dumps({"package_manager": "pip"}), encoding="utf-8"
+    )
+    requirements = tmp_path / "requirements.txt"
+    test_requirements = tmp_path / "requirements-test.txt"
+    requirements.write_text("fastapi\n", encoding="utf-8")
+    test_requirements.write_text("httpx\n", encoding="utf-8")
+    recorded: dict[str, object] = {}
+    builder_options: dict[str, object] = {}
+
+    class FakeBuilder:
+        def create(self, root: Path) -> None:
+            (root / "bin").mkdir(parents=True)
+            (root / "bin" / "python").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sanka.runtime.frameworks.generated_environment.venv.EnvBuilder",
+        lambda **kwargs: builder_options.update(kwargs) or FakeBuilder(),
+    )
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        recorded["command"] = command
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("sanka.runtime.frameworks.generated_environment.subprocess.run", fake_run)
+
+    environment = ensure_generated_environment(tmp_path)
+
+    assert environment.lockfile is None
+    assert environment.pyproject is None
+    assert builder_options["symlinks"] is (os.name != "nt")
+    assert recorded["command"] == [
+        str(tmp_path / ".venv" / "bin" / "python"),
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        str(requirements),
+        "-r",
+        str(test_requirements),
+    ]

@@ -63,11 +63,24 @@ def test_fastapi_app(
         str(generated_environment.python) if generated_environment is not None else sys.executable
     )
     source = _render_generated_tests(manifest, allow_writes=allow_writes)
-    test_path = output_path / GENERATED_TEST_FILE
+    test_path = (
+        output_path / "tests" / GENERATED_TEST_FILE
+        if manifest.get("generation_mode") == "full"
+        else output_path / GENERATED_TEST_FILE
+    )
+    test_path.parent.mkdir(parents=True, exist_ok=True)
     test_path.write_text(source, encoding="utf-8")
     compile(source, str(test_path), "exec")
     result = subprocess.run(
-        [test_python, "-m", "unittest", "test_generated", "-v"],
+        [
+            test_python,
+            "-m",
+            "unittest",
+            "tests.test_generated"
+            if manifest.get("generation_mode") == "full"
+            else "test_generated",
+            "-v",
+        ],
         cwd=output_path,
         env=env,
         capture_output=True,
@@ -93,10 +106,14 @@ def test_fastapi_app(
         ),
         "python": test_python,
         "pyproject": (
-            str(generated_environment.pyproject) if generated_environment is not None else None
+            str(generated_environment.pyproject)
+            if generated_environment is not None and generated_environment.pyproject is not None
+            else None
         ),
         "lockfile": (
-            str(generated_environment.lockfile) if generated_environment is not None else None
+            str(generated_environment.lockfile)
+            if generated_environment is not None and generated_environment.lockfile is not None
+            else None
         ),
         "log": log.strip(),
         "missing_dependency": missing_dependency,
@@ -218,7 +235,7 @@ def _has_required_create_field(fields: list[dict[str, Any]]) -> bool:
 
 def _render_generated_tests(manifest: dict[str, Any], *, allow_writes: bool) -> str:
     entrypoint = str(manifest.get("entrypoint") or "app.py")
-    module = Path(entrypoint).stem
+    module = Path(entrypoint).with_suffix("").as_posix().replace("/", ".")
     native = manifest.get("mode") == NATIVE_STRATEGY
     methods: list[str] = [
         "    def test_openapi_ok(self) -> None:",
