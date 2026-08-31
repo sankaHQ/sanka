@@ -63,6 +63,8 @@ def _clean_env() -> dict[str, str]:
 
 
 def _run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    if sys.platform != "darwin" and args and args[0] in {"scan", "test", "verify"}:
+        args = [*args, "--trust-source-code"]
     return subprocess.run(
         [
             sys.executable,

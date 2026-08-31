@@ -16,6 +16,7 @@ from typing import Any
 from sanka.runtime.safe_local_io import safe_read_text
 
 _MAX_WORKER_VIRTUAL_GROWTH = 2 * 1024 * 1024 * 1024
+_MAX_RESOURCE_MEASUREMENT_FAILURES = 3
 
 
 class UntrustedFrameworkError(RuntimeError):
@@ -111,6 +112,7 @@ def run_untrusted_framework_worker(
                 deadline = time.monotonic() + timeout
                 next_resource_check = 0.0
                 virtual_baseline: int | None = None
+                virtual_measurement_failures = 0
                 while process.poll() is None:
                     now = time.monotonic()
                     if now >= deadline:
@@ -118,15 +120,22 @@ def run_untrusted_framework_worker(
                         process.wait()
                         raise UntrustedFrameworkError("isolated framework worker timed out")
                     if virtual_baseline is None and ready_path.is_file():
-                        virtual_baseline = _process_virtual_bytes(process.pid)
-                        if virtual_baseline <= 0:
-                            process.kill()
-                            process.wait()
-                            raise UntrustedFrameworkError(
-                                "isolated framework worker memory could not be measured"
-                            )
-                        with budget_ack_path.open("xb") as acknowledgement:
-                            acknowledgement.write(b"ok\n")
+                        measured_baseline = _process_virtual_bytes(process.pid)
+                        if measured_baseline <= 0:
+                            if process.poll() is not None:
+                                break
+                            virtual_measurement_failures += 1
+                            if virtual_measurement_failures >= _MAX_RESOURCE_MEASUREMENT_FAILURES:
+                                process.kill()
+                                process.wait()
+                                raise UntrustedFrameworkError(
+                                    "isolated framework worker memory could not be measured"
+                                )
+                        else:
+                            virtual_baseline = measured_baseline
+                            virtual_measurement_failures = 0
+                            with budget_ack_path.open("xb") as acknowledgement:
+                                acknowledgement.write(b"ok\n")
                     if now >= next_resource_check:
                         next_resource_check = now + 0.1
                         if _temporary_usage(temporary) > 256 * 1024 * 1024:
@@ -150,12 +159,22 @@ def run_untrusted_framework_worker(
                                 # misreporting it as a budget violation.
                                 if process.poll() is not None:
                                     break
-                                process.kill()
-                                process.wait()
-                                raise UntrustedFrameworkError(
-                                    "isolated framework worker memory could not be measured"
-                                )
-                            if virtual_bytes - virtual_baseline > _MAX_WORKER_VIRTUAL_GROWTH:
+                                virtual_measurement_failures += 1
+                                if (
+                                    virtual_measurement_failures
+                                    >= _MAX_RESOURCE_MEASUREMENT_FAILURES
+                                ):
+                                    process.kill()
+                                    process.wait()
+                                    raise UntrustedFrameworkError(
+                                        "isolated framework worker memory could not be measured"
+                                    )
+                            else:
+                                virtual_measurement_failures = 0
+                            if (
+                                virtual_bytes > 0
+                                and virtual_bytes - virtual_baseline > _MAX_WORKER_VIRTUAL_GROWTH
+                            ):
                                 process.kill()
                                 process.wait()
                                 raise UntrustedFrameworkError(

@@ -111,6 +111,31 @@ def test_explicit_trust_runs_worker_without_a_profile(
     assert payload == {"ok": True}
 
 
+def test_worker_retries_a_transient_virtual_memory_measurement_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("sanka.runtime.frameworks.untrusted_framework.sys.platform", "linux")
+    original = _process_virtual_bytes
+    calls = 0
+
+    def transient_failure(process_id: int) -> int:
+        nonlocal calls
+        calls += 1
+        return 0 if calls == 1 else original(process_id)
+
+    monkeypatch.setattr(
+        "sanka.runtime.frameworks.untrusted_framework._process_virtual_bytes",
+        transient_failure,
+    )
+
+    payload = run_untrusted_framework_worker(
+        {"operation": "health"}, readable_roots=[tmp_path], allow_unsafe=True
+    )
+
+    assert payload == {"ok": True}
+    assert calls >= 2
+
+
 def test_ambient_sys_path_is_not_implicitly_sandbox_readable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

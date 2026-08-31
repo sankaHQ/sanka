@@ -10,12 +10,19 @@ from pathlib import Path
 
 import pytest
 
-from sanka.cli import _print_framework_test, main
+from sanka.cli import _print_framework_test
+from sanka.cli import main as cli_main
 from sanka.runtime.frameworks import load_fastapi_plan, load_framework_scan
 from sanka.runtime.frameworks.django_fastapi import _render_native_app, _stub_safe_path
 from sanka.runtime.frameworks.fastapi_tests import _missing_generated_dependency
 
 FIXTURE = Path(__file__).parent / "fixtures" / "drf_project"
+
+
+def _main(args: list[str]) -> int:
+    if sys.platform != "darwin" and args and args[0] in {"scan", "test", "verify"}:
+        args = [*args, "--trust-source-code"]
+    return cli_main(args)
 
 
 @pytest.fixture
@@ -34,7 +41,7 @@ def _reviewed_apply_args(project: Path, *extra: str) -> list[str]:
 def test_five_command_drf_to_fastapi_lifecycle(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
     scan_output = capsys.readouterr().out
     assert "Django" in scan_output
     assert "DRF" in scan_output
@@ -65,13 +72,13 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert next(route for route in scan.routes if route.operation == "featured").transactional
     assert not next(route for route in scan.routes if route.operation == "list").transactional
 
-    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
     plan_output = capsys.readouterr().out
     assert "DRF → FastAPI Migration Plan" in plan_output
     assert "Bridge generation readiness: 100%" in plan_output
 
     plan = load_fastapi_plan(drf_project)
-    assert main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
+    assert _main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
     apply_output = capsys.readouterr().out
     assert "generated 10 FastAPI routes" in apply_output
     assert "next: sanka test" in apply_output
@@ -81,7 +88,7 @@ def test_five_command_drf_to_fastapi_lifecycle(
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
     assert manifest["plan_hash"] == plan.plan_hash
 
-    assert main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 0
+    assert _main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 0
     test_output = capsys.readouterr().out
     assert "Generated API tests: OK" in test_output
     assert "next: sanka verify" in test_output
@@ -109,7 +116,7 @@ def test_five_command_drf_to_fastapi_lifecycle(
         encoding="utf-8",
     )
 
-    assert main(["verify", "--root", str(drf_project)]) == 0
+    assert _main(["verify", "--root", str(drf_project)]) == 0
     verify_output = capsys.readouterr().out
     assert "Verified paths" in verify_output
     assert f"Source app:    {drf_project}" in verify_output
@@ -120,10 +127,10 @@ def test_five_command_drf_to_fastapi_lifecycle(
     assert "Compatibility bridge verification: complete" in verify_output
 
     with pytest.raises(SystemExit):
-        main(["apply", "--root", str(drf_project)])
+        _main(["apply", "--root", str(drf_project)])
     assert "--plan-hash" in capsys.readouterr().err
 
-    assert main(["apply", "--root", str(drf_project), "--plan-hash", "sha256:wrong"]) == 1
+    assert _main(["apply", "--root", str(drf_project), "--plan-hash", "sha256:wrong"]) == 1
     assert "does not match current plan" in capsys.readouterr().err
 
     unsupported = replace(
@@ -135,12 +142,12 @@ def test_five_command_drf_to_fastapi_lifecycle(
         json.dumps(unsupported.to_dict()),
         encoding="utf-8",
     )
-    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
     unsupported_plan_output = capsys.readouterr().out
     assert "Needs adaptation\n  1 endpoints" in unsupported_plan_output
     unsupported_plan = load_fastapi_plan(drf_project)
     assert (
-        main(
+        _main(
             [
                 "apply",
                 "--root",
@@ -154,7 +161,7 @@ def test_five_command_drf_to_fastapi_lifecycle(
     )
     capsys.readouterr()
 
-    assert main(["verify", "--root", str(drf_project), "--no-http"]) == 1
+    assert _main(["verify", "--root", str(drf_project), "--no-http"]) == 1
     incomplete_output = capsys.readouterr().out
     assert "9 / 10 generated" in incomplete_output
     assert "skipped with --no-http" in incomplete_output
@@ -166,9 +173,9 @@ def test_five_command_drf_to_fastapi_lifecycle(
 def test_compatibility_test_cannot_write_from_django_startup(
     drf_project: Path, tmp_path: Path
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
-    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
-    assert main(_reviewed_apply_args(drf_project)) == 0
+    assert _main(["scan", str(drf_project)]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    assert _main(_reviewed_apply_args(drf_project)) == 0
     marker = tmp_path / "escaped-from-test.txt"
     settings = drf_project / "config" / "settings.py"
     with settings.open("a", encoding="utf-8") as stream:
@@ -177,7 +184,7 @@ def test_compatibility_test_cannot_write_from_django_startup(
             f"Path({str(marker)!r}).write_text('escaped', encoding='utf-8')\n"
         )
 
-    assert main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 1
+    assert _main(["test", "--root", str(drf_project), "--to", "fastapi"]) == 1
     assert not marker.exists()
 
 
@@ -211,10 +218,10 @@ def test_failed_generated_test_reports_missing_dependency_without_verify_next_st
 def test_compatibility_stream_propagates_failure_after_response_start(
     drf_project: Path,
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
-    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
     plan = load_fastapi_plan(drf_project)
-    assert main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
+    assert _main(["apply", "--root", str(drf_project), "--plan-hash", plan.plan_hash]) == 0
     output = drf_project / ".sanka" / "output" / "fastapi"
     script = """
 import asyncio
@@ -303,7 +310,7 @@ def test_failed_generated_test_without_missing_dependency_does_not_suggest_verif
 def test_scan_discloses_skipped_non_drf_routes(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
     scan_output = capsys.readouterr().out
     assert "Not scanned (non-DRF views" in scan_output
     assert "legacy/redirect/" in scan_output
@@ -318,10 +325,10 @@ def test_scan_discloses_skipped_non_drf_routes(
 def test_zero_readiness_native_apply_writes_gap_report_instead(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi"]) == 0
     capsys.readouterr()
-    assert main(_reviewed_apply_args(drf_project)) == 1
+    assert _main(_reviewed_apply_args(drf_project)) == 1
     output = capsys.readouterr().out
     assert "native readiness: 0%" in output
     assert "no generatable routes" in output
@@ -351,7 +358,7 @@ def test_zero_readiness_native_apply_writes_gap_report_instead(
 def test_min_readiness_gate_refuses_and_writes_gap_report(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
     scan = load_framework_scan(drf_project)
     partial = replace(
         scan,
@@ -364,9 +371,9 @@ def test_min_readiness_gate_refuses_and_writes_gap_report(
     (drf_project / ".sanka" / "scan.json").write_text(
         json.dumps(partial.to_dict()), encoding="utf-8"
     )
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi"]) == 0
     capsys.readouterr()
-    assert main(_reviewed_apply_args(drf_project, "--min-readiness", "50")) == 1
+    assert _main(_reviewed_apply_args(drf_project, "--min-readiness", "50")) == 1
     output = capsys.readouterr().out
     assert "below --min-readiness 50%" in output
     assert (drf_project / "gap-report" / "GAP-REPORT.md").is_file()
@@ -382,20 +389,20 @@ def test_apply_defaults_to_fifty_percent_readiness_gate() -> None:
 def test_apply_rejects_invalid_readiness_threshold(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi"]) == 0
     capsys.readouterr()
-    assert main(_reviewed_apply_args(drf_project, "--min-readiness", "101")) == 1
+    assert _main(_reviewed_apply_args(drf_project, "--min-readiness", "101")) == 1
     assert "must be between 0 and 100" in capsys.readouterr().err
 
 
 def test_gap_report_only_succeeds_without_generating(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi"]) == 0
     capsys.readouterr()
-    assert main(_reviewed_apply_args(drf_project, "--gap-report-only")) == 0
+    assert _main(_reviewed_apply_args(drf_project, "--gap-report-only")) == 0
     output = capsys.readouterr().out
     assert "gap report written to" in output
     assert not (drf_project / ".sanka" / "output" / "fastapi" / "app.py").exists()
@@ -404,13 +411,13 @@ def test_gap_report_only_succeeds_without_generating(
 def test_gap_report_refuses_to_coexist_with_a_stale_scaffold(
     drf_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["scan", str(drf_project)]) == 0
-    assert main(["plan", str(drf_project), "--to", "fastapi"]) == 0
+    assert _main(["scan", str(drf_project)]) == 0
+    assert _main(["plan", str(drf_project), "--to", "fastapi"]) == 0
     destination = drf_project / "gap-report"
     destination.mkdir()
     (destination / "app.py").write_text("stale = True\n", encoding="utf-8")
     capsys.readouterr()
-    assert main(_reviewed_apply_args(drf_project, "--gap-report-only")) == 1
+    assert _main(_reviewed_apply_args(drf_project, "--gap-report-only")) == 1
     error = capsys.readouterr().err
     assert "refusing to leave a stale scaffold" in error
     assert (destination / "app.py").read_text(encoding="utf-8") == "stale = True\n"
