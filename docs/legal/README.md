@@ -15,4 +15,4 @@ Contributions use the license applicable to the repository and files they
 modify: AGPL-3.0-only for this repository's runtime and CLI code, and
 Apache-2.0 for its MCP package, scripts, tests, and documentation. The
 Connector SDK and provider packages are separately distributed under
-Apache-2.0 from `sankaHQ/sanka-connectors`.
+Apache-2.0 from `sankaHQ/extensions`.

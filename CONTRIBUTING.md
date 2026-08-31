@@ -12,7 +12,7 @@ the license already applicable to the files it modifies:
 - MCP, test, script, and documentation contributions are Apache-2.0.
 
 Connector SDK and provider contributions belong in
-[`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors),
+[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions),
 where they are Apache-2.0.
 
 By submitting a contribution, you confirm that you have the right to submit it

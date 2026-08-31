@@ -10,7 +10,7 @@ alias.
 
 The runtime is licensed **AGPL-3.0-only** and depends only on PyYAML plus the
 zero-dependency, Apache-2.0
-[`sanka-connector-sdk`](https://github.com/sankaHQ/sanka-connectors). Provider
+[`sanka-connector-sdk`](https://github.com/sankaHQ/extensions). Provider
 packages are installed separately, so database drivers and API clients do not
 make the base runtime heavier. Commercial licensing is available by contacting
 [Sanka](mailto:hey@sanka.com).
@@ -95,7 +95,7 @@ sanka connect markdown
 
 Install only the local providers a migration needs, for example
 `sanka-connector-markdown` or `sanka-connector-postgres`. See the
-[connector repository](https://github.com/sankaHQ/sanka-connectors) for the
+[extensions repository](https://github.com/sankaHQ/extensions) for the
 SDK and first-party package list.
 
 HubSpot, Salesforce, SendGrid, and other managed-system migrations use Sanka's

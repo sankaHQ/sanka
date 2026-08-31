@@ -4,7 +4,7 @@
 Rules (see docs/ARCHITECTURE.md):
 
 - the Apache-2.0 Connector SDK and providers live in the separate
-  ``sankaHQ/sanka-connectors`` repository, whose CI owns their boundary checks.
+  ``sankaHQ/extensions`` repository, whose CI owns their boundary checks.
 - ``packages/sanka-migrate-mcp`` (Apache-2.0) must not import ``sanka`` at all;
   it is a standalone REST shim outside the runtime namespace.
 - the remaining ``packages/sanka-migrate`` runtime modules may import anything.
