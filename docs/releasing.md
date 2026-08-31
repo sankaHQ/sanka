@@ -28,7 +28,7 @@ release procedure; it does not override PyPI or live-service status.
 
 `sanka-migrate` contains the runtime and depends on the zero-dependency
 `sanka-connector-sdk`; it does not contain provider implementations.
-First-party connector mods are released separately from `sankaHQ/mods`
+First-party connector extensions are released separately from `sankaHQ/extensions`
 before a runtime release that depends on a new SDK version.
 `sanka-migrate-mcp` is the standalone Apache-2.0 research and assessment MCP
 server. It is built and checked with the same pre-release artifact set while

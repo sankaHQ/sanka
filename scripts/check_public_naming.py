@@ -175,7 +175,7 @@ def main() -> int:
 
     connector_entry_points = runtime["project"].get("entry-points", {}).get("sanka.connectors", {})
     if connector_entry_points:
-        errors.append("runtime must not bundle provider entry points; use sankaHQ/mods")
+        errors.append("runtime must not bundle provider entry points; use sankaHQ/extensions")
 
     package_paths = (
         ROOT / "packages/sanka-migrate/src/sanka/runtime",

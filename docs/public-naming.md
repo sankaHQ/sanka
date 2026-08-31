@@ -12,7 +12,7 @@ API identifiers keep their existing migration-specific names for stability.
 | Project and product | Sanka |
 | GitHub repository | `sankaHQ/sanka` |
 | Migration runtime distribution | `sanka-migrate` |
-| Mods repository | `sankaHQ/mods` |
+| Extensions repository | `sankaHQ/extensions` |
 | Connector interface distribution / import | `sanka-connector-sdk` / `sanka_connector` |
 | Provider distributions | `sanka-connector-<provider>` |
 | Preferred Python facade | `from sanka import Sanka` |

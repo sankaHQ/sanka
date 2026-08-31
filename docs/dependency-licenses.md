@@ -8,7 +8,7 @@ unexpected GPL / AGPL dependency outside this repository's own AGPL runtime.
 
 | Dependency family | License | Used by | Review note |
 |---|---|---|---|
-| `sanka-connector-sdk` | Apache-2.0 | runtime connector contract and discovery | Sanka-owned, zero-dependency interface package published from `sankaHQ/mods` |
+| `sanka-connector-sdk` | Apache-2.0 | runtime connector contract and discovery | Sanka-owned, zero-dependency interface package published from `sankaHQ/extensions` |
 | PyYAML | MIT | runtime configuration | permissive |
 | FastAPI, Starlette, Uvicorn, Click, python-dotenv | MIT / BSD-3-Clause | optional runtime compatibility extra and MCP transport | separate optional dependencies; not installed by the default runtime |
 | httpx, httpcore, idna | BSD-3-Clause | optional runtime compatibility extra and standalone MCP server | permissive |
@@ -21,7 +21,7 @@ unexpected GPL / AGPL dependency outside this repository's own AGPL runtime.
 | certifi | MPL-2.0 | HTTP transitive dependency | file-level copyleft; consumed unmodified as a separate package |
 
 First-party provider dependencies are reviewed and published from
-`sankaHQ/mods`; they are not dependencies of `sanka-migrate`.
+`sankaHQ/extensions`; they are not dependencies of `sanka-migrate`.
 Dependencies such as Tortoise ORM, SQLAlchemy, psycopg, and aiosqlite belong to
 the generated destination project and are recorded in its `pyproject.toml` and
 `uv.lock`, not in Sanka's own environment.

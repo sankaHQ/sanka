@@ -2,9 +2,9 @@
 
 This repository owns the AGPL-3.0-only Sanka migration runtime and the
 standalone Apache-2.0 MCP package. Extension SDKs and independently installable
-local/offline mods live in the separate
-[`sankaHQ/mods`](https://github.com/sankaHQ/mods) repository. The
-zero-dependency Connector SDK is the first stable mod interface. This document
+local/offline extensions live in the separate
+[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions) repository. The
+zero-dependency Connector SDK is the first stable extension interface. This document
 pins the runtime-side decisions.
 
 ## Components and licenses
@@ -13,7 +13,7 @@ pins the runtime-side decisions.
 |---|---|---|---|
 | Runtime | `sanka` (public facade); `sanka.runtime`, `sanka.cli` | AGPL-3.0-only | `Sanka` facade, lifecycle state machine, planner, execution engine, state store, verification, CLI |
 | Connector compatibility import | `sanka.connector` | AGPL-3.0-only | Temporary re-export of the standalone `sanka_connector` SDK |
-| Connector SDK and provider mods | `sanka_connector`, `sanka_connector_*` | Apache-2.0 | Separate packages from `sankaHQ/mods` |
+| Connector SDK and provider extensions | `sanka_connector`, `sanka_connector_*` | Apache-2.0 | Separate packages from `sankaHQ/extensions` |
 | Standalone MCP | `sanka_migrate_mcp` | Apache-2.0 | Credential-free research and assessment tools |
 
 License-dependency direction is one-way: this runtime depends on the Apache
