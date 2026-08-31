@@ -12,8 +12,8 @@ The runtime is licensed **AGPL-3.0-only** and depends only on PyYAML plus the
 zero-dependency, Apache-2.0
 [`sanka-connector-sdk`](https://github.com/sankaHQ/sanka-connectors). Provider
 packages are installed separately, so database drivers and API clients do not
-make the base runtime heavier. Commercial licenses are available from Sanka,
-Inc. for embedding the runtime without AGPL obligations.
+make the base runtime heavier. Commercial licensing is available by contacting
+[Sanka](mailto:hey@sanka.com).
 
 **Status: alpha.** Published releases are available on
 [PyPI](https://pypi.org/project/sanka-migrate/). Migration-as-code specs

@@ -373,11 +373,9 @@ boundary:
 The standalone Connector SDK and local/offline providers are Apache-2.0 in
 [`sankaHQ/sanka-connectors`](https://github.com/sankaHQ/sanka-connectors).
 
-Runtime code that Sanka owns or otherwise has permission to relicense is also
-available under a [commercial license](docs/legal/commercial-license.md) from
-Sanka, Inc. for embedding without AGPL obligations. Third-party contributions
-remain under the license applicable to their files unless their rights holder
-separately grants additional rights. See [LICENSE](LICENSE) for the full map.
+Commercial licensing is available by
+[contacting Sanka](mailto:hey@sanka.com). See [LICENSE](LICENSE) for the full
+component license map.
 
 The public project and distribution names are defined in
 [docs/public-naming.md](docs/public-naming.md). New applications use
