@@ -9,6 +9,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -294,6 +295,66 @@ def _command_paths(
             paths.append(path)
             paths.extend(_command_paths(child, tuple(path)))
     return paths
+
+
+def _command_parser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return cast(argparse.ArgumentParser, action.choices[name])
+    raise AssertionError(f"command parser not found: {name}")
+
+
+def test_sdk_command_functional_options_are_explicit() -> None:
+    parser = _build_parser()
+    presentation = {"help", "json", "no_color", "quiet", "verbose"}
+    expected = {
+        "scan": {"root", "settings", "artifact_dir"},
+        "plan": {
+            "root",
+            "file",
+            "state",
+            "to",
+            "strategy",
+            "artifact_dir",
+            "output",
+            "generation",
+            "package_manager",
+            "orm",
+        },
+        "apply": {
+            "plan_hash",
+            "root",
+            "file",
+            "state",
+            "to",
+            "artifact_dir",
+            "output",
+            "force",
+            "orm",
+            "min_readiness",
+            "gap_report_only",
+            "bench_candidate",
+        },
+        "test": {"root", "file", "state", "to", "artifact_dir", "output"},
+        "verify": {
+            "root",
+            "file",
+            "state",
+            "to",
+            "artifact_dir",
+            "output",
+            "cases",
+            "no_http",
+        },
+    }
+
+    for command, command_expected in expected.items():
+        actual = {
+            "root" if action.dest == "root_option" else action.dest
+            for action in _command_parser(parser, command)._actions
+            if action.dest not in presentation
+        }
+        assert actual == command_expected, command
 
 
 def test_help_is_available_for_every_registered_command(capsys: pytest.CaptureFixture[str]) -> None:

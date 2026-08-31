@@ -48,6 +48,22 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
     assert "{scan,plan,validate,apply,test,verify,status,migrate,connect,research,assess}" in output
 
 
+def test_sdk_command_parser_errors_use_the_versioned_json_contract(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["apply", "--json"]) == 2
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
+    assert payload["schema_version"] == "sanka-cli/v1"
+    assert payload["command"] == "apply"
+    assert payload["outcome"] == "error"
+    assert payload["migration_state"] == "not_started"
+    assert payload["data"]["error"]["code"] == "SANKA_USAGE"
+    assert "--plan-hash" in payload["data"]["error"]["message"]
+
+
 def test_connect_reports_an_installed_provider(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["connect", "markdown"]) == 0
 
@@ -106,6 +122,35 @@ def _spec_file(tmp_path: Path) -> tuple[Path, Path, list[str]]:
         encoding="utf-8",
     )
     return spec_file, db, ["-f", str(spec_file), "--state", str(tmp_path / "state.db")]
+
+
+def test_spec_lifecycle_uses_the_versioned_json_contract(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _spec_file_path, _db, base = _spec_file(tmp_path)
+
+    assert main(["plan", "--json", *base]) == 0
+    planned = json.loads(capsys.readouterr().out)
+    assert planned["schema_version"] == "sanka-cli/v1"
+    assert planned["command"] == "plan"
+    assert planned["outcome"] == "success"
+    assert planned["migration_state"] == "planned"
+    plan_hash = planned["data"]["plan_hash"]
+
+    assert main(["apply", "--json", *base, "--plan-hash", plan_hash]) == 0
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["schema_version"] == "sanka-cli/v1"
+    assert applied["command"] == "apply"
+    assert applied["data"]["plan_hash"] == plan_hash
+    assert applied["migration_state"] == "applied_not_verified"
+
+    assert main(["verify", "--json", *base]) == 0
+    verified = json.loads(capsys.readouterr().out)
+    assert verified["schema_version"] == "sanka-cli/v1"
+    assert verified["command"] == "verify"
+    assert verified["outcome"] == "success"
+    assert verified["migration_state"] == "verified_within_scope"
+    assert verified["data"]["ok"] is True
 
 
 def test_validate_help_lists_its_flags(capsys: pytest.CaptureFixture[str]) -> None:

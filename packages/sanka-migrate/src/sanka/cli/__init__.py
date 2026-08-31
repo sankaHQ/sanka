@@ -39,7 +39,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from sanka.cli._output import TerminalOutput
 from sanka.cli._research import (
@@ -81,16 +81,40 @@ from sanka.runtime.state import SqliteStateStore
 
 DEFAULT_SPEC_FILE = "sanka-migrate.yaml"
 DEFAULT_STATE_FILE = ".sanka/migrate/state.db"
+# Stable subprocess protocol consumed by sanka-sdk. Success is exit 0; migration
+# failures are exit 1; usage failures are exit 2. Each emits one JSON document.
 CLI_SCHEMA_VERSION = "sanka-cli/v1"
+SDK_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify"})
 
 
 class CliUsageError(ValueError):
-    """A deterministic usage failure raised after argument parsing."""
+    """A deterministic usage failure raised during or after argument parsing."""
+
+
+class _CliArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args: Any, json_errors: bool = False, **kwargs: Any) -> None:
+        self.json_errors = json_errors
+        super().__init__(*args, **kwargs)
+
+    def error(self, message: str) -> NoReturn:
+        if self.json_errors:
+            raise CliUsageError(message)
+        super().error(message)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    json_errors = "--json" in arguments
+    parser = _build_parser(json_errors=json_errors)
+    try:
+        args = parser.parse_args(arguments)
+    except CliUsageError as error:
+        command = arguments[0] if arguments and arguments[0] in SDK_COMMANDS else "sanka"
+        return _print_cli_error(
+            argparse.Namespace(command=command, json=json_errors),
+            error,
+            exit_code=2,
+        )
     if args.command is None:
         parser.print_help()
         return 0
@@ -179,8 +203,8 @@ def _print_cli_error(args: argparse.Namespace, error: Exception, *, exit_code: i
     return exit_code
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
+    parser = _CliArgumentParser(
         prog="sanka",
         description="Sanka — inspect, plan, execute, and verify migrations with a finish line.",
         epilog=(
@@ -188,6 +212,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Run `sanka <command> --help` for choices, safety, artifacts, and examples."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        json_errors=json_errors,
     )
     parser.add_argument("--version", action="version", version=f"sanka {__version__}")
     parser.set_defaults(command=None)
@@ -460,7 +485,17 @@ def _build_parser() -> argparse.ArgumentParser:
     assess.add_argument("--json", action="store_true", help="print the API data payload as JSON")
     assess.set_defaults(handler=_cmd_assess, form_started_at_ms=int(time.time() * 1000))
 
+    _set_json_errors(parser, json_errors)
     return parser
+
+
+def _set_json_errors(parser: argparse.ArgumentParser, enabled: bool) -> None:
+    if isinstance(parser, _CliArgumentParser):
+        parser.json_errors = enabled
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                _set_json_errors(child, enabled)
 
 
 def _research_output_options(parser: argparse.ArgumentParser) -> None:
@@ -739,7 +774,37 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
     engine = _engine(args.state)
     run_id = engine.create(spec)
     migration_plan = await engine.plan(run_id)
-    _print_plan(run_id, migration_plan)
+    if args.json:
+        _print_json(
+            _json_result(
+                "plan",
+                {
+                    **migration_plan.to_payload(),
+                    "run_id": run_id,
+                    "plan_hash": migration_plan.plan_hash,
+                    "ready": migration_plan.ready,
+                },
+                migration_state="planned",
+                artifacts=[str(Path(args.state).resolve())],
+                limitations=migration_plan.warnings,
+                next_actions=[
+                    shlex.join(
+                        [
+                            "sanka",
+                            "apply",
+                            "--file",
+                            str(args.file),
+                            "--state",
+                            str(args.state),
+                            "--plan-hash",
+                            migration_plan.plan_hash,
+                        ]
+                    )
+                ],
+            )
+        )
+    else:
+        _print_plan(run_id, migration_plan)
     return 0
 
 
@@ -881,7 +946,32 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
     if run.plan_json is None:
         raise ExecutionError("no plan for this spec yet; run `sanka plan` first")
     await engine.apply(run_id, plan_hash=args.plan_hash)
-    print(f"run {run_id}: applied")
+    if args.json:
+        _print_json(
+            _json_result(
+                "apply",
+                {
+                    "run_id": run_id,
+                    "plan_hash": args.plan_hash,
+                },
+                migration_state="applied_not_verified",
+                artifacts=[str(Path(args.state).resolve())],
+                next_actions=[
+                    shlex.join(
+                        [
+                            "sanka",
+                            "verify",
+                            "--file",
+                            str(args.file),
+                            "--state",
+                            str(args.state),
+                        ]
+                    )
+                ],
+            )
+        )
+    else:
+        print(f"run {run_id}: applied")
     return 0
 
 
@@ -963,7 +1053,34 @@ async def _cmd_verify(args: argparse.Namespace) -> int:
     engine = _engine(args.state)
     run_id = engine.create(spec)
     verify_report = await engine.verify(run_id)
-    _print_verify(verify_report)
+    if args.json:
+        _print_json(
+            _json_result(
+                "verify",
+                {
+                    "run_id": verify_report.run_id,
+                    "ok": verify_report.ok,
+                    "routes": [
+                        {
+                            "route_key": route.route_key,
+                            "source_count": route.source_count,
+                            "migrated": route.migrated,
+                            "failed": route.failed,
+                            "destination_count": route.destination_count,
+                            "ok": route.ok,
+                        }
+                        for route in verify_report.routes
+                    ],
+                },
+                outcome="success" if verify_report.ok else "error",
+                migration_state=(
+                    "verified_within_scope" if verify_report.ok else "verification_failed"
+                ),
+                artifacts=[str(Path(args.state).resolve())],
+            )
+        )
+    else:
+        _print_verify(verify_report)
     return 0 if verify_report.ok else 1
 
 
