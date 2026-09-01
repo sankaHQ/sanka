@@ -1,0 +1,9 @@
+{
+  "schema_version": "sanka-marketplace/v1",
+  "extensions": [
+    {
+      "id": "sanka/drf-to-fastapi",
+      "manifest": "drf-to-fastapi.json"
+    }
+  ]
+}
