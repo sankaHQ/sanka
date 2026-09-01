@@ -9,16 +9,18 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
 import tempfile
 import venv
 import zipfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from email.parser import BytesParser
+from functools import wraps
 from importlib import metadata
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, cast
@@ -62,6 +64,23 @@ def user_extension_root() -> Path:
 
 def _error(code: str, message: str, **details: Any) -> NoReturn:
     raise ExtensionError(code, message, details=details)
+
+
+def _store_operation[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
+    @wraps(operation)
+    def protected(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return operation(*args, **kwargs)
+        except ExtensionError:
+            raise
+        except OSError as error:
+            raise ExtensionError(
+                "SANKA_EXTENSION_IO",
+                "Extension store operation failed",
+                details={"operation": operation.__name__, "reason": str(error)},
+            ) from error
+
+    return protected
 
 
 @contextmanager
@@ -136,28 +155,75 @@ def _installation_sort_key(value: dict[str, Any]) -> str:
     return str(value.get("artifact_digest"))
 
 
-def _tree_digest(root: Path) -> str:
+def _tree_records(descriptor: int, prefix: str = "") -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
-        relative = path.relative_to(root).as_posix()
-        item = path.lstat()
-        if stat.S_ISLNK(item.st_mode) or not (path.is_dir() or stat.S_ISREG(item.st_mode)):
+    with os.scandir(descriptor) as entries:
+        children = sorted(entries, key=lambda item: item.name)
+    for child in children:
+        relative = f"{prefix}/{child.name}" if prefix else child.name
+        linked = os.stat(child.name, dir_fd=descriptor, follow_symlinks=False)
+        if stat.S_ISLNK(linked.st_mode) or not (
+            stat.S_ISDIR(linked.st_mode) or stat.S_ISREG(linked.st_mode)
+        ):
             _error(
                 "SANKA_MARKETPLACE_PATH_INVALID",
                 "Marketplace snapshots may contain only real directories and regular files",
                 path=relative,
             )
-        if path.is_file():
+        if stat.S_ISREG(linked.st_mode):
+            file_descriptor = os.open(child.name, _FILE_FLAGS, dir_fd=descriptor)
+            try:
+                opened = os.fstat(file_descriptor)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino)
+                ):
+                    _error(
+                        "SANKA_MARKETPLACE_PATH_INVALID",
+                        "Marketplace snapshot file changed while being inspected",
+                        path=relative,
+                    )
+                digest = hashlib.sha256()
+                with os.fdopen(file_descriptor, "rb", closefd=False) as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            finally:
+                os.close(file_descriptor)
             records.append(
                 {
                     "type": "file",
                     "path": relative,
-                    "size": item.st_size,
-                    "sha256": _sha256_file(path),
+                    "size": opened.st_size,
+                    "sha256": digest.hexdigest(),
                 }
             )
         else:
             records.append({"type": "directory", "path": relative, "size": 0, "sha256": None})
+            directory = os.open(child.name, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            try:
+                opened = os.fstat(directory)
+                if not stat.S_ISDIR(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+                    linked.st_dev,
+                    linked.st_ino,
+                ):
+                    _error(
+                        "SANKA_MARKETPLACE_PATH_INVALID",
+                        "Marketplace snapshot directory changed while being inspected",
+                        path=relative,
+                    )
+                records.extend(_tree_records(directory, relative))
+            finally:
+                os.close(directory)
+    return records
+
+
+def _tree_digest(root: Path) -> str:
+    descriptor = os.open(root, _DIRECTORY_FLAGS)
+    try:
+        records = _tree_records(descriptor)
+    finally:
+        os.close(descriptor)
     return content_hash(records)
 
 
@@ -338,20 +404,171 @@ def _exact_path(
     return candidate
 
 
-def _atomic_json(path: Path, payload: object) -> None:
-    temporary: Path | None = None
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+_FILE_FLAGS = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+@contextmanager
+def _parent_descriptor(
+    root: Path,
+    candidate: Path,
+    *,
+    create: bool = False,
+) -> Iterator[tuple[int, str]]:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=path.name + ".", suffix=".tmp", dir=path.parent
+        relative = candidate.relative_to(root)
+    except ValueError as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_PATH",
+            "Extension path escapes its store",
+            details={"path": str(candidate)},
+        ) from error
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        _error(
+            "SANKA_EXTENSION_PATH",
+            "Extension path does not have an exact relative placement",
+            path=str(candidate),
         )
-        temporary = Path(temporary_name)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-            json.dump(payload, output, ensure_ascii=False, indent=2, sort_keys=True)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, path)
+    descriptor = os.open(root, _DIRECTORY_FLAGS)
+    try:
+        for part in relative.parts[:-1]:
+            if create:
+                with suppress(FileExistsError):
+                    os.mkdir(part, mode=0o700, dir_fd=descriptor)
+            child = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        yield descriptor, relative.parts[-1]
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _regular_at(
+    parent: int,
+    name: str,
+    display_path: Path,
+    *,
+    missing_ok: bool = False,
+) -> Iterator[Any | None]:
+    try:
+        descriptor = os.open(name, _FILE_FLAGS, dir_fd=parent)
+    except FileNotFoundError:
+        if missing_ok:
+            yield None
+            return
+        raise
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension state and cache must be one regular file",
+                path=str(display_path),
+            )
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            yield source
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _store_file(
+    root: Path,
+    path: Path,
+    *,
+    missing_ok: bool = False,
+) -> Iterator[Any | None]:
+    yielded = False
+    try:
+        with (
+            _parent_descriptor(root, path) as (parent, name),
+            _regular_at(parent, name, path, missing_ok=missing_ok) as source,
+        ):
+            yielded = True
+            yield source
+    except FileNotFoundError:
+        if not missing_ok or yielded:
+            raise
+        yield None
+
+
+def _store_file_sha256(root: Path, path: Path) -> str:
+    digest = hashlib.sha256()
+    with _store_file(root, path) as source:
+        assert source is not None
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@contextmanager
+def _directory_at(
+    parent: int,
+    name: str,
+    display_path: Path,
+    *,
+    missing_ok: bool = False,
+) -> Iterator[int | None]:
+    try:
+        descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent)
+    except FileNotFoundError:
+        if missing_ok:
+            yield None
+            return
+        raise
+    try:
+        opened = os.fstat(descriptor)
+        linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or not stat.S_ISDIR(linked.st_mode)
+            or (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino)
+        ):
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension directory changed while being inspected",
+                path=str(display_path),
+            )
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_json(root: Path, path: Path, payload: object) -> None:
+    temporary = ""
+    try:
+        with _parent_descriptor(root, path, create=True) as (parent, name):
+            for _attempt in range(10):
+                temporary = f".{name}.{secrets.token_hex(8)}.tmp"
+                try:
+                    descriptor = os.open(
+                        temporary,
+                        os.O_WRONLY
+                        | os.O_CREAT
+                        | os.O_EXCL
+                        | getattr(os, "O_CLOEXEC", 0)
+                        | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                        dir_fd=parent,
+                    )
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise FileExistsError("could not allocate extension state temporary")
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                json.dump(payload, output, ensure_ascii=False, indent=2, sort_keys=True)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+            temporary = ""
     except OSError as error:
         raise ExtensionError(
             "SANKA_EXTENSION_IO",
@@ -359,25 +576,34 @@ def _atomic_json(path: Path, payload: object) -> None:
             details={"path": str(path), "reason": str(error)},
         ) from error
     finally:
-        if temporary is not None:
-            with suppress(OSError):
-                temporary.unlink(missing_ok=True)
+        if temporary:
+            with (
+                suppress(OSError),
+                _parent_descriptor(root, path) as (parent, _name),
+            ):
+                os.unlink(temporary, dir_fd=parent)
 
 
 @contextmanager
 def _locked(root: Path, path: Path) -> Iterator[None]:
-    _exact_path(root, path, expected=path)
-    parent = path.parent
     lock_path = path.with_name(path.name + ".lock")
-    _exact_path(root, lock_path, expected=lock_path)
     try:
-        parent.mkdir(parents=True, exist_ok=True)
-        _exact_path(root, parent, must_exist=True, expected=parent)
-        descriptor = os.open(
-            lock_path,
-            os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-        )
+        with _parent_descriptor(root, lock_path, create=True) as (parent, name):
+            for attempt in range(3):
+                try:
+                    descriptor = os.open(
+                        name,
+                        os.O_RDWR
+                        | os.O_CREAT
+                        | getattr(os, "O_CLOEXEC", 0)
+                        | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                        dir_fd=parent,
+                    )
+                    break
+                except FileNotFoundError:
+                    if attempt == 2:
+                        raise
     except OSError as error:
         raise ExtensionError(
             "SANKA_EXTENSION_IO",
@@ -405,6 +631,33 @@ def _locked(root: Path, path: Path) -> Iterator[None]:
         with suppress(OSError):
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+def _remove_store_tree(root: Path, path: Path) -> None:
+    with (
+        _parent_descriptor(root, path) as (parent, name),
+        _directory_at(parent, name, path, missing_ok=True) as descriptor,
+    ):
+        if descriptor is not None:
+            shutil.rmtree(name, dir_fd=parent)
+
+
+def _unlink_store_file(root: Path, path: Path) -> None:
+    with (
+        _parent_descriptor(root, path) as (parent, name),
+        _regular_at(parent, name, path, missing_ok=True) as source,
+    ):
+        if source is None:
+            return
+        opened = os.fstat(source.fileno())
+        linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino):
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension cache file changed before deletion",
+                path=str(path),
+            )
+        os.unlink(name, dir_fd=parent)
 
 
 class ExtensionStore:
@@ -464,11 +717,12 @@ class ExtensionStore:
         )
 
     @staticmethod
-    def _load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
-        if not path.exists():
-            return default
+    def _load_json(root: Path, path: Path, default: dict[str, Any]) -> dict[str, Any]:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            with _store_file(root, path, missing_ok=True) as source:
+                if source is None:
+                    return default
+                payload = json.loads(source.read().decode("utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ExtensionError(
                 "SANKA_EXTENSION_STATE_INVALID",
@@ -490,6 +744,7 @@ class ExtensionStore:
     def _raw_marketplaces(self) -> list[dict[str, Any]]:
         path = self._state_path(self.user_root, self._marketplace_path)
         payload = self._load_json(
+            self.user_root,
             path,
             {"schema_version": MARKETPLACE_SCHEMA, "marketplaces": []},
         )
@@ -609,6 +864,7 @@ class ExtensionStore:
             snapshot_root=root,
         )
 
+    @_store_operation
     def marketplaces(self) -> tuple[MarketplaceRecord, ...]:
         return tuple(
             sorted(
@@ -623,20 +879,69 @@ class ExtensionStore:
             self.user_root / "snapshots" / _identity_key(identity) / digest.removeprefix("sha256:"),
         )
 
-    def _place_snapshot(self, source: Path, identity: str, digest: str) -> Path:
-        destination = self._snapshot_destination(identity, digest)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            if not destination.is_dir() or _tree_digest(destination) != _tree_digest(source):
+    def _place_snapshot(
+        self,
+        source: Path,
+        identity: str,
+        snapshot_digest: str,
+        expected_tree_digest: str,
+    ) -> Path:
+        destination = self._snapshot_destination(identity, snapshot_digest)
+        with (
+            _parent_descriptor(self.user_root, source) as (source_parent, source_name),
+            _directory_at(source_parent, source_name, source) as source_descriptor,
+        ):
+            assert source_descriptor is not None
+            if content_hash(_tree_records(source_descriptor)) != expected_tree_digest:
                 _error(
                     "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
-                    "Existing immutable marketplace snapshot does not match staged content",
-                    path=str(destination),
+                    "Staged marketplace snapshot changed after its digest was fixed",
+                    path=str(source),
                 )
-            shutil.rmtree(source)
-            return destination
-        os.replace(source, destination)
-        return destination
+            with (
+                _parent_descriptor(self.user_root, destination, create=True) as (
+                    destination_parent,
+                    destination_name,
+                ),
+                _directory_at(
+                    destination_parent, destination_name, destination, missing_ok=True
+                ) as existing_descriptor,
+            ):
+                if existing_descriptor is not None:
+                    if content_hash(_tree_records(existing_descriptor)) != expected_tree_digest:
+                        _error(
+                            "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
+                            "Existing immutable marketplace snapshot does not match "
+                            "expected content",
+                            path=str(destination),
+                        )
+                    shutil.rmtree(source_name, dir_fd=source_parent)
+                    return destination
+                os.replace(
+                    source_name,
+                    destination_name,
+                    src_dir_fd=source_parent,
+                    dst_dir_fd=destination_parent,
+                )
+                try:
+                    with _directory_at(
+                        destination_parent,
+                        destination_name,
+                        destination,
+                    ) as placed_descriptor:
+                        assert placed_descriptor is not None
+                        placed_digest = content_hash(_tree_records(placed_descriptor))
+                    if placed_digest != expected_tree_digest:
+                        _error(
+                            "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
+                            "Placed immutable marketplace snapshot does not match expected content",
+                            path=str(destination),
+                        )
+                except BaseException:
+                    with suppress(OSError, ExtensionError):
+                        shutil.rmtree(destination_name, dir_fd=destination_parent)
+                    raise
+                return destination
 
     def _snapshot_local(self, source: Path, identity: str) -> tuple[Path, str]:
         temporary_root = self._confined(self.user_root, self.user_root / "tmp")
@@ -651,9 +956,10 @@ class ExtensionStore:
             )
             digest = _tree_digest(staging)
             load_marketplace(staging)
-            return self._place_snapshot(staging, identity, digest), digest
+            return self._place_snapshot(staging, identity, digest, digest), digest
         finally:
-            shutil.rmtree(staging.parent, ignore_errors=True)
+            with suppress(OSError, ExtensionError):
+                _remove_store_tree(self.user_root, staging.parent)
 
     def _snapshot_git(self, source: str, identity: str) -> tuple[Path, str]:
         temporary_root = self._confined(self.user_root, self.user_root / "tmp")
@@ -687,9 +993,12 @@ class ExtensionStore:
                     source=source,
                 )
             shutil.rmtree(git_directory)
-            _tree_digest(checkout)
+            expected_tree_digest = _tree_digest(checkout)
             load_marketplace(checkout)
-            return self._place_snapshot(checkout, identity, commit), commit
+            return (
+                self._place_snapshot(checkout, identity, commit, expected_tree_digest),
+                commit,
+            )
         except subprocess.CalledProcessError as error:
             raise ExtensionError(
                 "SANKA_MARKETPLACE_GIT_FAILED",
@@ -697,7 +1006,8 @@ class ExtensionStore:
                 details={"source": source, "reason": error.stderr.strip()},
             ) from error
         finally:
-            shutil.rmtree(parent, ignore_errors=True)
+            with suppress(OSError, ExtensionError):
+                _remove_store_tree(self.user_root, parent)
 
     @staticmethod
     def _marketplace_name(source: str, identity: str, name: str | None) -> str:
@@ -710,6 +1020,7 @@ class ExtensionStore:
             )
         return chosen
 
+    @_store_operation
     def add_marketplace(
         self,
         source: str | Path,
@@ -755,6 +1066,7 @@ class ExtensionStore:
             records.append(raw)
             records.sort(key=_marketplace_sort_key)
             _atomic_json(
+                self.user_root,
                 self._marketplace_path,
                 {
                     "schema_version": MARKETPLACE_SCHEMA,
@@ -763,6 +1075,7 @@ class ExtensionStore:
             )
             return self._record(raw)
 
+    @_store_operation
     def upgrade_marketplace(self, name: str | None = None) -> tuple[MarketplaceRecord, ...]:
         with _locked(self.user_root, self._marketplace_path):
             records = self._raw_marketplaces()
@@ -802,6 +1115,7 @@ class ExtensionStore:
                 upgraded.append(self._record(raw))
             records.sort(key=_marketplace_sort_key)
             _atomic_json(
+                self.user_root,
                 self._marketplace_path,
                 {
                     "schema_version": MARKETPLACE_SCHEMA,
@@ -810,6 +1124,7 @@ class ExtensionStore:
             )
             return tuple(sorted(upgraded, key=lambda item: item.name))
 
+    @_store_operation
     def remove_marketplace(self, name: str) -> MarketplaceRecord:
         with (
             _locked(self.user_root, self._marketplace_path),
@@ -834,6 +1149,7 @@ class ExtensionStore:
                 )
             records.remove(raw)
             _atomic_json(
+                self.user_root,
                 self._marketplace_path,
                 {"schema_version": MARKETPLACE_SCHEMA, "marketplaces": records},
             )
@@ -842,6 +1158,7 @@ class ExtensionStore:
     def _load_installations(self) -> list[dict[str, Any]]:
         path = self._state_path(self.user_root, self._installation_path)
         payload = self._load_json(
+            self.user_root,
             path,
             {"schema_version": INSTALLATION_SCHEMA, "installations": []},
         )
@@ -931,6 +1248,7 @@ class ExtensionStore:
     def _load_disabled(self) -> set[str]:
         path = self._state_path(self.user_root, self._disabled_path)
         payload = self._load_json(
+            self.user_root,
             path,
             {"schema_version": "sanka-extension-disabled/v1", "extensions": []},
         )
@@ -952,6 +1270,7 @@ class ExtensionStore:
         values = list(values)
         values.sort(key=_installation_sort_key)
         _atomic_json(
+            self.user_root,
             self._installation_path,
             {
                 "schema_version": INSTALLATION_SCHEMA,
@@ -961,13 +1280,18 @@ class ExtensionStore:
 
     def _write_disabled(self, values: set[str]) -> None:
         _atomic_json(
+            self.user_root,
             self._disabled_path,
             {"schema_version": "sanka-extension-disabled/v1", "extensions": sorted(values)},
         )
 
     def _load_lock(self) -> dict[str, LockEntry]:
         path = self._state_path(self.project_root, self._project_lock_path)
-        payload = self._load_json(path, {"schema_version": LOCK_SCHEMA, "extensions": []})
+        payload = self._load_json(
+            self.project_root,
+            path,
+            {"schema_version": LOCK_SCHEMA, "extensions": []},
+        )
         values = payload.get("extensions")
         if payload.get("schema_version") != LOCK_SCHEMA or not isinstance(values, list):
             _error(
@@ -1022,6 +1346,7 @@ class ExtensionStore:
     def _write_lock(self, entries: Mapping[str, LockEntry]) -> None:
         path = self._state_path(self.project_root, self._project_lock_path)
         _atomic_json(
+            self.project_root,
             path,
             {
                 "schema_version": LOCK_SCHEMA,
@@ -1041,6 +1366,7 @@ class ExtensionStore:
             values.extend((record, manifest) for manifest in load_marketplace(record.snapshot_root))
         return values
 
+    @_store_operation
     def list_extensions(self) -> tuple[ExtensionRecord, ...]:
         installations = self._load_installations()
         disabled = self._load_disabled()
@@ -1143,42 +1469,51 @@ class ExtensionStore:
                 artifact=wheel.name,
             )
         destination = self._wheel_cache_path(wheel)
-        try:
-            destination.lstat()
-        except FileNotFoundError:
-            pass
-        else:
-            if _sha256_file(destination) != wheel.sha256:
-                _error(
-                    "SANKA_EXTENSION_HASH_MISMATCH",
-                    "Cached extension wheel does not match its declared SHA-256",
-                    artifact=wheel.name,
-                )
-            return destination
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=destination.name + ".", suffix=".tmp", dir=destination.parent
-        )
-        os.close(descriptor)
-        temporary = Path(temporary_name)
-        try:
-            try:
-                with urlopen(wheel.url, timeout=30) as response:
-                    declared_size = (
-                        response.headers.get("Content-Length")
-                        if hasattr(response, "headers")
-                        else None
-                    )
-                    if declared_size is not None and int(declared_size) > MAX_WHEEL_BYTES:
-                        _error(
-                            "SANKA_EXTENSION_ARTIFACT_TOO_LARGE",
-                            "Extension wheel exceeds the download limit",
-                            artifact=wheel.name,
-                            limit=MAX_WHEEL_BYTES,
-                        )
+        temporary = ""
+        with _parent_descriptor(self.user_root, destination, create=True) as (parent, name):
+            with _regular_at(parent, name, destination, missing_ok=True) as existing:
+                if existing is not None:
                     digest = hashlib.sha256()
-                    size = 0
-                    with temporary.open("wb") as output:
+                    for chunk in iter(lambda: existing.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                    if digest.hexdigest() != wheel.sha256:
+                        _error(
+                            "SANKA_EXTENSION_HASH_MISMATCH",
+                            "Cached extension wheel does not match its declared SHA-256",
+                            artifact=wheel.name,
+                        )
+                    return destination
+            temporary = f".{name}.{secrets.token_hex(8)}.tmp"
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=parent,
+            )
+            try:
+                try:
+                    with (
+                        os.fdopen(descriptor, "wb") as output,
+                        urlopen(wheel.url, timeout=30) as response,
+                    ):
+                        declared_size = (
+                            response.headers.get("Content-Length")
+                            if hasattr(response, "headers")
+                            else None
+                        )
+                        if declared_size is not None and int(declared_size) > MAX_WHEEL_BYTES:
+                            _error(
+                                "SANKA_EXTENSION_ARTIFACT_TOO_LARGE",
+                                "Extension wheel exceeds the download limit",
+                                artifact=wheel.name,
+                                limit=MAX_WHEEL_BYTES,
+                            )
+                        digest = hashlib.sha256()
+                        size = 0
                         while chunk := response.read(1024 * 1024):
                             size += len(chunk)
                             if size > MAX_WHEEL_BYTES:
@@ -1190,24 +1525,27 @@ class ExtensionStore:
                                 )
                             digest.update(chunk)
                             output.write(chunk)
-            except ExtensionError:
-                raise
-            except (OSError, ValueError) as error:
-                raise ExtensionError(
-                    "SANKA_EXTENSION_NOT_CACHED",
-                    "Exact extension artifact is unavailable and not cached",
-                    details={"artifact": wheel.name, "reason": str(error)},
-                ) from error
-            if digest.hexdigest() != wheel.sha256:
-                _error(
-                    "SANKA_EXTENSION_HASH_MISMATCH",
-                    "Downloaded extension wheel does not match its declared SHA-256",
-                    artifact=wheel.name,
-                )
-            os.replace(temporary, destination)
-            return destination
-        finally:
-            temporary.unlink(missing_ok=True)
+                except ExtensionError:
+                    raise
+                except (OSError, ValueError) as error:
+                    raise ExtensionError(
+                        "SANKA_EXTENSION_NOT_CACHED",
+                        "Exact extension artifact is unavailable and not cached",
+                        details={"artifact": wheel.name, "reason": str(error)},
+                    ) from error
+                if digest.hexdigest() != wheel.sha256:
+                    _error(
+                        "SANKA_EXTENSION_HASH_MISMATCH",
+                        "Downloaded extension wheel does not match its declared SHA-256",
+                        artifact=wheel.name,
+                    )
+                os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+                temporary = ""
+                return destination
+            finally:
+                if temporary:
+                    with suppress(OSError):
+                        os.unlink(temporary, dir_fd=parent)
 
     @staticmethod
     def _zip_member(archive: zipfile.ZipFile, suffix: str, artifact: str) -> bytes:
@@ -1244,7 +1582,10 @@ class ExtensionStore:
                 artifact=wheel.name,
             )
         try:
-            with _regular_file(path) as source, zipfile.ZipFile(source) as archive:
+            with (
+                _store_file(self.user_root, path) as source,
+                zipfile.ZipFile(cast(Any, source)) as archive,
+            ):
                 members = archive.infolist()
                 normalized_members: set[str] = set()
                 unsafe = len(members) > MAX_WHEEL_MEMBERS
@@ -1408,16 +1749,8 @@ class ExtensionStore:
         root.parent.mkdir(parents=True, exist_ok=True)
         temporary = Path(tempfile.mkdtemp(prefix="environment-", dir=root.parent))
         try:
-            venv.EnvBuilder(with_pip=True, system_site_packages=True).create(temporary)
+            venv.EnvBuilder(with_pip=False, system_site_packages=True).create(temporary)
             python = temporary / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-            requirements = temporary / "requirements-hashed.txt"
-            requirements.write_text(
-                "".join(
-                    f"{wheel.as_uri()} --hash=sha256:{sha256}\n"
-                    for wheel, sha256 in sorted(wheels, key=lambda item: str(item[0]))
-                ),
-                encoding="utf-8",
-            )
             allowed = {"LANG", "LC_ALL", "LC_CTYPE", "PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"}
             environment = {key: value for key, value in os.environ.items() if key in allowed}
             environment.update(
@@ -1425,6 +1758,22 @@ class ExtensionStore:
                     "PIP_DISABLE_PIP_VERSION_CHECK": "1",
                     "PYTHONNOUSERSITE": "1",
                 }
+            )
+            subprocess.run(
+                [str(python), "-I", "-m", "ensurepip"],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=temporary,
+                env=environment,
+            )
+            requirements = temporary / "requirements-hashed.txt"
+            requirements.write_text(
+                "".join(
+                    f"{wheel.as_uri()} --hash=sha256:{sha256}\n"
+                    for wheel, sha256 in sorted(wheels, key=lambda item: str(item[0]))
+                ),
+                encoding="utf-8",
             )
             subprocess.run(
                 [
@@ -1521,6 +1870,7 @@ class ExtensionStore:
             )
         return content_hash(records).removeprefix("sha256:")
 
+    @_store_operation
     def add_extension(
         self,
         extension_id: str,
@@ -1613,6 +1963,7 @@ class ExtensionStore:
             self._write_lock(entries)
             return entry
 
+    @_store_operation
     def remove_extension(self, extension_id: str) -> None:
         with (
             _locked(self.user_root, self._installation_path),
@@ -1656,15 +2007,14 @@ class ExtensionStore:
                     environment = item.get("environment")
                     if isinstance(environment, str):
                         root = self._confined(self.user_root, self.user_root / environment)
-                        if root.exists():
-                            shutil.rmtree(root)
+                        _remove_store_tree(self.user_root, root)
                     for wheel in item.get("wheels", []):
                         if isinstance(wheel, dict) and wheel.get("path") not in retained_wheels:
                             path = self._confined(
                                 self.user_root,
                                 self.user_root / str(wheel.get("path", "")),
                             )
-                            path.unlink(missing_ok=True)
+                            _unlink_store_file(self.user_root, path)
                 self._write_installations(installations)
             self._write_disabled(disabled)
             self._write_lock(entries)
@@ -1736,6 +2086,7 @@ class ExtensionStore:
             ],
         }
 
+    @_store_operation
     def resolve_locked(self, extension_id: str) -> LockEntry:
         entry = self._load_lock().get(extension_id)
         if entry is None or not entry.enabled or extension_id in self._load_disabled():
@@ -1824,7 +2175,7 @@ class ExtensionStore:
                 self.user_root / wheel["path"],
                 must_exist=True,
             )
-            if _sha256_file(path) != wheel.get("sha256"):
+            if _store_file_sha256(self.user_root, path) != wheel.get("sha256"):
                 _error(
                     "SANKA_EXTENSION_HASH_MISMATCH",
                     "Cached locked extension wheel has changed",
