@@ -10,7 +10,6 @@ import re
 import selectors
 import stat
 import subprocess
-import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -18,7 +17,12 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from sanka.runtime.extensions.model import LIFECYCLE_COMMANDS, ExtensionError
-from sanka.runtime.extensions.store import DEFAULT_EXTENSION_ID, LockEntry, user_extension_root
+from sanka.runtime.extensions.store import (
+    DEFAULT_EXTENSION_ID,
+    LockEntry,
+    _default_executable,
+    user_extension_root,
+)
 
 SCHEMA_VERSION = "sanka-extension/v1"
 SAFE_ENV = ("LANG", "LC_ALL", "PATH", "PYTHONUTF8", "TMPDIR", "VIRTUAL_ENV")
@@ -101,7 +105,7 @@ class ExtensionRunner:
         if configured.is_absolute():
             executable = configured
         elif lock.id == DEFAULT_EXTENSION_ID:
-            executable = Path(sys.executable).resolve().parent / lock.executable
+            executable = _default_executable(lock)
         else:
             executable = (
                 self.user_root
@@ -438,11 +442,7 @@ class ExtensionRunner:
                         "Extension executable changed after verification",
                         path=str(executable),
                     )
-                interpreter = (
-                    Path(sys.executable)
-                    if lock.id == DEFAULT_EXTENSION_ID
-                    else executable.parent / "python"
-                )
+                interpreter = executable.parent / "python"
                 command = [str(interpreter), f"/dev/fd/{executable_fd}"]
                 pass_fds = (executable_fd,)
             returncode, stdout_bytes, stderr_bytes = self._execute(

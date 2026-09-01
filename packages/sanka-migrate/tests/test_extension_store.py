@@ -11,6 +11,7 @@ import sys
 import threading
 import zipfile
 from collections.abc import Mapping
+from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -40,6 +41,45 @@ def _descriptor_path(descriptor: int) -> Path:
         raw = fcntl.fcntl(descriptor, fcntl.F_GETPATH, b"\0" * 1024)
         assert isinstance(raw, bytes)
         return Path(raw.split(b"\0", 1)[0].decode())
+
+
+def test_default_execution_lease_uses_the_installed_distribution_script(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "project"
+    user = tmp_path / "user"
+    store = ExtensionStore(project, user_root=user)
+    site_packages = tmp_path / "wheel-environment" / "lib" / "python3.12" / "site-packages"
+    executable = tmp_path / "wheel-environment" / "bin" / "sanka-extension-drf-to-fastapi"
+    executable.parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    distribution = SimpleNamespace(
+        files=(metadata.PackagePath("../../../bin/sanka-extension-drf-to-fastapi"),),
+        locate_file=lambda relative: site_packages / relative,
+        metadata={"Name": "sanka-extension-drf-to-fastapi"},
+        version="0.1.0a1",
+    )
+    entry = LockEntry(
+        id="sanka/drf-to-fastapi",
+        version="0.1.0a1",
+        marketplace_identity="github.com/sankaHQ/extensions",
+        snapshot_digest="1" * 40,
+        manifest_digest="sha256:" + "2" * 64,
+        distribution="sanka-extension-drf-to-fastapi",
+        artifact_digest=store._distribution_digest(distribution),
+        protocol_version="sanka-extension/v1",
+        executable="sanka-extension-drf-to-fastapi",
+        commands=("apply", "plan", "scan", "test", "verify"),
+        enabled=True,
+        configuration_digest="sha256:" + "3" * 64,
+    )
+    monkeypatch.setattr(store, "resolve_locked", lambda _extension_id: entry)
+    monkeypatch.setattr(extension_store.metadata, "distribution", lambda _name: distribution)
+
+    with store.execution_lease(entry) as descriptor:
+        assert _descriptor_path(descriptor).resolve() == executable.resolve()
 
 
 def _wheel(

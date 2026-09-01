@@ -911,7 +911,7 @@ class ExtensionStore:
                 extension_id=entry.id,
             )
         if entry.id == DEFAULT_EXTENSION_ID:
-            executable = Path(sys.executable).resolve().parent / entry.executable
+            executable = _default_executable(entry)
         else:
             executable = (
                 self.user_root
@@ -3114,6 +3114,42 @@ class ExtensionStore:
                 extension_id=extension_id,
             )
         return entry
+
+
+def _default_executable(entry: LockEntry) -> Path:
+    try:
+        distribution = metadata.distribution(entry.distribution)
+    except metadata.PackageNotFoundError as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_NOT_CACHED",
+            "Default extension distribution is not installed",
+            details={"distribution": entry.distribution},
+        ) from error
+    if (
+        _normalized_distribution(distribution.metadata.get("Name", ""))
+        != _normalized_distribution(entry.distribution)
+        or distribution.version != entry.version
+        or ExtensionStore._distribution_digest(distribution) != entry.artifact_digest
+    ):
+        _error(
+            "SANKA_EXTENSION_IDENTITY",
+            "Installed default extension does not match the project lock",
+            distribution=entry.distribution,
+        )
+    scripts = [
+        relative
+        for relative in distribution.files or ()
+        if PurePosixPath(str(relative).replace("\\", "/")).parts[-2:]
+        in {("bin", entry.executable), ("Scripts", entry.executable)}
+    ]
+    if len(scripts) != 1:
+        _error(
+            "SANKA_EXTENSION_NOT_CACHED",
+            "Installed default extension does not expose its exact executable",
+            executable=entry.executable,
+        )
+    located = cast(str | os.PathLike[str], distribution.locate_file(scripts[0]))
+    return Path(os.path.abspath(located))
 
 
 __all__ = [
