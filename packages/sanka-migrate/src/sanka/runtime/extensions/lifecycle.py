@@ -376,24 +376,34 @@ class ApplicationLifecycle:
             return self._scan_locked(
                 fingerprint,
                 recommendations,
+                self._scan_locks(recommendations),
                 normalized,
                 explicit_env_names,
             )
+
+    def _scan_locks(
+        self,
+        recommendations: tuple[Recommendation, ...],
+    ) -> tuple[LockEntry, ...]:
+        locks: list[LockEntry] = []
+        for recommendation in self._enabled(recommendations):
+            if "scan" not in recommendation.commands:
+                continue
+            lock = self.store.resolve_locked(recommendation.id)
+            self._verify_selection(lock, recommendation)
+            locks.append(lock)
+        return tuple(locks)
 
     def _scan_locked(
         self,
         fingerprint: Fingerprint,
         recommendations: tuple[Recommendation, ...],
+        locks: tuple[LockEntry, ...],
         normalized: dict[str, Any],
         explicit_env_names: tuple[str, ...],
     ) -> ExtensionResult:
-        enabled = self._enabled(recommendations)
         extension_results: list[tuple[LockEntry, ExtensionResult]] = []
-        for recommendation in enabled:
-            if "scan" not in recommendation.commands:
-                continue
-            lock = self.store.resolve_locked(recommendation.id)
-            self._verify_selection(lock, recommendation)
+        for lock in locks:
             request = self._request(lock, "scan", fingerprint, normalized)
             extension_root = Path(request["artifact_root"])
             with self.store.execution_lease(lock) as executable_fd:
@@ -419,7 +429,11 @@ class ApplicationLifecycle:
             data["extension"] = extension_result.data
         data["fingerprint"] = _fingerprint(fingerprint)
         data["recommendations"] = [_recommendation(item) for item in recommendations]
-        scan_payload = {"schema_version": SCAN_SCHEMA, **data}
+        scan_payload = {
+            "schema_version": SCAN_SCHEMA,
+            "configuration": normalized,
+            **data,
+        }
         scan_path = _write_json(self.artifact_root / "scan.json", scan_payload)
         return ExtensionResult(
             outcome="success",
@@ -439,27 +453,42 @@ class ApplicationLifecycle:
             error=None,
         )
 
-    def _current_scan(
+    def _current_scan_locked(
         self,
-        configuration: Mapping[str, Any] | None,
+        fingerprint: Fingerprint,
+        recommendations: tuple[Recommendation, ...],
+        normalized: dict[str, Any],
         explicit_env_names: tuple[str, ...],
-    ) -> tuple[Fingerprint, tuple[Recommendation, ...]]:
-        fingerprint = fingerprint_repository(self.project_root)
+    ) -> None:
+        locks = self._scan_locks(recommendations)
+        expected_locks = [lock.to_dict() for lock in locks]
         try:
             scan = _read_json(self.artifact_root / "scan.json", SCAN_SCHEMA)
         except ExtensionError:
-            self.scan(
-                configuration=configuration,
-                explicit_env_names=explicit_env_names,
-            )
+            pass
         else:
             saved = scan.get("fingerprint")
-            if not isinstance(saved, dict) or saved.get("hash") != fingerprint.hash:
-                self.scan(
-                    configuration=configuration,
-                    explicit_env_names=explicit_env_names,
-                )
-        return fingerprint, self._recommendations(fingerprint)
+            extensions = scan.get("extensions")
+            saved_locks = (
+                [item.get("extension") for item in extensions]
+                if isinstance(extensions, list)
+                and all(isinstance(item, dict) for item in extensions)
+                else None
+            )
+            if (
+                isinstance(saved, dict)
+                and saved.get("hash") == fingerprint.hash
+                and scan.get("configuration") == normalized
+                and saved_locks == expected_locks
+            ):
+                return
+        self._scan_locked(
+            fingerprint,
+            recommendations,
+            locks,
+            normalized,
+            explicit_env_names,
+        )
 
     def plan(
         self,
@@ -469,14 +498,24 @@ class ApplicationLifecycle:
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
         normalized = _normalized_json_object(configuration)
-        fingerprint, _recommendations = self._current_scan(
-            normalized,
-            explicit_env_names,
+        fingerprint = fingerprint_repository(self.project_root)
+        self._ensure_enabled(
+            fingerprint,
+            self._recommendations(fingerprint),
         )
         with self.store.execution_guard():
+            recommendations = self._recommendations(fingerprint)
+            if recommendations and not self._enabled(recommendations):
+                self._required(fingerprint, recommendations)
+            self._current_scan_locked(
+                fingerprint,
+                recommendations,
+                normalized,
+                explicit_env_names,
+            )
             return self._plan_locked(
                 fingerprint,
-                self._recommendations(fingerprint),
+                recommendations,
                 target,
                 normalized,
                 explicit_env_names,

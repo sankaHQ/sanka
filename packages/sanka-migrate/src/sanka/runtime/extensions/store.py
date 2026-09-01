@@ -2092,7 +2092,14 @@ class ExtensionStore:
     @staticmethod
     def _wheel_install_path(info: zipfile.ZipInfo, artifact: str) -> PurePosixPath:
         parts = PurePosixPath(info.filename).parts
-        if parts and parts[0].endswith(".data"):
+        identity = _wheel_identity(artifact)
+        if identity is None:
+            _error(
+                "SANKA_EXTENSION_ARTIFACT_INVALID",
+                "Only valid Python wheels may be installed",
+                artifact=artifact,
+            )
+        if parts and parts[0] == f"{identity[0]}-{identity[1]}.data":
             scheme = parts[1] if len(parts) > 1 else ""
             if len(parts) < 3 or scheme != "purelib":
                 _error(
@@ -2308,6 +2315,7 @@ class ExtensionStore:
         wheels: tuple[tuple[Path, str], ...],
     ) -> dict[str, tuple[int, str]]:
         records: dict[str, tuple[int, str]] = {}
+        installed_paths: set[str] = set()
         for path, expected_sha256 in wheels:
             if _store_file_sha256(self.user_root, path) != expected_sha256:
                 _error(
@@ -2323,17 +2331,18 @@ class ExtensionStore:
                     if info.is_dir():
                         continue
                     relative = self._wheel_install_path(info, path.name)
-                    if any(part.endswith(".dist-info") for part in relative.parts) and (
-                        relative.name == "RECORD"
-                    ):
-                        continue
                     name = relative.as_posix()
-                    if name in records:
+                    if name in installed_paths:
                         _error(
                             "SANKA_EXTENSION_ARTIFACT_INVALID",
                             "Extension wheels install duplicate import paths",
                             path=name,
                         )
+                    installed_paths.add(name)
+                    if any(part.endswith(".dist-info") for part in relative.parts) and (
+                        relative.name == "RECORD"
+                    ):
+                        continue
                     digest = hashlib.sha256()
                     with archive.open(info) as member:
                         for chunk in iter(lambda: member.read(1024 * 1024), b""):
@@ -2692,6 +2701,11 @@ class ExtensionStore:
                 cached = tuple(self._cache_wheel(wheel) for wheel in manifest.wheels)
                 for path, wheel in zip(cached, manifest.wheels, strict=True):
                     self._inspect_wheel(path, wheel, manifest, declared)
+                verified_wheels = tuple(
+                    (path, wheel.sha256)
+                    for path, wheel in zip(cached, manifest.wheels, strict=True)
+                )
+                self._wheel_import_records(verified_wheels)
                 artifact_digest = self._manifest_artifact_digest(manifest)
                 prior = next(
                     (
@@ -2709,10 +2723,7 @@ class ExtensionStore:
                 environment = self._materialize_environment(
                     artifact_digest,
                     manifest.executable,
-                    tuple(
-                        (path, wheel.sha256)
-                        for path, wheel in zip(cached, manifest.wheels, strict=True)
-                    ),
+                    verified_wheels,
                     expected_digest=(
                         prior.get("environment_digest") if isinstance(prior, dict) else None
                     ),

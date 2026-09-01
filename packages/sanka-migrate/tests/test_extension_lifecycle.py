@@ -292,6 +292,52 @@ def test_plan_auto_scan_receives_the_normalized_configuration_and_explicit_envir
     assert runner.explicit_env_names[0] == ("DJANGO_SECRET_KEY",)
 
 
+def test_plan_refreshes_an_existing_scan_for_changed_configuration(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    lifecycle.scan(configuration={"settings_module": "config.dev"})
+
+    lifecycle.plan(
+        target="fastapi",
+        configuration={"settings_module": "config.prod"},
+    )
+
+    assert [request["command"] for _lock, request in runner.calls] == [
+        "scan",
+        "scan",
+        "plan",
+    ]
+    assert runner.calls[1][1]["configuration"] == {"settings_module": "config.prod"}
+    scan = json.loads((project / ".sanka" / "scan.json").read_text())
+    assert scan["configuration"] == {"settings_module": "config.prod"}
+
+
+def test_plan_refreshes_an_existing_scan_after_a_legitimate_repin(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    store = FakeStore(installed=True)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, store, runner)
+    lifecycle.scan()
+    store.lock = replace(
+        store.lock,
+        version="0.2.0",
+        snapshot_digest="9" * 40,
+        manifest_digest="sha256:" + "8" * 64,
+        artifact_digest="7" * 64,
+    )
+
+    lifecycle.plan(target="fastapi")
+
+    assert [(request["command"], lock.version) for lock, request in runner.calls] == [
+        ("scan", "0.1.0a1"),
+        ("scan", "0.2.0"),
+        ("plan", "0.2.0"),
+    ]
+    scan = json.loads((project / ".sanka" / "scan.json").read_text())
+    assert scan["extensions"][0]["extension"] == store.lock.to_dict()
+
+
 def test_scan_dispatches_every_scan_capable_lock_under_its_exact_identity(
     tmp_path: Path,
 ) -> None:

@@ -52,8 +52,9 @@ def _wheel(
     tag: str = "py3-none-any",
     cli_source: str = "def main():\n    return 0\n",
     data_scheme: str | None = None,
+    extra_members: tuple[tuple[str, str], ...] = (),
 ) -> tuple[str, bytes, str]:
-    normalized = distribution.replace("-", "_")
+    normalized = distribution.replace("-", "_").replace(".", "_")
     name = f"{normalized}-{version}-{tag}.whl"
     dist_info = f"{normalized}-{version}.dist-info"
     metadata = [
@@ -86,6 +87,8 @@ def _wheel(
                 f"{normalized}-{version}.data/{data_scheme}/{normalized}/from_data.py",
                 f"SCHEME = {data_scheme!r}\n",
             )
+        for path, contents in extra_members:
+            archive.writestr(path, contents)
     data = output.getvalue()
     return name, data, hashlib.sha256(data).hexdigest()
 
@@ -115,6 +118,7 @@ def _marketplace(
     purelib: bool = True,
     cli_source: str = "def main():\n    return 0\n",
     data_scheme: str | None = None,
+    extra_members: tuple[tuple[str, str], ...] = (),
 ) -> tuple[Path, bytes]:
     root.mkdir(parents=True, exist_ok=True)
     wheel_name, wheel, digest = _wheel(
@@ -125,6 +129,7 @@ def _marketplace(
         purelib=purelib,
         cli_source=cli_source,
         data_scheme=data_scheme,
+        extra_members=extra_members,
     )
     manifest_name = extension_id.replace("/", "-") + ".json"
     (root / "marketplace.json").write_text(
@@ -660,6 +665,124 @@ def test_purelib_data_scheme_is_installed_and_verified(
     )
     assert installed.read_text(encoding="utf-8") == "SCHEME = 'purelib'\n"
     assert store.resolve_locked("example/demo") == lock
+
+
+@pytest.mark.parametrize("distribution", ["example-demo", "example_demo", "example.demo"])
+def test_only_the_exact_normalized_prerelease_wheel_data_root_is_relocated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    distribution: str,
+) -> None:
+    normalized = "example_demo"
+    source, wheel = _marketplace(
+        tmp_path / "source",
+        version="1.2.0rc1",
+        distribution=distribution,
+        data_scheme="purelib",
+        extra_members=(
+            ("README.data", "ordinary file\n"),
+            ("assets.data/templates/x.txt", "ordinary directory\n"),
+            ("other-9.9.data/purelib/mismatched.py", "MISMATCHED = True\n"),
+        ),
+    )
+    name = f"{normalized}-1.2.0rc1-py3-none-any.whl"
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+    manifest = load_marketplace(store.marketplaces()[0].snapshot_root)[0]
+    artifact = manifest.wheels[0]
+    cached = store._cache_wheel(artifact)
+    store._inspect_wheel(cached, artifact, manifest, {normalized: "1.2.0rc1"})
+
+    records = store._wheel_import_records(((cached, artifact.sha256),))
+
+    assert f"{normalized}/from_data.py" in records
+    assert "README.data" in records
+    assert "assets.data/templates/x.txt" in records
+    assert "other-9.9.data/purelib/mismatched.py" in records
+
+
+@pytest.mark.parametrize(
+    "destination",
+    ["shared.py", "example_demo-0.1.0.dist-info/RECORD"],
+)
+def test_ordinary_and_purelib_destination_collision_is_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    destination: str,
+) -> None:
+    ordinary = () if destination.endswith("/RECORD") else ((destination, "ORDINARY = True\n"),)
+    source, wheel = _marketplace(
+        tmp_path / "source",
+        extra_members=(
+            *ordinary,
+            (f"example_demo-0.1.0.data/purelib/{destination}", "RELOCATED = True\n"),
+        ),
+    )
+    name = "example_demo-0.1.0-py3-none-any.whl"
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        raise AssertionError("colliding wheel reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.details == {"path": destination}
+
+
+def test_cross_wheel_destination_collision_is_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, _ = _marketplace(tmp_path / "source")
+    primary_name, primary, primary_digest = _wheel(
+        "example-demo",
+        "0.1.0",
+        "example-demo",
+        requires=("example-sdk==1.0.0",),
+        extra_members=(("shared.py", "PRIMARY = True\n"),),
+    )
+    sdk_name, sdk, sdk_digest = _wheel(
+        "example-sdk",
+        "1.0.0",
+        "example-sdk",
+        extra_members=(("shared.py", "DEPENDENCY = True\n"),),
+    )
+    manifest_path = next(path for path in source.glob("*.json") if path.name != "marketplace.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wheels"] = [
+        {
+            "name": primary_name,
+            "url": f"https://fixtures.invalid/{primary_name}",
+            "sha256": primary_digest,
+        },
+        {
+            "name": sdk_name,
+            "url": f"https://fixtures.invalid/{sdk_name}",
+            "sha256": sdk_digest,
+        },
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {primary_name: primary, sdk_name: sdk})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        raise AssertionError("colliding wheels reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.details == {"path": "shared.py"}
 
 
 def test_declared_dependency_version_must_satisfy_requires_dist(
