@@ -144,6 +144,46 @@ def test_default_execution_lease_uses_the_installed_distribution_script(
         assert _descriptor_path(descriptor).resolve() == executable.resolve()
 
 
+def test_default_execution_lease_closes_executable_when_parent_close_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, entry, executable = _installed_default(tmp_path, monkeypatch, _CANONICAL_SCRIPT)
+    original_open = os.open
+    original_close = os.close
+    executable_descriptor: int | None = None
+    injected = False
+
+    def tracking_open(path: str | bytes | Path, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal executable_descriptor
+        descriptor = original_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+        if path == executable.name and kwargs.get("dir_fd") is not None:
+            executable_descriptor = descriptor
+        return descriptor
+
+    def failing_close(descriptor: int) -> None:
+        nonlocal injected
+        original_close(descriptor)
+        if (
+            executable_descriptor is not None
+            and descriptor != executable_descriptor
+            and not injected
+        ):
+            injected = True
+            raise OSError("injected parent close failure")
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "close", failing_close)
+
+    with pytest.raises(ExtensionError) as raised, store.execution_lease(entry):
+        pass
+
+    assert raised.value.code == "SANKA_EXTENSION_NOT_CACHED"
+    assert executable_descriptor is not None
+    with pytest.raises(OSError):
+        os.fstat(executable_descriptor)
+
+
 def test_default_execution_rejects_a_symlinked_script_directory_escape(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -921,33 +921,35 @@ class ExtensionStore:
                 / ("Scripts" if os.name == "nt" else "bin")
                 / entry.executable
             )
+        descriptor: int | None = None
         try:
-            if entry.id == DEFAULT_EXTENSION_ID:
-                environment = executable.parent.parent
-                environment_descriptor = os.open(environment, _DIRECTORY_FLAGS)
-                try:
-                    with _directory_at(
-                        environment_descriptor,
-                        executable.parent.name,
-                        executable.parent,
-                    ) as script_directory:
-                        assert script_directory is not None
-                        descriptor = os.open(
-                            executable.name,
-                            _FILE_FLAGS,
-                            dir_fd=script_directory,
-                        )
-                finally:
-                    _close_descriptor(environment_descriptor)
-            else:
-                descriptor = os.open(executable, _FILE_FLAGS)
-        except OSError as error:
-            raise ExtensionError(
-                "SANKA_EXTENSION_NOT_CACHED",
-                "Verified extension executable could not be leased",
-                details={"path": str(executable), "reason": str(error)},
-            ) from error
-        try:
+            try:
+                if entry.id == DEFAULT_EXTENSION_ID:
+                    environment = executable.parent.parent
+                    environment_descriptor = os.open(environment, _DIRECTORY_FLAGS)
+                    try:
+                        with _directory_at(
+                            environment_descriptor,
+                            executable.parent.name,
+                            executable.parent,
+                        ) as script_directory:
+                            assert script_directory is not None
+                            descriptor = os.open(
+                                executable.name,
+                                _FILE_FLAGS,
+                                dir_fd=script_directory,
+                            )
+                    finally:
+                        _close_descriptor(environment_descriptor)
+                else:
+                    descriptor = os.open(executable, _FILE_FLAGS)
+            except OSError as error:
+                raise ExtensionError(
+                    "SANKA_EXTENSION_NOT_CACHED",
+                    "Verified extension executable could not be leased",
+                    details={"path": str(executable), "reason": str(error)},
+                ) from error
+            assert descriptor is not None
             try:
                 opened = os.fstat(descriptor)
                 linked = executable.lstat()
@@ -970,7 +972,8 @@ class ExtensionStore:
                 )
             yield descriptor
         finally:
-            _close_descriptor(descriptor)
+            if descriptor is not None:
+                _close_descriptor(descriptor)
 
     @staticmethod
     def _real_root(path: Path, label: str) -> Path:
