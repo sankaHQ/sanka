@@ -51,6 +51,7 @@ def _wheel(
     purelib: bool = True,
     tag: str = "py3-none-any",
     cli_source: str = "def main():\n    return 0\n",
+    data_scheme: str | None = None,
 ) -> tuple[str, bytes, str]:
     normalized = distribution.replace("-", "_")
     name = f"{normalized}-{version}-{tag}.whl"
@@ -80,6 +81,11 @@ def _wheel(
             f"[console_scripts]\n{executable} = {normalized}.cli:main\n",
         )
         archive.writestr(f"{dist_info}/RECORD", "")
+        if data_scheme is not None:
+            archive.writestr(
+                f"{normalized}-{version}.data/{data_scheme}/{normalized}/from_data.py",
+                f"SCHEME = {data_scheme!r}\n",
+            )
     data = output.getvalue()
     return name, data, hashlib.sha256(data).hexdigest()
 
@@ -108,6 +114,7 @@ def _marketplace(
     requires: tuple[str, ...] = (),
     purelib: bool = True,
     cli_source: str = "def main():\n    return 0\n",
+    data_scheme: str | None = None,
 ) -> tuple[Path, bytes]:
     root.mkdir(parents=True, exist_ok=True)
     wheel_name, wheel, digest = _wheel(
@@ -117,6 +124,7 @@ def _marketplace(
         requires=requires,
         purelib=purelib,
         cli_source=cli_source,
+        data_scheme=data_scheme,
     )
     manifest_name = extension_id.replace("/", "-") + ".json"
     (root / "marketplace.json").write_text(
@@ -578,6 +586,80 @@ def test_native_tag_is_rejected_even_when_wheel_claims_purelib(
         store.add_extension("example/demo")
 
     assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+
+
+@pytest.mark.parametrize("scheme", ["scripts", "data", "platlib", "headers", "unknown"])
+def test_non_purelib_data_scheme_in_dependency_is_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scheme: str,
+) -> None:
+    source, _ = _marketplace(tmp_path / "source")
+    primary_name, primary, primary_digest = _wheel(
+        "example-demo",
+        "0.1.0",
+        "example-demo",
+        requires=("example-sdk==1.0.0",),
+    )
+    sdk_name, sdk, sdk_digest = _wheel(
+        "example-sdk",
+        "1.0.0",
+        "example-sdk",
+        data_scheme=scheme,
+    )
+    manifest_path = next(path for path in source.glob("*.json") if path.name != "marketplace.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wheels"] = [
+        {
+            "name": primary_name,
+            "url": f"https://fixtures.invalid/{primary_name}",
+            "sha256": primary_digest,
+        },
+        {
+            "name": sdk_name,
+            "url": f"https://fixtures.invalid/{sdk_name}",
+            "sha256": sdk_digest,
+        },
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {primary_name: primary, sdk_name: sdk})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        raise AssertionError("unsupported wheel reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.details == {"artifact": sdk_name, "scheme": scheme}
+
+
+def test_purelib_data_scheme_is_installed_and_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source", data_scheme="purelib")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
+
+    lock = store.add_extension("example/demo")
+
+    installed = (
+        store.user_root
+        / "environments"
+        / lock.artifact_digest
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+        / "example_demo"
+        / "from_data.py"
+    )
+    assert installed.read_text(encoding="utf-8") == "SCHEME = 'purelib'\n"
+    assert store.resolve_locked("example/demo") == lock
 
 
 def test_declared_dependency_version_must_satisfy_requires_dist(

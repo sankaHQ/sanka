@@ -2089,6 +2089,21 @@ class ExtensionStore:
             )
         return archive.read(matches[0])
 
+    @staticmethod
+    def _wheel_install_path(info: zipfile.ZipInfo, artifact: str) -> PurePosixPath:
+        parts = PurePosixPath(info.filename).parts
+        if parts and parts[0].endswith(".data"):
+            scheme = parts[1] if len(parts) > 1 else ""
+            if len(parts) < 3 or scheme != "purelib":
+                _error(
+                    "SANKA_EXTENSION_ARTIFACT_INVALID",
+                    "Extension wheel uses an unsupported .data installation scheme",
+                    artifact=artifact,
+                    scheme=scheme,
+                )
+            return PurePosixPath(*parts[2:])
+        return PurePosixPath(*parts)
+
     def _inspect_wheel(
         self,
         path: Path,
@@ -2137,6 +2152,9 @@ class ExtensionStore:
                         "Extension wheel members are unsafe",
                         artifact=wheel.name,
                     )
+                for info in members:
+                    if not info.is_dir():
+                        self._wheel_install_path(info, wheel.name)
                 package = BytesParser().parsebytes(
                     self._zip_member(archive, ".dist-info/METADATA", wheel.name)
                 )
@@ -2304,13 +2322,7 @@ class ExtensionStore:
                 for info in archive.infolist():
                     if info.is_dir():
                         continue
-                    parts = PurePosixPath(info.filename).parts
-                    if parts and parts[0].endswith(".data"):
-                        if len(parts) < 3 or parts[1] != "purelib":
-                            continue
-                        relative = PurePosixPath(*parts[2:])
-                    else:
-                        relative = PurePosixPath(*parts)
+                    relative = self._wheel_install_path(info, path.name)
                     if any(part.endswith(".dist-info") for part in relative.parts) and (
                         relative.name == "RECORD"
                     ):
