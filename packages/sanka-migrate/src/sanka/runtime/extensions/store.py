@@ -517,6 +517,16 @@ def _create_venv(
 def _normalize_venv_launchers(environment_descriptor: int) -> None:
     if os.name == "nt":
         return
+    with suppress(FileNotFoundError):
+        alias = os.stat("lib64", dir_fd=environment_descriptor, follow_symlinks=False)
+        if stat.S_ISLNK(alias.st_mode):
+            if Path(os.readlink("lib64", dir_fd=environment_descriptor)) != Path("lib"):
+                _error(
+                    "SANKA_EXTENSION_PATH",
+                    "Virtual environment library alias is not verifiable",
+                    path="lib64",
+                )
+            os.unlink("lib64", dir_fd=environment_descriptor)
     interpreter = Path(sys.executable).resolve()
     names = ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}")
     with _directory_at(environment_descriptor, "bin", Path("bin")) as bin_descriptor:

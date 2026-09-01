@@ -1451,6 +1451,39 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+def test_venv_normalization_removes_the_standard_linux_lib64_alias(tmp_path: Path) -> None:
+    environment = tmp_path / "environment"
+    (environment / "bin").mkdir(parents=True)
+    (environment / "lib").mkdir()
+    alias = environment / "lib64"
+    alias.symlink_to("lib", target_is_directory=True)
+
+    descriptor = os.open(environment, os.O_RDONLY)
+    try:
+        extension_store._normalize_venv_launchers(descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert not alias.exists() and not alias.is_symlink()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+def test_venv_normalization_rejects_a_nonstandard_lib64_alias(tmp_path: Path) -> None:
+    environment = tmp_path / "environment"
+    (environment / "bin").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (environment / "lib64").symlink_to(outside, target_is_directory=True)
+
+    descriptor = os.open(environment, os.O_RDONLY)
+    try:
+        with pytest.raises(ExtensionError, match="library alias"):
+            extension_store._normalize_venv_launchers(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
 def test_real_posix_materializer_installs_without_a_venv_test_hook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
