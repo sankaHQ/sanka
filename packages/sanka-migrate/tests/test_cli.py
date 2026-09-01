@@ -194,6 +194,27 @@ def test_extension_errors_preserve_stable_code_and_details(
     }
 
 
+def test_extension_invalid_store_path_emits_one_clean_json_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    invalid_home = tmp_path / "sanka-home"
+    invalid_home.write_text("not a directory", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SANKA_HOME", str(invalid_home))
+
+    assert main(["extension", "list", "--json"]) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
+    assert captured.out.count('"schema_version"') == 1
+    assert payload["schema_version"] == "sanka-cli/v1"
+    assert payload["command"] == "extension"
+    assert payload["data"]["error"]["code"] == "SANKA_EXTENSION_PATH"
+
+
 def test_sdk_command_parser_errors_use_the_versioned_json_contract(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -16,7 +16,7 @@ import tempfile
 import venv
 import zipfile
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from email.parser import BytesParser
 from importlib import metadata
@@ -30,6 +30,7 @@ from sanka.runtime.extensions.discovery import (
     STATUS_ORDER,
     _compatible,
     _normalized_distribution,
+    _valid_specifier,
     _wheel_identity,
     load_marketplace,
 )
@@ -42,12 +43,16 @@ DEFAULT_EXTENSION_ID = "sanka/drf-to-fastapi"
 MAX_WHEEL_BYTES = 128 * 1024 * 1024
 MAX_WHEEL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_WHEEL_METADATA_BYTES = 1024 * 1024
+MAX_WHEEL_MEMBERS = 10_000
 MARKETPLACE_SCHEMA = "sanka-extension-marketplaces/v1"
 INSTALLATION_SCHEMA = "sanka-extension-installations/v1"
 LOCK_SCHEMA = "sanka-extension-lock/v1"
 _COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 _ENTRY_POINT = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
-_REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_REQUIREMENT = re.compile(
+    r"(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?:\s*(?:\((?P<parenthesized>[^()]*)\)|(?P<bare>(?:<=|>=|==|<|>).+)))?"
+)
 
 
 def user_extension_root() -> Path:
@@ -59,9 +64,61 @@ def _error(code: str, message: str, **details: Any) -> NoReturn:
     raise ExtensionError(code, message, details=details)
 
 
-def _sha256_file(path: Path) -> str:
+@contextmanager
+def _regular_file(path: Path, *, require_single_link: bool = True) -> Iterator[Any]:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = path.lstat()
+        descriptor = os.open(path, flags)
+    except (FileNotFoundError, OSError) as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_PATH",
+            "Extension cache path must be a regular file",
+            details={"path": str(path)},
+        ) from error
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not stat.S_ISREG(opened.st_mode)
+            or before.st_dev != opened.st_dev
+            or before.st_ino != opened.st_ino
+            or (require_single_link and before.st_nlink != 1)
+            or (require_single_link and opened.st_nlink != 1)
+        ):
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension artifact path must be one regular file",
+                path=str(path),
+            )
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            yield source
+        after = path.lstat()
+        if (
+            after.st_dev != opened.st_dev
+            or after.st_ino != opened.st_ino
+            or (require_single_link and after.st_nlink != 1)
+        ):
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension cache path changed while it was being read",
+                path=str(path),
+            )
+    except ExtensionError:
+        raise
+    except OSError as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_PATH",
+            "Extension artifact path changed or became unreadable",
+            details={"path": str(path)},
+        ) from error
+    finally:
+        os.close(descriptor)
+
+
+def _sha256_file(path: Path, *, require_single_link: bool = True) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as source:
+    with _regular_file(path, require_single_link=require_single_link) as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -80,7 +137,7 @@ def _installation_sort_key(value: dict[str, Any]) -> str:
 
 
 def _tree_digest(root: Path) -> str:
-    digest = hashlib.sha256()
+    records: list[dict[str, object]] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix()
         item = path.lstat()
@@ -90,14 +147,18 @@ def _tree_digest(root: Path) -> str:
                 "Marketplace snapshots may contain only real directories and regular files",
                 path=relative,
             )
-        digest.update(("d\0" if path.is_dir() else "f\0").encode())
-        digest.update(relative.encode())
-        digest.update(b"\0")
         if path.is_file():
-            with path.open("rb") as source:
-                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(chunk)
-    return f"sha256:{digest.hexdigest()}"
+            records.append(
+                {
+                    "type": "file",
+                    "path": relative,
+                    "size": item.st_size,
+                    "sha256": _sha256_file(path),
+                }
+            )
+        else:
+            records.append({"type": "directory", "path": relative, "size": 0, "sha256": None})
+    return content_hash(records)
 
 
 def _canonical_source(source: str | Path) -> tuple[str, str, str]:
@@ -208,55 +269,141 @@ class LockEntry:
         return asdict(self)
 
 
-def _atomic_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=path.name + ".", suffix=".tmp", dir=path.parent
-    )
-    temporary = Path(temporary_name)
+def _exact_path(
+    root: Path,
+    candidate: Path,
+    *,
+    must_exist: bool = False,
+    expected: Path | None = None,
+) -> Path:
     try:
+        root_status = root.lstat()
+        relative = candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_PATH",
+            "Extension path cannot be placed inside its store",
+            details={"path": str(candidate)},
+        ) from error
+    if (
+        stat.S_ISLNK(root_status.st_mode)
+        or not stat.S_ISDIR(root_status.st_mode)
+        or (expected is not None and candidate != expected)
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        _error(
+            "SANKA_EXTENSION_PATH",
+            "Extension path does not have its exact store placement",
+            path=str(candidate),
+        )
+    current = root
+    missing = False
+    for index, part in enumerate(relative.parts):
+        current /= part
+        try:
+            status = current.lstat()
+        except FileNotFoundError:
+            missing = True
+            if must_exist:
+                _error(
+                    "SANKA_EXTENSION_PATH",
+                    "Required extension path does not exist",
+                    path=str(candidate),
+                )
+            continue
+        except OSError as error:
+            raise ExtensionError(
+                "SANKA_EXTENSION_PATH",
+                "Extension path cannot be inspected",
+                details={"path": str(current)},
+            ) from error
+        if missing or stat.S_ISLNK(status.st_mode):
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension paths cannot contain symlinks or redirections",
+                path=str(current),
+            )
+        if index < len(relative.parts) - 1 and not stat.S_ISDIR(status.st_mode):
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension path parent must be a directory",
+                path=str(current),
+            )
+        if stat.S_ISREG(status.st_mode) and status.st_nlink != 1:
+            _error(
+                "SANKA_EXTENSION_PATH",
+                "Extension state and cache files cannot have multiple links",
+                path=str(current),
+            )
+    return candidate
+
+
+def _atomic_json(path: Path, payload: object) -> None:
+    temporary: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=path.name + ".", suffix=".tmp", dir=path.parent
+        )
+        temporary = Path(temporary_name)
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
             json.dump(payload, output, ensure_ascii=False, indent=2, sort_keys=True)
             output.write("\n")
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
+    except OSError as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_IO",
+            "Extension state could not be written atomically",
+            details={"path": str(path), "reason": str(error)},
+        ) from error
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
 
 
 @contextmanager
 def _locked(root: Path, path: Path) -> Iterator[None]:
-    try:
-        parent = path.parent.resolve()
-    except (OSError, RuntimeError, ValueError) as error:
-        raise ExtensionError(
-            "SANKA_EXTENSION_PATH",
-            "Extension lock parent cannot be resolved inside its store",
-            details={"path": str(path.parent)},
-        ) from error
-    if not parent.is_relative_to(root):
-        _error("SANKA_EXTENSION_PATH", "Extension lock escapes its store", path=str(path))
+    _exact_path(root, path, expected=path)
+    parent = path.parent
     lock_path = path.with_name(path.name + ".lock")
-    if lock_path.is_symlink():
-        _error("SANKA_EXTENSION_PATH", "Extension lock cannot be a symlink", path=str(lock_path))
-    parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(
-        lock_path,
-        os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
+    _exact_path(root, lock_path, expected=lock_path)
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        parent.mkdir(parents=True, exist_ok=True)
+        _exact_path(root, parent, must_exist=True, expected=parent)
+        descriptor = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_IO",
+            "Extension mutation lock could not be opened",
+            details={"path": str(lock_path), "reason": str(error)},
+        ) from error
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
             _error(
                 "SANKA_EXTENSION_PATH",
-                "Extension lock must be a regular file",
+                "Extension lock must be one regular file",
                 path=str(lock_path),
             )
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        except OSError as error:
+            raise ExtensionError(
+                "SANKA_EXTENSION_IO",
+                "Extension mutation lock could not be acquired",
+                details={"path": str(lock_path), "reason": str(error)},
+            ) from error
         yield
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        with suppress(OSError):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
 
 
@@ -274,40 +421,47 @@ class ExtensionStore:
     @staticmethod
     def _real_root(path: Path, label: str) -> Path:
         path = path.expanduser()
-        if path.is_symlink():
+        try:
+            symlink = path.is_symlink()
+            path.mkdir(parents=True, exist_ok=True)
+            directory = path.is_dir()
+            resolved = path.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ExtensionError(
+                "SANKA_EXTENSION_PATH",
+                "Extension store root cannot be created or resolved",
+                details={"store": label, "path": str(path), "reason": str(error)},
+            ) from error
+        if symlink:
             _error(
                 "SANKA_EXTENSION_PATH",
                 "Extension store root cannot be a symlink",
                 store=label,
                 path=str(path),
             )
-        path.mkdir(parents=True, exist_ok=True)
-        if not path.is_dir():
+        if not directory:
             _error(
                 "SANKA_EXTENSION_PATH",
                 "Extension store root must be a directory",
                 store=label,
                 path=str(path),
             )
-        return path.resolve()
+        return resolved
 
     @staticmethod
-    def _confined(root: Path, candidate: Path, *, must_exist: bool = False) -> Path:
-        try:
-            resolved = candidate.resolve(strict=must_exist)
-        except (OSError, RuntimeError, ValueError) as error:
-            raise ExtensionError(
-                "SANKA_EXTENSION_PATH",
-                "Extension path cannot be resolved inside its store",
-                details={"path": str(candidate)},
-            ) from error
-        if not resolved.is_relative_to(root):
-            _error(
-                "SANKA_EXTENSION_PATH",
-                "Extension path escapes its store",
-                path=str(candidate),
-            )
-        return resolved
+    def _confined(
+        root: Path,
+        candidate: Path,
+        *,
+        must_exist: bool = False,
+        expected: Path | None = None,
+    ) -> Path:
+        return _exact_path(
+            root,
+            candidate,
+            must_exist=must_exist,
+            expected=expected,
+        )
 
     @staticmethod
     def _load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
@@ -331,14 +485,7 @@ class ExtensionStore:
 
     @classmethod
     def _state_path(cls, root: Path, path: Path) -> Path:
-        if path.is_symlink():
-            _error(
-                "SANKA_EXTENSION_PATH",
-                "Extension state path cannot be a symlink",
-                path=str(path),
-            )
-        cls._confined(root, path)
-        return path
+        return cls._confined(root, path, expected=path)
 
     def _raw_marketplaces(self) -> list[dict[str, Any]]:
         path = self._state_path(self.user_root, self._marketplace_path)
@@ -480,6 +627,12 @@ class ExtensionStore:
         destination = self._snapshot_destination(identity, digest)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
+            if not destination.is_dir() or _tree_digest(destination) != _tree_digest(source):
+                _error(
+                    "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
+                    "Existing immutable marketplace snapshot does not match staged content",
+                    path=str(destination),
+                )
             shutil.rmtree(source)
             return destination
         os.replace(source, destination)
@@ -629,7 +782,14 @@ class ExtensionStore:
                     root, digest = self._snapshot_git(source, identity)
                     raw["resolved_commit"], raw["content_digest"] = digest, None
                 elif kind == "local":
-                    root, digest = self._snapshot_local(Path(source), identity)
+                    current_kind, current_source, current_identity = _canonical_source(source)
+                    if current_kind != "local" or current_identity != identity:
+                        _error(
+                            "SANKA_MARKETPLACE_SOURCE_INVALID",
+                            "Local marketplace source no longer matches its trusted identity",
+                            source=source,
+                        )
+                    root, digest = self._snapshot_local(Path(current_source), identity)
                     raw["resolved_commit"], raw["content_digest"] = None, digest
                 else:
                     _error(
@@ -727,7 +887,12 @@ class ExtensionStore:
                     "Extension installation record is invalid",
                     path=str(self._installation_path),
                 )
-            self._confined(self.user_root, self.user_root / item["environment"])
+            environment = self.user_root / item["environment"]
+            self._confined(
+                self.user_root,
+                environment,
+                expected=self.user_root / "environments" / item["artifact_digest"],
+            )
             for wheel in item["wheels"]:
                 if (
                     not isinstance(wheel, dict)
@@ -742,7 +907,18 @@ class ExtensionStore:
                         "Extension installation wheel record is invalid",
                         path=str(self._installation_path),
                     )
-                self._confined(self.user_root, self.user_root / wheel["path"])
+                cached = self.user_root / wheel["path"]
+                if (
+                    cached.parent != self.user_root / "cache" / "wheels" / wheel["sha256"]
+                    or cached.name in {"", ".", ".."}
+                    or not cached.name.endswith(".whl")
+                ):
+                    _error(
+                        "SANKA_EXTENSION_PATH",
+                        "Extension wheel does not have its exact cache placement",
+                        path=str(cached),
+                    )
+                self._confined(self.user_root, cached, expected=cached)
             digests.append(item["artifact_digest"])
         if len(digests) != len(set(digests)):
             _error(
@@ -873,19 +1049,32 @@ class ExtensionStore:
         for marketplace, manifest in self._catalog():
             statuses = {"available"}
             lock = locks.get(manifest.id)
-            installed = any(item.get("id") == manifest.id for item in installations)
-            if manifest.id == DEFAULT_EXTENSION_ID and manifest.id not in disabled:
+            scoped_lock = (
+                lock
+                if lock is not None and lock.marketplace_identity == marketplace.identity
+                else None
+            )
+            installed = any(
+                item.get("id") == manifest.id
+                and item.get("marketplace_identity") == marketplace.identity
+                for item in installations
+            )
+            if (
+                manifest.id == DEFAULT_EXTENSION_ID
+                and manifest.id not in disabled
+                and scoped_lock is not None
+            ):
                 installed = (
                     installed or self._default_distribution(manifest, required=False) is not None
                 )
             if installed and manifest.id not in disabled:
                 statuses.add("installed")
-            if lock and lock.enabled:
+            if scoped_lock and scoped_lock.enabled:
                 statuses.add("locked")
                 if (
-                    lock.version != manifest.version
-                    or lock.snapshot_digest != marketplace.snapshot_digest
-                    or lock.manifest_digest != manifest.digest
+                    scoped_lock.version != manifest.version
+                    or scoped_lock.snapshot_digest != marketplace.snapshot_digest
+                    or scoped_lock.manifest_digest != manifest.digest
                 ):
                     statuses.add("update_available")
             if not _compatible(manifest.runtime_sanka_migrate, __version__):
@@ -942,14 +1131,23 @@ class ExtensionStore:
         )
 
     def _cache_wheel(self, wheel: Wheel) -> Path:
-        if not wheel.name.endswith(".whl") or _wheel_identity(wheel.name) is None:
+        filename_parts = wheel.name.removesuffix(".whl").split("-")
+        if (
+            not wheel.name.endswith(".whl")
+            or _wheel_identity(wheel.name) is None
+            or filename_parts[-2:] != ["none", "any"]
+        ):
             _error(
                 "SANKA_EXTENSION_ARTIFACT_INVALID",
                 "Only valid Python wheels may be installed",
                 artifact=wheel.name,
             )
         destination = self._wheel_cache_path(wheel)
-        if destination.exists():
+        try:
+            destination.lstat()
+        except FileNotFoundError:
+            pass
+        else:
             if _sha256_file(destination) != wheel.sha256:
                 _error(
                     "SANKA_EXTENSION_HASH_MISMATCH",
@@ -1036,7 +1234,7 @@ class ExtensionStore:
         path: Path,
         wheel: Wheel,
         manifest: Manifest,
-        declared: set[str],
+        declared: Mapping[str, str],
     ) -> None:
         identity = _wheel_identity(wheel.name)
         if identity is None:
@@ -1046,17 +1244,31 @@ class ExtensionStore:
                 artifact=wheel.name,
             )
         try:
-            with zipfile.ZipFile(path) as archive:
+            with _regular_file(path) as source, zipfile.ZipFile(source) as archive:
                 members = archive.infolist()
-                if (
-                    any(
-                        info.flag_bits & 0x1
-                        or PurePosixPath(info.filename).is_absolute()
-                        or ".." in PurePosixPath(info.filename).parts
-                        for info in members
+                normalized_members: set[str] = set()
+                unsafe = len(members) > MAX_WHEEL_MEMBERS
+                for info in members:
+                    raw = info.filename
+                    pure = PurePosixPath(raw)
+                    normalized = pure.as_posix().rstrip("/")
+                    mode_type = stat.S_IFMT((info.external_attr >> 16) & 0xFFFF)
+                    safe_type = (info.is_dir() and mode_type in {0, stat.S_IFDIR}) or (
+                        not info.is_dir() and mode_type in {0, stat.S_IFREG}
                     )
-                    or sum(info.file_size for info in members) > MAX_WHEEL_UNCOMPRESSED_BYTES
-                ):
+                    if (
+                        not raw
+                        or "\\" in raw
+                        or info.flag_bits & 0x1
+                        or pure.is_absolute()
+                        or ".." in pure.parts
+                        or not normalized
+                        or normalized in normalized_members
+                        or not safe_type
+                    ):
+                        unsafe = True
+                    normalized_members.add(normalized)
+                if unsafe or sum(info.file_size for info in members) > MAX_WHEEL_UNCOMPRESSED_BYTES:
                     _error(
                         "SANKA_EXTENSION_ARTIFACT_INVALID",
                         "Extension wheel members are unsafe",
@@ -1114,10 +1326,13 @@ class ExtensionStore:
                 artifact=wheel.name,
             )
         expected_tag = "-".join(wheel.name.removesuffix(".whl").split("-")[-3:])
+        declared_tags = wheel_metadata.get_all("Tag", [])
         if (
             wheel_metadata.get_all("Wheel-Version", []) != ["1.0"]
             or wheel_metadata.get_all("Root-Is-Purelib", []) != ["true"]
-            or expected_tag not in wheel_metadata.get_all("Tag", [])
+            or not declared_tags
+            or expected_tag not in declared_tags
+            or any(tag.split("-")[-2:] != ["none", "any"] for tag in declared_tags)
         ):
             _error(
                 "SANKA_EXTENSION_ARTIFACT_INVALID",
@@ -1125,14 +1340,32 @@ class ExtensionStore:
                 artifact=wheel.name,
             )
         for requirement in package.get_all("Requires-Dist", []):
-            match = _REQUIREMENT_NAME.match(requirement)
-            normalized = _normalized_distribution(match.group(0)) if match else ""
+            match = _REQUIREMENT.fullmatch(requirement.strip())
+            if match is None:
+                _error(
+                    "SANKA_EXTENSION_ARTIFACT_INVALID",
+                    "Extension wheel requirement syntax is unsupported",
+                    artifact=wheel.name,
+                    requirement=requirement,
+                )
+            normalized = _normalized_distribution(match.group("name"))
             if normalized not in declared:
                 _error(
                     "SANKA_EXTENSION_UNDECLARED_REQUIREMENT",
                     "Extension wheel requires an undeclared distribution",
                     artifact=wheel.name,
                     requirement=requirement,
+                )
+            specifier = (match.group("parenthesized") or match.group("bare") or "").strip()
+            if specifier and (
+                not _valid_specifier(specifier) or not _compatible(specifier, declared[normalized])
+            ):
+                _error(
+                    "SANKA_EXTENSION_REQUIREMENT_UNSATISFIED",
+                    "Declared extension wheel version does not satisfy Requires-Dist",
+                    artifact=wheel.name,
+                    requirement=requirement,
+                    declared_version=declared[normalized],
                 )
         if identity[0] == _normalized_distribution(manifest.distribution):
             parser = configparser.ConfigParser(interpolation=None)
@@ -1157,7 +1390,7 @@ class ExtensionStore:
         self,
         artifact_digest: str,
         executable: str,
-        wheels: tuple[Path, ...],
+        wheels: tuple[tuple[Path, str], ...],
     ) -> Path:
         root = self._confined(
             self.user_root,
@@ -1180,16 +1413,26 @@ class ExtensionStore:
             requirements = temporary / "requirements-hashed.txt"
             requirements.write_text(
                 "".join(
-                    f"{wheel.as_uri()} --hash=sha256:{_sha256_file(wheel)}\n"
-                    for wheel in sorted(wheels)
+                    f"{wheel.as_uri()} --hash=sha256:{sha256}\n"
+                    for wheel, sha256 in sorted(wheels, key=lambda item: str(item[0]))
                 ),
                 encoding="utf-8",
+            )
+            allowed = {"LANG", "LC_ALL", "LC_CTYPE", "PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"}
+            environment = {key: value for key, value in os.environ.items() if key in allowed}
+            environment.update(
+                {
+                    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                    "PYTHONNOUSERSITE": "1",
+                }
             )
             subprocess.run(
                 [
                     str(python),
+                    "-I",
                     "-m",
                     "pip",
+                    "--isolated",
                     "install",
                     "--no-index",
                     "--no-deps",
@@ -1200,6 +1443,8 @@ class ExtensionStore:
                 check=True,
                 capture_output=True,
                 text=True,
+                cwd=temporary,
+                env=environment,
             )
             requirements.unlink()
             os.replace(temporary, root)
@@ -1256,7 +1501,7 @@ class ExtensionStore:
                 "SANKA_EXTENSION_IDENTITY",
                 "Installed default extension does not expose verifiable files",
             )
-        digest = hashlib.sha256()
+        records: list[dict[str, object]] = []
         for relative in sorted(files, key=lambda item: str(item)):
             path = Path(distribution.locate_file(relative))
             if path.is_symlink() or not path.is_file():
@@ -1265,12 +1510,16 @@ class ExtensionStore:
                     "Installed default extension contains an unverifiable file",
                     path=str(relative),
                 )
-            digest.update(str(relative).replace(os.sep, "/").encode())
-            digest.update(b"\0")
-            with path.open("rb") as source:
-                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(chunk)
-        return digest.hexdigest()
+            status = path.lstat()
+            records.append(
+                {
+                    "type": "file",
+                    "path": str(relative).replace(os.sep, "/"),
+                    "size": status.st_size,
+                    "sha256": _sha256_file(path, require_single_link=False),
+                }
+            )
+        return content_hash(records).removeprefix("sha256:")
 
     def add_extension(
         self,
@@ -1303,7 +1552,7 @@ class ExtensionStore:
                     for wheel in manifest.wheels
                     if (identity := _wheel_identity(wheel.name)) is not None
                 )
-                declared = {identity[0] for identity in wheel_identities}
+                declared = {identity[0]: identity[1] for identity in wheel_identities}
                 if len(wheel_identities) != len(manifest.wheels) or len(declared) != len(
                     wheel_identities
                 ):
@@ -1315,14 +1564,14 @@ class ExtensionStore:
                 cached = tuple(self._cache_wheel(wheel) for wheel in manifest.wheels)
                 for path, wheel in zip(cached, manifest.wheels, strict=True):
                     self._inspect_wheel(path, wheel, manifest, declared)
-                artifact_digest = content_hash(
-                    {
-                        "manifest_digest": manifest.digest,
-                        "wheels": [wheel.sha256 for wheel in manifest.wheels],
-                    }
-                ).removeprefix("sha256:")
+                artifact_digest = self._manifest_artifact_digest(manifest)
                 environment = self._materialize_environment(
-                    artifact_digest, manifest.executable, cached
+                    artifact_digest,
+                    manifest.executable,
+                    tuple(
+                        (path, wheel.sha256)
+                        for path, wheel in zip(cached, manifest.wheels, strict=True)
+                    ),
                 )
                 installation = {
                     "artifact_digest": artifact_digest,
@@ -1376,11 +1625,26 @@ class ExtensionStore:
             if extension_id == DEFAULT_EXTENSION_ID:
                 disabled.add(extension_id)
             elif entry is not None:
-                removed = [
+                manifest = self._manifest_for_lock(entry)
+                if self._manifest_artifact_digest(manifest) != entry.artifact_digest:
+                    _error(
+                        "SANKA_EXTENSION_IDENTITY",
+                        "Locked extension artifact does not match its immutable manifest",
+                        extension_id=extension_id,
+                    )
+                expected_installation = self._expected_installation(entry, manifest)
+                same_artifact = [
                     item
                     for item in installations
                     if item.get("artifact_digest") == entry.artifact_digest
                 ]
+                if same_artifact and same_artifact != [expected_installation]:
+                    _error(
+                        "SANKA_EXTENSION_IDENTITY",
+                        "Installed extension provenance does not match the project lock",
+                        extension_id=extension_id,
+                    )
+                removed = [item for item in installations if item == expected_installation]
                 installations = [item for item in installations if item not in removed]
                 retained_wheels = {
                     wheel.get("path")
@@ -1415,6 +1679,63 @@ class ExtensionStore:
             must_exist=True,
         )
 
+    def _manifest_for_lock(self, entry: LockEntry) -> Manifest:
+        manifest = next(
+            (
+                item
+                for item in load_marketplace(self._snapshot_for_lock(entry))
+                if item.id == entry.id
+            ),
+            None,
+        )
+        if manifest is None or any(
+            actual != expected
+            for actual, expected in (
+                (entry.version, manifest.version),
+                (entry.manifest_digest, manifest.digest),
+                (entry.distribution, manifest.distribution),
+                (entry.protocol_version, manifest.protocol_version),
+                (entry.executable, manifest.executable),
+            )
+        ):
+            _error(
+                "SANKA_EXTENSION_IDENTITY",
+                "Locked extension fields do not match its immutable manifest",
+                extension_id=entry.id,
+            )
+        return manifest
+
+    @staticmethod
+    def _manifest_artifact_digest(manifest: Manifest) -> str:
+        return content_hash(
+            {
+                "manifest_digest": manifest.digest,
+                "wheels": [wheel.sha256 for wheel in manifest.wheels],
+            }
+        ).removeprefix("sha256:")
+
+    def _expected_installation(
+        self,
+        entry: LockEntry,
+        manifest: Manifest,
+    ) -> dict[str, Any]:
+        return {
+            "artifact_digest": entry.artifact_digest,
+            "environment": (Path("environments") / entry.artifact_digest).as_posix(),
+            "id": entry.id,
+            "manifest_digest": manifest.digest,
+            "marketplace_identity": entry.marketplace_identity,
+            "snapshot_digest": entry.snapshot_digest,
+            "version": manifest.version,
+            "wheels": [
+                {
+                    "path": (Path("cache") / "wheels" / wheel.sha256 / wheel.name).as_posix(),
+                    "sha256": wheel.sha256,
+                }
+                for wheel in manifest.wheels
+            ],
+        }
+
     def resolve_locked(self, extension_id: str) -> LockEntry:
         entry = self._load_lock().get(extension_id)
         if entry is None or not entry.enabled or extension_id in self._load_disabled():
@@ -1433,22 +1754,14 @@ class ExtensionStore:
                 extension_id=extension_id,
                 identity=entry.marketplace_identity,
             )
-        snapshot = self._snapshot_for_lock(entry)
-        manifest = next(
-            (
-                item
-                for item in load_marketplace(snapshot)
-                if item.id == entry.id
-                and item.version == entry.version
-                and item.digest == entry.manifest_digest
-            ),
-            None,
-        )
-        if manifest is None:
+        manifest = self._manifest_for_lock(entry)
+        if not _compatible(manifest.runtime_sanka_migrate, __version__):
             _error(
-                "SANKA_EXTENSION_IDENTITY",
-                "Locked extension manifest does not match its immutable snapshot",
+                "SANKA_EXTENSION_INCOMPATIBLE",
+                "Locked extension is incompatible with this sanka-migrate runtime",
                 extension_id=extension_id,
+                runtime=__version__,
+                required=manifest.runtime_sanka_migrate,
             )
         if extension_id == DEFAULT_EXTENSION_ID:
             distribution = self._default_distribution(manifest, required=True)
@@ -1459,14 +1772,15 @@ class ExtensionStore:
                     extension_id=extension_id,
                 )
             return entry
+        if self._manifest_artifact_digest(manifest) != entry.artifact_digest:
+            _error(
+                "SANKA_EXTENSION_IDENTITY",
+                "Locked extension artifact does not match its immutable manifest",
+                extension_id=extension_id,
+            )
+        expected_installation = self._expected_installation(entry, manifest)
         installation = next(
-            (
-                item
-                for item in self._load_installations()
-                if item.get("artifact_digest") == entry.artifact_digest
-                and item.get("id") == entry.id
-                and item.get("version") == entry.version
-            ),
+            (item for item in self._load_installations() if item == expected_installation),
             None,
         )
         if installation is None:
@@ -1483,8 +1797,15 @@ class ExtensionStore:
                 "Extension installation environment is invalid",
                 extension_id=extension_id,
             )
-        root = self._confined(self.user_root, self.user_root / environment, must_exist=True)
-        binary = root / ("Scripts" if os.name == "nt" else "bin") / entry.executable
+        expected_root = self.user_root / "environments" / entry.artifact_digest
+        root = self._confined(
+            self.user_root,
+            self.user_root / environment,
+            must_exist=True,
+            expected=expected_root,
+        )
+        binary = root / ("Scripts" if os.name == "nt" else "bin") / manifest.executable
+        self._confined(self.user_root, binary, must_exist=True, expected=binary)
         if not binary.is_file():
             _error(
                 "SANKA_EXTENSION_NOT_CACHED",
