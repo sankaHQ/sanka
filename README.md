@@ -1,34 +1,42 @@
-# Sanka — Migrate Django REST Framework APIs to FastAPI
+# Sanka Migrate
 
-> Inspect a DRF application, generate a reviewable FastAPI migration plan,
-> apply a native async app (or a compatibility bridge), test the generated
-> API, and verify route integrity plus selected HTTP behavior.
+Sanka Migrate is the local engine behind Sanka's migration CLI. It owns the
+`scan`, `plan`, `apply`, `test`, and `verify` lifecycle. Framework-specific
+inspection and code generation run in separately installed extensions.
 
-Sanka turns migration into a reusable developer primitive. Its first
-application recipe moves Django REST Framework APIs toward FastAPI. Native
-mode (the default) generates async FastAPI handlers over the existing SQL
-tables and does not import Django at serve time. Compatibility mode keeps a
-verified strangler bridge: FastAPI owns the generated route graph while the
-original Django/DRF handlers remain available in-process.
+The first official extension is `sanka/drf-to-fastapi`. It scans a Django REST
+Framework project and generates either an async FastAPI application or a
+compatibility bridge. The extension lives in
+[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions), not in this
+repository.
 
 Sanka requires Python 3.12 or newer.
 
+The quick start below applies after a `sanka-migrate` release pins the
+published `sanka-extension-drf-to-fastapi` package as its default extension.
+
 ```bash
-python -m pip install sanka-cli
+uv tool install sanka-migrate
 cd my-django-app
 
-sanka scan
-sanka plan .                       # guided full/update/minimal selection
-sanka apply --plan-hash sha256:<hash-from-plan>
-sanka test
-sanka verify
+sanka-migrate extension marketplace add git@github.com:sankaHQ/extensions.git --name sanka
+sanka-migrate extension add sanka/drf-to-fastapi
+
+sanka-migrate scan .
+sanka-migrate plan .
+sanka-migrate apply --plan-hash sha256:<hash-from-plan>
+sanka-migrate test .
+sanka-migrate verify .
 ```
+
+See [Current release status](#current-release-status) before testing a clean
+PyPI installation.
 
 ## CLI and SDK execution
 
-`sanka-migrate` is the local migration engine and the owner of command
-defaults, validation, plan hashes, generated artifacts, and the
-`sanka-cli/v1` JSON protocol. The other developer surfaces reuse that engine:
+`sanka-migrate` owns command defaults, validation, plan hashes, generated
+artifacts, extension execution, and the `sanka-cli/v1` JSON protocol. The
+other developer entry points call this same executable:
 
 | Surface | Entry point | Execution path |
 |---|---|---|
@@ -37,26 +45,86 @@ defaults, validation, plan hashes, generated artifacts, and the
 | Node.js SDK | `import { SankaMigrate } from "sanka-sdk/migrate"` | Runs `sanka-migrate <command> --json` locally from Node.js |
 | Hosted API SDK | `SankaClient` in Python or the default `Sanka` client in Node.js | Calls Sanka's hosted HTTP API with an API token |
 
-The local SDK adapters are tokenless and do not reimplement migration recipes
-or auto-install the runtime. They expose generic `scan()`, `plan()`, `apply()`,
-`test()`, and `verify()` methods; the runtime still detects the framework and
-uses the generated target's environment for test and verification dependencies.
+The local SDK adapters are tokenless. They do not reimplement migrations or
+install the runtime. They expose the lifecycle and extension-management
+commands as typed methods. `sanka-migrate` still owns framework detection,
+extension selection, validation, and the generated target environment.
 See the [CLI-to-SDK execution model](docs/django-to-fastapi.md#cli-and-sdk-execution-model),
 the [Python SDK](https://github.com/sankaHQ/sanka-python), and the
 [Node.js SDK](https://github.com/sankaHQ/sanka-node).
 
-The package also includes the data-migration runtime. Extension SDKs and
-independently installable extensions live separately in
-[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions), so the base runtime never
-installs unused framework runtimes, database drivers, or API clients.
+## Extension marketplaces
+
+`scan` fingerprints the project's files, dependency metadata, languages, and
+frameworks without importing project code. It compares that fingerprint with
+extension manifests from configured marketplace snapshots. If the exact
+default extension package is installed and has not been disabled, the first
+scan can lock it automatically. An interactive run can instead ask the user to
+choose among eligible extensions. If neither path enables an extension, `scan`
+and `plan` stop with `SANKA_EXTENSION_REQUIRED` and return the matching IDs and
+install commands. They do not continue with a built-in fallback.
+
+Automation and AI agents use the same commands. Add `--json` to receive one
+`sanka-cli/v1` document instead of interactive output. An agent can inspect
+the recommendations, run the selected `add_command`, and retry. Without that
+step, the lifecycle stays failed.
+
+```bash
+# Extensions and their installed/locked/disabled status
+sanka-migrate extension list
+
+# Project extension pins
+sanka-migrate extension add sanka/drf-to-fastapi
+sanka-migrate extension remove sanka/drf-to-fastapi
+
+# User-level marketplace snapshots
+sanka-migrate extension marketplace list
+sanka-migrate extension marketplace upgrade sanka
+sanka-migrate extension marketplace remove sanka
+```
+
+The official `git@github.com:sankaHQ/extensions.git` source is trusted by
+identity. A third-party source requires an explicit `--trust` flag:
+
+```bash
+sanka-migrate extension marketplace add \
+  git@github.com:acme/migrations.git \
+  --name acme \
+  --trust
+```
+
+Sanka clones a Git marketplace into a snapshot identified by its commit and
+tree digest. `marketplace upgrade` creates a new snapshot but does not
+change a project's existing extension pins. Each project records exact
+marketplace, manifest, version, and artifact identities in
+`.sanka/extensions.lock`. User-level snapshots, verified wheels, and isolated
+extension environments live under `~/.sanka/extensions` or
+`$SANKA_HOME/extensions`.
+
+For `sanka/drf-to-fastapi`, `extension add` verifies the already installed
+default distribution and locks its exact file digest. Other extensions accept
+published wheels only. Sanka verifies every SHA-256 hash, rejects source
+distributions and undeclared files, then installs those wheels in an isolated
+environment. Lifecycle commands execute only the version recorded in the
+project lock.
+
+`extension remove` disables and unpins the extension. A later scan will
+recommend it again when the project still matches, but Sanka will not silently
+switch to another extension.
+
+Extensions receive one `sanka-extension/v1` JSON request on standard input and
+must return one response on standard output. Sanka starts them with a direct
+argument vector, no shell, and only environment variables named with
+`--extension-env`. Extension configuration must be a JSON object supplied with
+`--extension-config`.
 
 ## Current release status
 
 | Surface | Current status and authority |
 |---|---|
 | Runtime and CLI | Alpha, published as [`sanka-migrate`](https://pypi.org/project/sanka-migrate/) on PyPI |
-| Extensions and Connector SDK | Apache-2.0 packages from [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions); install only the capabilities a migration needs |
-| DRF → FastAPI recipe | Included in source candidate `v0.1.0a10`; the live PyPI project remains the publication authority. Native mode generates async FastAPI over existing SQL tables; compatibility mode is the strangler bridge. Both share scan, a hashed plan, separate FastAPI output, `sanka test` unit tests, and `sanka verify` integrity plus safe read-only probes |
+| Extensions and Connector SDK | Apache-2.0 packages from [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions). Marketplace and extension metadata are available in source; PyPI and GitHub release assets remain the publication authority |
+| DRF → FastAPI extension | Implemented as `sanka/drf-to-fastapi` in the extensions repository. A clean PyPI install is not supported until `sanka-extension-drf-to-fastapi==0.1.0a1` is published and pinned by a `sanka-migrate` release |
 | Standalone MCP server | Alpha, published as [`sanka-migrate-mcp`](https://pypi.org/project/sanka-migrate-mcp/) on PyPI |
 | Hosted research and assessment API | Canonical base: `https://api.sanka.com/v2/migrate`; the [dataset catalog](https://api.sanka.com/v2/migrate/research/datasets) is the live availability check |
 | Stability | Alpha: Python, CLI, connector, and MCP contracts may change before `1.0` |
@@ -260,13 +328,12 @@ capability protocols (`SupportsSnapshotBounds`, `SupportsBatchWrites`,
 `isinstance`. Installed providers register through the `sanka.connectors`
 entry-point group.
 
-The `extensions` repository is the Apache-2.0 extension layer for framework,
-database, language, library, and file-specific migration knowledge. Connector
-extensions are the first stable interface. Sanka currently discovers installed
-connector extensions; it does not silently download arbitrary packages during
-`scan` or `plan`. The extension resolver will select only reviewed matches from a
-shallow project fingerprint, materialize exact versions in isolation, and pin
-their artifact hashes into the plan.
+The `extensions` repository also contains executable framework-migration
+extensions. Sanka matches their manifests against a static project fingerprint,
+then runs only the exact snapshot and artifact recorded in the project lock.
+These extensions use the versioned JSON subprocess contract described in
+[Extension marketplaces](#extension-marketplaces). Connector packages keep
+using the in-process `sanka.connectors` entry-point contract.
 
 SaaS and managed-system migrations, including HubSpot, Salesforce, and
 SendGrid, run through Sanka's hosted System Migration API. Their credentials,
