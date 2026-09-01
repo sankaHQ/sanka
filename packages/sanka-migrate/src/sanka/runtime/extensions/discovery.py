@@ -742,6 +742,8 @@ def recommend(
                 version=manifest.version,
                 marketplace=manifest.marketplace,
                 marketplace_identity=manifest.marketplace,
+                snapshot_digest="",
+                manifest_digest=manifest.digest,
                 commands=manifest.commands,
                 targets=manifest.targets,
                 evidence=tuple(

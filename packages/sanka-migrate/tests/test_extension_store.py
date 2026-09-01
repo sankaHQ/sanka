@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from sanka.runtime.extensions import ExtensionError, load_marketplace
+from sanka.runtime.extensions import ExtensionError, fingerprint_repository, load_marketplace
 from sanka.runtime.extensions import store as extension_store
 from sanka.runtime.extensions.store import (
     OFFICIAL_IDENTITY,
@@ -170,11 +170,24 @@ def _fast_environments(monkeypatch: pytest.MonkeyPatch) -> None:
         artifact_digest: str,
         executable: str,
         _wheels: tuple[tuple[Path, str], ...],
+        *,
+        expected_digest: str | None = None,
     ) -> Path:
+        del expected_digest
         root = self.user_root / "environments" / artifact_digest
         binary = root / "bin" / executable
         binary.parent.mkdir(parents=True, exist_ok=True)
         binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        package = (
+            root
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+            / "example_demo"
+            / "__init__.py"
+        )
+        package.parent.mkdir(parents=True, exist_ok=True)
+        package.write_text("__version__ = 'fixture'\n", encoding="utf-8")
         return root
 
     monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
@@ -1018,7 +1031,67 @@ def test_marketplace_upgrade_reports_update_without_changing_project_pin(
     assert store.resolve_locked("example/demo") == locked
     listing = store.list_extensions()[0]
     assert listing.version == "0.2.0"
-    assert listing.status == ("available", "installed", "locked", "update_available")
+    assert listing.status == ("available", "update_available")
+
+
+def test_marketplace_upgrade_does_not_lend_capabilities_to_the_locked_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, source, wheel = _configured_store(tmp_path, monkeypatch)
+    locked = store.add_extension("example/demo")
+    _marketplace(source, version="0.2.0")
+    manifest_path = source / "example-demo.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["commands"] = ["plan"]
+    manifest["targets"] = ["flask"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    upgraded_wheel = _wheel("example-demo", "0.2.0", "example-demo")[1]
+    _responses(
+        monkeypatch,
+        {
+            "example_demo-0.1.0-py3-none-any.whl": wheel,
+            "example_demo-0.2.0-py3-none-any.whl": upgraded_wheel,
+        },
+    )
+    (store.project_root / "source.py").write_text("pass\n", encoding="utf-8")
+
+    store.upgrade_marketplace("fixtures")
+    recommendations = store.recommendations(fingerprint_repository(store.project_root))
+
+    assert len(recommendations) == 1
+    recommendation = recommendations[0]
+    assert recommendation.version == locked.version
+    assert recommendation.snapshot_digest == locked.snapshot_digest
+    assert recommendation.manifest_digest == locked.manifest_digest
+    assert recommendation.commands == ("scan",)
+    assert recommendation.targets == ("fastapi",)
+    assert "update_available" in recommendation.status
+
+
+def test_resolve_rejects_mutated_installed_executable_and_imported_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
+    _fast_environments(monkeypatch)
+    lock = store.add_extension("example/demo")
+    environment = store.user_root / "environments" / lock.artifact_digest
+    executable = environment / "bin" / "example-demo"
+    original_executable = executable.read_bytes()
+
+    executable.write_bytes(b"#!/bin/sh\nexit 9\n")
+    with pytest.raises(ExtensionError) as raised:
+        store.resolve_locked("example/demo")
+    assert raised.value.code == "SANKA_EXTENSION_HASH_MISMATCH"
+
+    executable.write_bytes(original_executable)
+    imported = next(environment.glob("lib/python*/site-packages/example_demo/__init__.py"))
+    imported.write_text("__version__ = 'tampered'\n", encoding="utf-8")
+    with pytest.raises(ExtensionError) as raised:
+        store.resolve_locked("example/demo")
+    assert raised.value.code == "SANKA_EXTENSION_HASH_MISMATCH"
 
 
 def test_removing_locked_marketplace_fails_closed(

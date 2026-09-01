@@ -181,19 +181,43 @@ def _installation_sort_key(value: dict[str, Any]) -> str:
     return str(value.get("artifact_digest"))
 
 
-def _tree_records(descriptor: int, prefix: str = "") -> list[dict[str, object]]:
+def _tree_records(
+    descriptor: int,
+    prefix: str = "",
+    *,
+    error_code: str = "SANKA_MARKETPLACE_PATH_INVALID",
+    subject: str = "Marketplace snapshot",
+    allowed_symlinks: Mapping[str, Path] | None = None,
+) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     with os.scandir(descriptor) as entries:
         children = sorted(entries, key=lambda item: item.name)
     for child in children:
         relative = f"{prefix}/{child.name}" if prefix else child.name
         linked = os.stat(child.name, dir_fd=descriptor, follow_symlinks=False)
-        if stat.S_ISLNK(linked.st_mode) or not (
-            stat.S_ISDIR(linked.st_mode) or stat.S_ISREG(linked.st_mode)
-        ):
+        if stat.S_ISLNK(linked.st_mode):
+            target = Path(os.readlink(child.name, dir_fd=descriptor))
+            expected = (allowed_symlinks or {}).get(relative)
+            if expected is None or not target.is_absolute() or target != expected:
+                _error(
+                    error_code,
+                    f"{subject} contains an unverified symlink",
+                    path=relative,
+                )
+            records.append(
+                {
+                    "type": "symlink",
+                    "path": relative,
+                    "size": linked.st_size,
+                    "sha256": _sha256_file(expected, require_single_link=False),
+                    "target": str(target),
+                }
+            )
+            continue
+        if not (stat.S_ISDIR(linked.st_mode) or stat.S_ISREG(linked.st_mode)):
             _error(
-                "SANKA_MARKETPLACE_PATH_INVALID",
-                "Marketplace snapshots may contain only real directories and regular files",
+                error_code,
+                f"{subject} may contain only real directories and regular files",
                 path=relative,
             )
         if stat.S_ISREG(linked.st_mode):
@@ -206,8 +230,8 @@ def _tree_records(descriptor: int, prefix: str = "") -> list[dict[str, object]]:
                     or (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino)
                 ):
                     _error(
-                        "SANKA_MARKETPLACE_PATH_INVALID",
-                        "Marketplace snapshot file changed while being inspected",
+                        error_code,
+                        f"{subject} file changed while being inspected",
                         path=relative,
                     )
                 digest = hashlib.sha256()
@@ -234,11 +258,19 @@ def _tree_records(descriptor: int, prefix: str = "") -> list[dict[str, object]]:
                     linked.st_ino,
                 ):
                     _error(
-                        "SANKA_MARKETPLACE_PATH_INVALID",
-                        "Marketplace snapshot directory changed while being inspected",
+                        error_code,
+                        f"{subject} directory changed while being inspected",
                         path=relative,
                     )
-                records.extend(_tree_records(directory, relative))
+                records.extend(
+                    _tree_records(
+                        directory,
+                        relative,
+                        error_code=error_code,
+                        subject=subject,
+                        allowed_symlinks=allowed_symlinks,
+                    )
+                )
             finally:
                 _close_descriptor(directory)
     return records
@@ -1470,6 +1502,7 @@ class ExtensionStore:
         expected = {
             "artifact_digest",
             "environment",
+            "environment_digest",
             "id",
             "manifest_digest",
             "marketplace_identity",
@@ -1487,6 +1520,7 @@ class ExtensionStore:
                     for field in string_fields
                 )
                 or re.fullmatch(r"[0-9a-f]{64}", item["artifact_digest"]) is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", item["environment_digest"]) is None
                 or re.fullmatch(r"sha256:[0-9a-f]{64}", item["manifest_digest"]) is None
                 or not isinstance(item["wheels"], list)
                 or not item["wheels"]
@@ -1684,29 +1718,32 @@ class ExtensionStore:
                 if lock is not None and lock.marketplace_identity == marketplace.identity
                 else None
             )
+            exact_lock = (
+                scoped_lock
+                if scoped_lock is not None
+                and scoped_lock.version == manifest.version
+                and scoped_lock.snapshot_digest == marketplace.snapshot_digest
+                and scoped_lock.manifest_digest == manifest.digest
+                else None
+            )
             installed = any(
                 item.get("id") == manifest.id
                 and item.get("marketplace_identity") == marketplace.identity
+                and item.get("snapshot_digest") == marketplace.snapshot_digest
+                and item.get("manifest_digest") == manifest.digest
+                and item.get("version") == manifest.version
                 for item in installations
             )
-            if (
-                manifest.id == DEFAULT_EXTENSION_ID
-                and manifest.id not in disabled
-                and scoped_lock is not None
-            ):
+            if manifest.id == DEFAULT_EXTENSION_ID and manifest.id not in disabled:
                 installed = (
                     installed or self._default_distribution(manifest, required=False) is not None
                 )
             if installed and manifest.id not in disabled:
                 statuses.add("installed")
-            if scoped_lock and scoped_lock.enabled:
+            if exact_lock and exact_lock.enabled:
                 statuses.add("locked")
-                if (
-                    scoped_lock.version != manifest.version
-                    or scoped_lock.snapshot_digest != marketplace.snapshot_digest
-                    or scoped_lock.manifest_digest != manifest.digest
-                ):
-                    statuses.add("update_available")
+            if scoped_lock and scoped_lock.enabled and exact_lock is None:
+                statuses.add("update_available")
             if not _compatible(manifest.runtime_sanka_migrate, __version__):
                 statuses.add("incompatible")
             if manifest.id in disabled:
@@ -1728,12 +1765,29 @@ class ExtensionStore:
     @_store_operation
     def recommendations(self, fingerprint: Fingerprint) -> tuple[Recommendation, ...]:
         """Match only manifests read through the verified snapshot boundary."""
-        records = {
-            (item.id, item.version, item.marketplace_identity): item
-            for item in self.list_extensions()
-        }
+        catalog = self._catalog()
+        records = {(item.id, item.marketplace_identity): item for item in self.list_extensions()}
+        marketplaces = {item.identity: item for item in self.marketplaces()}
+        locks = self._load_lock()
+        installations = self._load_installations()
+        disabled = self._load_disabled()
         recommendations: list[Recommendation] = []
-        for marketplace, manifest in self._catalog():
+        selected: list[tuple[MarketplaceRecord, Manifest, LockEntry | None]] = []
+        covered_locks: set[str] = set()
+        for marketplace, current in catalog:
+            lock = locks.get(current.id)
+            if lock is not None and lock.marketplace_identity == marketplace.identity:
+                selected.append((marketplace, self._manifest_for_lock(lock), lock))
+                covered_locks.add(lock.id)
+            else:
+                selected.append((marketplace, current, None))
+        for lock in locks.values():
+            if lock.id in covered_locks or lock.marketplace_identity not in marketplaces:
+                continue
+            selected.append(
+                (marketplaces[lock.marketplace_identity], self._manifest_for_lock(lock), lock)
+            )
+        for marketplace, manifest, lock in selected:
             matched = recommend(
                 fingerprint,
                 (replace(manifest, marketplace=marketplace.name),),
@@ -1741,13 +1795,51 @@ class ExtensionStore:
             )
             if not matched:
                 continue
-            record = records[(manifest.id, manifest.version, marketplace.identity)]
+            if lock is None:
+                status = records[(manifest.id, marketplace.identity)].status
+                snapshot_digest = marketplace.snapshot_digest
+            else:
+                statuses = {"available", "locked"}
+                if any(
+                    item.get("id") == lock.id
+                    and item.get("marketplace_identity") == lock.marketplace_identity
+                    and item.get("snapshot_digest") == lock.snapshot_digest
+                    and item.get("manifest_digest") == lock.manifest_digest
+                    and item.get("version") == lock.version
+                    for item in installations
+                ) or (
+                    lock.id == DEFAULT_EXTENSION_ID
+                    and self._default_distribution(manifest, required=False) is not None
+                ):
+                    statuses.add("installed")
+                available_current = next(
+                    (
+                        item
+                        for source, item in catalog
+                        if source.identity == lock.marketplace_identity and item.id == lock.id
+                    ),
+                    None,
+                )
+                if available_current is not None and (
+                    available_current.version != lock.version
+                    or available_current.digest != lock.manifest_digest
+                    or marketplace.snapshot_digest != lock.snapshot_digest
+                ):
+                    statuses.add("update_available")
+                if not _compatible(manifest.runtime_sanka_migrate, __version__):
+                    statuses.add("incompatible")
+                if lock.id in disabled or not lock.enabled:
+                    statuses.add("disabled")
+                status = tuple(item for item in STATUS_ORDER if item in statuses)
+                snapshot_digest = lock.snapshot_digest
             recommendations.append(
                 replace(
                     matched[0],
                     commands=manifest.commands,
                     marketplace_identity=marketplace.identity,
-                    status=record.status,
+                    snapshot_digest=snapshot_digest,
+                    manifest_digest=manifest.digest,
+                    status=status,
                 )
             )
         return tuple(
@@ -2068,6 +2160,8 @@ class ExtensionStore:
         artifact_digest: str,
         executable: str,
         wheels: tuple[tuple[Path, str], ...],
+        *,
+        expected_digest: str | None = None,
     ) -> Path:
         root = self._confined(
             self.user_root,
@@ -2081,6 +2175,7 @@ class ExtensionStore:
             environment_name,
         ):
             _require_directory_identity(root.parent, environments)
+            replace_existing = False
             with _directory_at(
                 environments,
                 environment_name,
@@ -2088,12 +2183,19 @@ class ExtensionStore:
                 missing_ok=True,
             ) as existing:
                 if existing is not None:
-                    with (
-                        _directory_at(existing, binary_name, binary.parent) as bin_descriptor,
-                        _regular_at(cast(int, bin_descriptor), executable, binary) as installed,
-                    ):
-                        assert installed is not None
-                    return root
+                    digest = content_hash(
+                        _tree_records(
+                            existing,
+                            error_code="SANKA_EXTENSION_PATH",
+                            subject="Extension environment",
+                            allowed_symlinks=self._environment_symlinks(),
+                        )
+                    )
+                    if digest == expected_digest:
+                        return root
+                    replace_existing = True
+            if replace_existing:
+                shutil.rmtree(environment_name, dir_fd=environments)
             for _attempt in range(10):
                 temporary = f"environment-{secrets.token_hex(8)}"
                 try:
@@ -2309,6 +2411,19 @@ class ExtensionStore:
                 for path, wheel in zip(cached, manifest.wheels, strict=True):
                     self._inspect_wheel(path, wheel, manifest, declared)
                 artifact_digest = self._manifest_artifact_digest(manifest)
+                prior = next(
+                    (
+                        item
+                        for item in installations
+                        if item.get("artifact_digest") == artifact_digest
+                        and item.get("id") == manifest.id
+                        and item.get("manifest_digest") == manifest.digest
+                        and item.get("marketplace_identity") == source.identity
+                        and item.get("snapshot_digest") == source.snapshot_digest
+                        and item.get("version") == manifest.version
+                    ),
+                    None,
+                )
                 environment = self._materialize_environment(
                     artifact_digest,
                     manifest.executable,
@@ -2316,10 +2431,14 @@ class ExtensionStore:
                         (path, wheel.sha256)
                         for path, wheel in zip(cached, manifest.wheels, strict=True)
                     ),
+                    expected_digest=(
+                        prior.get("environment_digest") if isinstance(prior, dict) else None
+                    ),
                 )
                 installation = {
                     "artifact_digest": artifact_digest,
                     "environment": environment.relative_to(self.user_root).as_posix(),
+                    "environment_digest": self._environment_digest(environment),
                     "id": manifest.id,
                     "manifest_digest": manifest.digest,
                     "marketplace_identity": source.identity,
@@ -2384,13 +2503,20 @@ class ExtensionStore:
                     for item in installations
                     if item.get("artifact_digest") == entry.artifact_digest
                 ]
-                if same_artifact and same_artifact != [expected_installation]:
+                if same_artifact and any(
+                    not self._installation_matches(item, expected_installation)
+                    for item in same_artifact
+                ):
                     _error(
                         "SANKA_EXTENSION_IDENTITY",
                         "Installed extension provenance does not match the project lock",
                         extension_id=extension_id,
                     )
-                removed = [item for item in installations if item == expected_installation]
+                removed = [
+                    item
+                    for item in installations
+                    if self._installation_matches(item, expected_installation)
+                ]
                 installations = [item for item in installations if item not in removed]
                 retained_wheels = {
                     wheel.get("path")
@@ -2422,6 +2548,33 @@ class ExtensionStore:
             / _identity_key(entry.marketplace_identity)
             / entry.snapshot_digest.removeprefix("sha256:"),
             must_exist=True,
+        )
+
+    def _environment_digest(self, root: Path) -> str:
+        with (
+            _parent_descriptor(self.user_root, root) as (parent, name),
+            _directory_at(parent, name, root) as descriptor,
+        ):
+            assert descriptor is not None
+            return content_hash(
+                _tree_records(
+                    descriptor,
+                    error_code="SANKA_EXTENSION_PATH",
+                    subject="Extension environment",
+                    allowed_symlinks=self._environment_symlinks(),
+                )
+            )
+
+    @staticmethod
+    def _environment_symlinks() -> dict[str, Path]:
+        interpreter = Path(sys.executable).resolve()
+        return dict.fromkeys(
+            (
+                "bin/python",
+                "bin/python3",
+                f"bin/python{sys.version_info.major}.{sys.version_info.minor}",
+            ),
+            interpreter,
         )
 
     def _manifest_for_lock(self, entry: LockEntry) -> Manifest:
@@ -2494,6 +2647,12 @@ class ExtensionStore:
             ],
         }
 
+    @staticmethod
+    def _installation_matches(value: Mapping[str, Any], expected: Mapping[str, Any]) -> bool:
+        return set(value) == {*expected, "environment_digest"} and all(
+            value.get(key) == item for key, item in expected.items()
+        )
+
     @_store_operation
     def resolve_locked(self, extension_id: str) -> LockEntry:
         entry = self._load_lock().get(extension_id)
@@ -2539,7 +2698,11 @@ class ExtensionStore:
             )
         expected_installation = self._expected_installation(entry, manifest)
         installation = next(
-            (item for item in self._load_installations() if item == expected_installation),
+            (
+                item
+                for item in self._load_installations()
+                if self._installation_matches(item, expected_installation)
+            ),
             None,
         )
         if installation is None:
@@ -2590,6 +2753,12 @@ class ExtensionStore:
                     extension_id=extension_id,
                     artifact=path.name,
                 )
+        if self._environment_digest(root) != installation.get("environment_digest"):
+            _error(
+                "SANKA_EXTENSION_HASH_MISMATCH",
+                "Installed locked extension environment has changed",
+                extension_id=extension_id,
+            )
         return entry
 
 

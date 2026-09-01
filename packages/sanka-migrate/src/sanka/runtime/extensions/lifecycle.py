@@ -63,6 +63,8 @@ def _recommendation(value: Recommendation) -> dict[str, Any]:
         "id": value.id,
         "marketplace": value.marketplace,
         "marketplace_identity": value.marketplace_identity,
+        "snapshot_digest": value.snapshot_digest,
+        "manifest_digest": value.manifest_digest,
         "commands": list(value.commands),
         "status": list(value.status),
         "targets": list(value.targets),
@@ -284,6 +286,25 @@ class ApplicationLifecycle:
         owner, name = lock.id.split("/", 1)
         return ensure_safe_directory(self.artifact_root / "extensions" / owner / name)
 
+    @staticmethod
+    def _verify_selection(lock: LockEntry, recommendation: Recommendation) -> None:
+        if any(
+            actual != expected
+            for actual, expected in (
+                (lock.id, recommendation.id),
+                (lock.version, recommendation.version),
+                (lock.marketplace_identity, recommendation.marketplace_identity),
+                (lock.snapshot_digest, recommendation.snapshot_digest),
+                (lock.manifest_digest, recommendation.manifest_digest),
+                (lock.commands, recommendation.commands),
+            )
+        ):
+            _error(
+                "SANKA_EXTENSION_IDENTITY",
+                "Resolved extension does not match its exact recommendation",
+                extension_id=recommendation.id,
+            )
+
     def _request(
         self,
         lock: LockEntry,
@@ -354,12 +375,7 @@ class ApplicationLifecycle:
             if "scan" not in recommendation.commands:
                 continue
             lock = self.store.resolve_locked(recommendation.id)
-            if lock.marketplace_identity != recommendation.marketplace_identity:
-                _error(
-                    "SANKA_EXTENSION_IDENTITY",
-                    "Resolved extension does not match its recommendation",
-                    extension_id=lock.id,
-                )
+            self._verify_selection(lock, recommendation)
             request = self._request(lock, "scan", fingerprint, normalized)
             extension_root = Path(request["artifact_root"])
             extension_result = self.runner.run(
@@ -462,6 +478,7 @@ class ApplicationLifecycle:
                 extensions=[item.id for item in selected],
             )
         lock = self.store.resolve_locked(selected[0].id)
+        self._verify_selection(lock, selected[0])
         request = self._request(lock, "plan", fingerprint, normalized)
         extension_root = Path(request["artifact_root"])
         seen_inputs: set[str] = set()

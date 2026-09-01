@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -75,6 +76,17 @@ request = json.load(sys.stdin)
 mode = request["configuration"]["mode"]
 if mode == "timeout":
     time.sleep(0.2)
+if mode == "non-utf8":
+    sys.stdout.buffer.write(b"\\xff")
+    raise SystemExit(0)
+if mode == "combined-overflow":
+    with open(os.path.join(request["artifact_root"], "pid"), "w", encoding="utf-8") as output:
+        output.write(str(os.getpid()))
+    sys.stdout.buffer.write(b"x" * (3 * 1024 * 1024))
+    sys.stdout.buffer.flush()
+    sys.stderr.buffer.write(b"y" * (2 * 1024 * 1024))
+    sys.stderr.buffer.flush()
+    time.sleep(30)
 if mode == "invalid-json":
     print("not json")
     raise SystemExit(0)
@@ -125,6 +137,7 @@ raise SystemExit(1 if mode == "error" else 0)
         ("outside-artifact", "SANKA_EXTENSION_PATH"),
         ("timeout", "SANKA_EXTENSION_TIMEOUT"),
         ("invalid-json", "SANKA_EXTENSION_PROTOCOL"),
+        ("non-utf8", "SANKA_EXTENSION_PROTOCOL"),
     ],
 )
 def test_runner_rejects_invalid_extension_output(
@@ -141,6 +154,27 @@ def test_runner_rejects_invalid_extension_output(
             allowed_roots=(_artifact_root(request),),
         )
     assert raised.value.code == code
+
+
+def test_runner_enforces_the_combined_output_limit_while_the_process_is_running(
+    tmp_path: Path,
+    fake_extension: Path,
+) -> None:
+    request = _request(tmp_path, "combined-overflow")
+    started = time.monotonic()
+
+    with pytest.raises(ExtensionError) as raised:
+        ExtensionRunner(timeout_seconds=10).run(
+            _lock(fake_extension),
+            request,
+            allowed_roots=(_artifact_root(request),),
+        )
+
+    assert raised.value.code == "SANKA_EXTENSION_PROTOCOL"
+    assert time.monotonic() - started < 5
+    pid = int((_artifact_root(request) / "pid").read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
 def test_runner_forwards_only_explicit_environment_names(

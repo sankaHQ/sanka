@@ -7,9 +7,12 @@ import json
 import math
 import os
 import re
+import selectors
 import stat
 import subprocess
 import sys
+import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -114,6 +117,117 @@ class ExtensionRunner:
                 path=str(executable),
             )
         return executable.resolve()
+
+    @staticmethod
+    def _stop(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is None:
+            with suppress(OSError):
+                process.terminate()
+            try:
+                process.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                with suppress(OSError):
+                    process.kill()
+                process.wait()
+        else:
+            process.wait()
+
+    def _execute(
+        self,
+        executable: Path,
+        request: bytes,
+        *,
+        cwd: str,
+        environment: dict[str, str],
+    ) -> tuple[int, bytes, bytes]:
+        process = subprocess.Popen(
+            [str(executable)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=cwd,
+            env=environment,
+        )
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        streams = (process.stdin, process.stdout, process.stderr)
+        selector = selectors.DefaultSelector()
+        stdout = bytearray()
+        stderr = bytearray()
+        sent = 0
+        deadline = time.monotonic() + self.timeout_seconds
+        try:
+            for stream in streams:
+                os.set_blocking(stream.fileno(), False)
+            selector.register(process.stdin, selectors.EVENT_WRITE, None)
+            selector.register(process.stdout, selectors.EVENT_READ, stdout)
+            selector.register(process.stderr, selectors.EVENT_READ, stderr)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._stop(process)
+                    _error(
+                        "SANKA_EXTENSION_TIMEOUT",
+                        "Extension execution timed out",
+                        timeout_seconds=self.timeout_seconds,
+                    )
+                for key, _events in selector.select(min(remaining, 0.1)):
+                    selected_stream: Any = key.fileobj
+                    if key.data is None:
+                        try:
+                            written = os.write(
+                                selected_stream.fileno(), request[sent : sent + 65536]
+                            )
+                        except BlockingIOError:
+                            continue
+                        except BrokenPipeError:
+                            written = 0
+                        sent += written
+                        if written == 0 or sent == len(request):
+                            selector.unregister(selected_stream)
+                            selected_stream.close()
+                        continue
+                    try:
+                        chunk = os.read(selected_stream.fileno(), 65536)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(selected_stream)
+                        selected_stream.close()
+                        continue
+                    if len(stdout) + len(stderr) + len(chunk) > MAX_PROCESS_OUTPUT:
+                        self._stop(process)
+                        _error(
+                            "SANKA_EXTENSION_PROTOCOL",
+                            "Extension process output exceeded the limit",
+                        )
+                    key.data.extend(chunk)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._stop(process)
+                _error(
+                    "SANKA_EXTENSION_TIMEOUT",
+                    "Extension execution timed out",
+                    timeout_seconds=self.timeout_seconds,
+                )
+            try:
+                return process.wait(timeout=remaining), bytes(stdout), bytes(stderr)
+            except subprocess.TimeoutExpired:
+                self._stop(process)
+                _error(
+                    "SANKA_EXTENSION_TIMEOUT",
+                    "Extension execution timed out",
+                    timeout_seconds=self.timeout_seconds,
+                )
+        except BaseException:
+            self._stop(process)
+            raise
+        finally:
+            selector.close()
+            for stream in streams:
+                with suppress(OSError):
+                    stream.close()
 
     @staticmethod
     def _validate_request(lock: LockEntry, request: dict[str, Any]) -> None:
@@ -293,45 +407,41 @@ class ExtensionRunner:
             {name: os.environ[name] for name in explicit_env_names if name in os.environ}
         )
         try:
-            completed = subprocess.run(
-                [str(self._executable(lock))],
-                input=json.dumps(
+            returncode, stdout_bytes, stderr_bytes = self._execute(
+                self._executable(lock),
+                json.dumps(
                     request,
                     ensure_ascii=False,
                     separators=(",", ":"),
                     sort_keys=True,
                     allow_nan=False,
-                ),
-                text=True,
-                capture_output=True,
-                timeout=self.timeout_seconds,
-                check=False,
+                ).encode("utf-8"),
                 cwd=request["project_root"],
-                env=environment,
+                environment=environment,
             )
-        except subprocess.TimeoutExpired as error:
-            raise ExtensionError(
-                "SANKA_EXTENSION_TIMEOUT",
-                "Extension execution timed out",
-                details={"timeout_seconds": self.timeout_seconds},
-            ) from error
+        except ExtensionError:
+            raise
         except OSError as error:
             raise ExtensionError(
                 "SANKA_EXTENSION_EXECUTION_FAILED",
                 "Extension process could not be started",
                 details={"reason": str(error)},
             ) from error
-        if (
-            len(completed.stdout.encode()) > MAX_PROCESS_OUTPUT
-            or len(completed.stderr.encode()) > MAX_PROCESS_OUTPUT
-        ):
-            _error("SANKA_EXTENSION_PROTOCOL", "Extension process output exceeded the limit")
-        result = self._parse_response(lock, request, completed.stdout, allowed_roots)
-        if (result.outcome == "success") != (completed.returncode == 0):
+        try:
+            stdout = stdout_bytes.decode("utf-8")
+            stderr_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ExtensionError(
+                "SANKA_EXTENSION_PROTOCOL",
+                "Extension process output must be valid UTF-8",
+                details={"stream": "stdout" if error.object is stdout_bytes else "stderr"},
+            ) from error
+        result = self._parse_response(lock, request, stdout, allowed_roots)
+        if (result.outcome == "success") != (returncode == 0):
             _error(
                 "SANKA_EXTENSION_PROTOCOL",
                 "Extension exit status does not match its response outcome",
-                returncode=completed.returncode,
+                returncode=returncode,
             )
         return result
 

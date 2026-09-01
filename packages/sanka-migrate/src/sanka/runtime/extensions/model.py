@@ -77,6 +77,8 @@ class Recommendation:
     version: str
     marketplace: str
     marketplace_identity: str
+    snapshot_digest: str
+    manifest_digest: str
     commands: tuple[str, ...]
     targets: tuple[str, ...]
     evidence: tuple[MatchedEvidence, ...]

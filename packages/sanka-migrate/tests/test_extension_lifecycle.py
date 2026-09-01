@@ -53,6 +53,8 @@ class FakeStore:
                 version=self.lock.version,
                 marketplace="official",
                 marketplace_identity=self.lock.marketplace_identity,
+                snapshot_digest=self.lock.snapshot_digest,
+                manifest_digest=self.lock.manifest_digest,
                 commands=self.lock.commands,
                 targets=("fastapi",),
                 evidence=(),
@@ -228,6 +230,44 @@ def test_plan_selects_target_and_binds_a_generic_core_plan(tmp_path: Path) -> No
     assert plan["plan_hash"].startswith("sha256:")
 
 
+def test_plan_rejects_resolved_lock_identity_drift_before_dispatch(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    expected = _lock()
+    recommendation = SimpleNamespace(
+        id=expected.id,
+        version=expected.version,
+        marketplace="official",
+        marketplace_identity=expected.marketplace_identity,
+        snapshot_digest=expected.snapshot_digest,
+        manifest_digest=expected.manifest_digest,
+        commands=("plan",),
+        targets=("fastapi",),
+        evidence=(),
+        status=("available", "installed", "locked"),
+        add_command=f"sanka-migrate extension add {expected.id}",
+    )
+
+    class Store:
+        def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
+            return cast(tuple[Recommendation, ...], (recommendation,))
+
+        def resolve_locked(self, _extension_id: str) -> LockEntry:
+            return replace(
+                expected,
+                version="0.2.0",
+                snapshot_digest="9" * 40,
+                manifest_digest="sha256:" + "8" * 64,
+            )
+
+    runner = FakeRunner()
+
+    with pytest.raises(ExtensionError) as raised:
+        _lifecycle(project, cast(FakeStore, Store()), runner).plan(target="fastapi")
+
+    assert raised.value.code == "SANKA_EXTENSION_IDENTITY"
+    assert runner.calls == []
+
+
 def test_plan_auto_scan_receives_the_normalized_configuration_and_explicit_environment(
     tmp_path: Path,
 ) -> None:
@@ -255,18 +295,21 @@ def test_scan_dispatches_every_scan_capable_lock_under_its_exact_identity(
             id="a/one",
             marketplace_identity="marketplace-a",
             manifest_digest="sha256:" + "a" * 64,
+            commands=("plan", "scan"),
         ),
         "b/two": replace(
             _lock(),
             id="b/two",
             marketplace_identity="marketplace-b",
             manifest_digest="sha256:" + "b" * 64,
+            commands=("plan", "scan"),
         ),
         "c/plan-only": replace(
             _lock(),
             id="c/plan-only",
             marketplace_identity="marketplace-c",
             manifest_digest="sha256:" + "c" * 64,
+            commands=("plan",),
         ),
     }
     recommendations = tuple(
@@ -275,6 +318,8 @@ def test_scan_dispatches_every_scan_capable_lock_under_its_exact_identity(
             version=lock.version,
             marketplace=lock.marketplace_identity,
             marketplace_identity=lock.marketplace_identity,
+            snapshot_digest=lock.snapshot_digest,
+            manifest_digest=lock.manifest_digest,
             commands=("plan",) if extension_id == "c/plan-only" else ("plan", "scan"),
             targets=("fastapi",),
             evidence=(),
@@ -328,6 +373,8 @@ def test_interactive_install_selects_the_exact_colliding_marketplace_recommendat
                         version="1.0.0",
                         marketplace=name,
                         marketplace_identity=identity,
+                        snapshot_digest=_lock().snapshot_digest,
+                        manifest_digest=_lock().manifest_digest,
                         commands=("scan",),
                         targets=("fastapi",),
                         evidence=(),
@@ -345,6 +392,7 @@ def test_interactive_install_selects_the_exact_colliding_marketplace_recommendat
                 id=extension_id,
                 version="1.0.0",
                 marketplace_identity=marketplace,
+                commands=("scan",),
             )
 
         def resolve_locked(self, extension_id: str) -> LockEntry:
@@ -354,6 +402,7 @@ def test_interactive_install_selects_the_exact_colliding_marketplace_recommendat
                 id=extension_id,
                 version="1.0.0",
                 marketplace_identity=self.installed_marketplace,
+                commands=("scan",),
             )
 
     store = Store()
