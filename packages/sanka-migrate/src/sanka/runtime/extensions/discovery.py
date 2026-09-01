@@ -7,6 +7,7 @@ import ast
 import json
 import os
 import re
+import stat
 import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
@@ -58,6 +59,11 @@ IMPORT = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
 VERSION = re.compile(r"(?P<release>\d+(?:\.\d+){1,2})(?:(?P<pre>a|b|rc)(?P<pre_number>\d+))?")
 SPECIFIER = re.compile(r"(<=|>=|==|<|>)(.+)")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+PYTHON_TAG = re.compile(
+    r"(?:py|cp|pp|pypy)\d+[A-Za-z0-9_]*(?:\.(?:py|cp|pp|pypy)\d+[A-Za-z0-9_]*)*"
+)
+WHEEL_TAG = re.compile(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*")
+BUILD_TAG = re.compile(r"\d[A-Za-z0-9_]*")
 
 
 def _error(code: str, message: str, *, path: Path | None = None, reason: str = "") -> NoReturn:
@@ -158,6 +164,58 @@ def _python_imports(text: str) -> set[str]:
     return imports
 
 
+def _stat_identity(item: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        item.st_dev,
+        item.st_ino,
+        item.st_mode,
+        item.st_size,
+        item.st_mtime_ns,
+        item.st_ctime_ns,
+    )
+
+
+def _read_source(path: Path) -> tuple[bool, bytes | None]:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        path_before = os.lstat(path)
+        if not stat.S_ISREG(path_before.st_mode):
+            return False, None
+        descriptor = os.open(path, flags)
+    except OSError:
+        return False, None
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or (path_before.st_dev, path_before.st_ino) != (
+            before.st_dev,
+            before.st_ino,
+        ):
+            return False, None
+        chunks: list[bytes] = []
+        remaining = MAX_SOURCE_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(descriptor)
+        path_after = os.lstat(path)
+    except OSError:
+        return False, None
+    finally:
+        os.close(descriptor)
+    if len({_stat_identity(item) for item in (path_before, before, after, path_after)}) != 1:
+        return False, None
+    data = b"".join(chunks)
+    return True, data if len(data) <= MAX_SOURCE_BYTES else None
+
+
 def fingerprint_repository(root: Path) -> Fingerprint:
     """Build a deterministic project fingerprint without importing project code."""
     if root.is_symlink() or not root.is_dir():
@@ -177,8 +235,6 @@ def fingerprint_repository(root: Path) -> Fingerprint:
         )
         for name in sorted(files):
             path = current_path / name
-            if path.is_symlink() or not path.is_file():
-                continue
             file_count += 1
             if file_count > MAX_FILES:
                 raise ExtensionError(
@@ -186,6 +242,9 @@ def fingerprint_repository(root: Path) -> Fingerprint:
                     "Repository exceeds the static fingerprint file limit",
                     details={"limit": MAX_FILES},
                 )
+            regular, data = _read_source(path)
+            if not regular:
+                continue
             relative = path.relative_to(root).as_posix()
             suffix = path.suffix.lower()
             evidence.add(MatchedEvidence("file", relative, relative))
@@ -194,16 +253,11 @@ def fingerprint_repository(root: Path) -> Fingerprint:
             language = LANGUAGES.get(suffix)
             if language:
                 evidence.add(MatchedEvidence("language", language, relative))
-            try:
-                size = path.stat().st_size
-            except OSError:
-                continue
-            if size > MAX_SOURCE_BYTES:
+            if data is None:
                 continue
             try:
-                data = path.read_bytes()
                 text = data.decode("utf-8")
-            except (OSError, UnicodeDecodeError):
+            except UnicodeDecodeError:
                 continue
             discovered: set[str] = set()
             if suffix == ".txt" and (
@@ -242,7 +296,7 @@ def fingerprint_repository(root: Path) -> Fingerprint:
     languages = tuple(sorted({item.value for item in ordered if item.kind == "language"}))
     framework_names = tuple(sorted(frameworks))
     dependency_names = tuple(sorted(dependencies))
-    digest = content_hash(
+    fingerprint_hash = content_hash(
         {
             "dependencies": dependency_names,
             "evidence": [item.__dict__ for item in ordered],
@@ -250,7 +304,7 @@ def fingerprint_repository(root: Path) -> Fingerprint:
             "languages": languages,
         }
     )
-    return Fingerprint(languages, framework_names, dependency_names, ordered, digest)
+    return Fingerprint(languages, framework_names, dependency_names, ordered, fingerprint_hash)
 
 
 def _invalid(code: str, path: Path, reason: str) -> NoReturn:
@@ -308,11 +362,39 @@ def _valid_specifier(value: Any) -> bool:
     return True
 
 
+def _normalized_distribution(value: str) -> str:
+    return re.sub(r"[-_.]+", "_", value).lower()
+
+
+def _wheel_identity(name: str) -> tuple[str, str] | None:
+    if not name.endswith(".whl"):
+        return None
+    parts = name.removesuffix(".whl").split("-")
+    if len(parts) not in {5, 6}:
+        return None
+    distribution, version = parts[:2]
+    if (
+        DISTRIBUTION.fullmatch(distribution) is None
+        or VERSION.fullmatch(version) is None
+        or (len(parts) == 6 and BUILD_TAG.fullmatch(parts[2]) is None)
+        or PYTHON_TAG.fullmatch(parts[-3]) is None
+        or WHEEL_TAG.fullmatch(parts[-2]) is None
+        or WHEEL_TAG.fullmatch(parts[-1]) is None
+    ):
+        return None
+    return _normalized_distribution(distribution), version
+
+
 def _parse_matcher(value: Any, code: str, path: Path) -> Matcher:
     item = _object(value, {"kind", "value"}, code, path, "matcher")
     kind = item["kind"]
     matcher_value = item["value"]
-    if kind not in MATCHER_KINDS or not isinstance(matcher_value, str) or not matcher_value:
+    if (
+        not isinstance(kind, str)
+        or kind not in MATCHER_KINDS
+        or not isinstance(matcher_value, str)
+        or not matcher_value
+    ):
         _invalid(code, path, "matcher kind or value is unsupported")
     if kind == "file":
         pure = PurePosixPath(matcher_value)
@@ -413,10 +495,15 @@ def _load_manifest(path: Path, marketplace: str) -> Manifest:
     if not isinstance(raw_wheels, list) or not raw_wheels:
         _invalid(code, path, "wheels must be a non-empty array")
     wheels: list[Wheel] = []
+    wheel_identities: list[tuple[str, str]] = []
     for raw_wheel in raw_wheels:
         wheel = _object(raw_wheel, {"name", "sha256", "url"}, code, path, "wheel")
         name, url, digest = wheel["name"], wheel["url"], wheel["sha256"]
-        parsed_url = urlparse(url) if isinstance(url, str) else None
+        try:
+            parsed_url = urlparse(url) if isinstance(url, str) else None
+            url_name = Path(parsed_url.path).name if parsed_url is not None else None
+        except (TypeError, ValueError):
+            _invalid(code, path, "wheel URL is invalid")
         if (
             not isinstance(name, str)
             or Path(name).name != name
@@ -424,16 +511,20 @@ def _load_manifest(path: Path, marketplace: str) -> Manifest:
             or parsed_url is None
             or parsed_url.scheme != "https"
             or not parsed_url.netloc
-            or Path(parsed_url.path).name != name
+            or url_name != name
             or not isinstance(digest, str)
             or SHA256.fullmatch(digest) is None
         ):
             _invalid(code, path, "wheel metadata is invalid")
+        identity = _wheel_identity(name)
+        if identity is None:
+            _invalid(code, path, "wheel filename is invalid")
         wheels.append(Wheel(name, url, digest))
+        wheel_identities.append(identity)
     if len({wheel.name for wheel in wheels}) != len(wheels):
         _invalid(code, path, "wheel names must be unique")
-    distribution_prefix = f"{distribution['name'].replace('-', '_')}-{version}-"
-    if not any(wheel.name.startswith(distribution_prefix) for wheel in wheels):
+    expected_identity = (_normalized_distribution(distribution["name"]), version)
+    if expected_identity not in wheel_identities:
         _invalid(code, path, "manifest does not contain its exact distribution wheel")
 
     return Manifest(
@@ -454,11 +545,36 @@ def _load_manifest(path: Path, marketplace: str) -> Manifest:
     )
 
 
+def _confined_marketplace_path(root: Path, candidate: Path, display: str) -> Path:
+    try:
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ExtensionError(
+            "SANKA_MARKETPLACE_PATH_INVALID",
+            "Marketplace path cannot be resolved inside the snapshot",
+            details={"path": display},
+        ) from error
+    if not resolved.is_relative_to(root):
+        raise ExtensionError(
+            "SANKA_MARKETPLACE_PATH_INVALID",
+            "Marketplace path escapes the snapshot",
+            details={"path": display},
+        )
+    return resolved
+
+
 def load_marketplace(snapshot_root: Path) -> tuple[Manifest, ...]:
     """Load one immutable marketplace snapshot with strict path confinement."""
-    root = snapshot_root.resolve()
+    try:
+        root = snapshot_root.resolve()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ExtensionError(
+            "SANKA_MARKETPLACE_PATH_INVALID",
+            "Marketplace snapshot root cannot be resolved",
+            details={"path": snapshot_root.as_posix()},
+        ) from error
     code = "SANKA_MARKETPLACE_INVALID"
-    catalog_path = root / "marketplace.json"
+    catalog_path = _confined_marketplace_path(root, root / "marketplace.json", "marketplace.json")
     catalog = _object(
         _load_json(catalog_path, code),
         {"extensions", "schema_version"},
@@ -482,13 +598,7 @@ def load_marketplace(snapshot_root: Path) -> tuple[Manifest, ...]:
         if extension_id in seen:
             _invalid(code, catalog_path, "catalog extension ids must be unique")
         seen.add(extension_id)
-        candidate = (root / manifest_name).resolve()
-        if not candidate.is_relative_to(root):
-            raise ExtensionError(
-                "SANKA_MARKETPLACE_PATH_INVALID",
-                "Catalog manifest path escapes the marketplace snapshot",
-                details={"path": manifest_name},
-            )
+        candidate = _confined_marketplace_path(root, root / manifest_name, manifest_name)
         manifest = _load_manifest(candidate, snapshot_root.name)
         if manifest.id != extension_id:
             _invalid(code, catalog_path, "catalog and manifest extension ids differ")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -54,6 +55,8 @@ def test_drf_fingerprint_matches_with_exact_evidence(tmp_path: Path) -> None:
 
     assert fingerprint.languages == ("python",)
     assert "django-rest-framework" in fingerprint.frameworks
+    assert fingerprint.hash.startswith("sha256:")
+    assert not hasattr(fingerprint, "digest")
     assert recommendations[0].id == "sanka/drf-to-fastapi"
     assert recommendations[0].evidence == (
         MatchedEvidence("dependency", "djangorestframework", "requirements.txt"),
@@ -144,6 +147,86 @@ def test_oversized_source_is_not_parsed(tmp_path: Path) -> None:
     assert not any(item.kind == "static_import" for item in fingerprint.evidence)
 
 
+def test_source_at_exact_read_limit_is_parsed(tmp_path: Path) -> None:
+    prefix = b"import rest_framework\n#"
+    (tmp_path / "limit.py").write_bytes(prefix + b"x" * (1024 * 1024 - len(prefix)))
+
+    fingerprint = fingerprint_repository(tmp_path)
+
+    assert fingerprint.frameworks == ("django-rest-framework",)
+
+
+def test_source_growth_after_size_check_cannot_exceed_read_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "changing.py"
+    source.write_text("# initially small\n", encoding="utf-8")
+    original_read_bytes = Path.read_bytes
+
+    def grow_during_path_read(path: Path) -> bytes:
+        if path == source:
+            return b"import rest_framework\n" + b"#" * (2 * 1024 * 1024)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", grow_during_path_read)
+
+    fingerprint = fingerprint_repository(tmp_path)
+
+    assert "django-rest-framework" not in fingerprint.frameworks
+
+
+def test_path_swapped_to_symlink_during_read_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repository"
+    root.mkdir()
+    source = root / "changing.py"
+    source.write_text("# pinned descriptor\n", encoding="utf-8")
+    external = tmp_path / "external.py"
+    external.write_text("import rest_framework\n", encoding="utf-8")
+    original_read = os.read
+    backup = root / "original.py"
+    swapped = False
+
+    def swap_path_before_read(descriptor: int, size: int) -> bytes:
+        nonlocal swapped
+        if not swapped:
+            source.rename(backup)
+            source.symlink_to(external)
+            swapped = True
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(os, "read", swap_path_before_read)
+
+    fingerprint = fingerprint_repository(root)
+
+    assert not any(item.path == "changing.py" for item in fingerprint.evidence)
+
+
+def test_symlink_is_skipped_without_platform_no_follow_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repository"
+    root.mkdir()
+    external = tmp_path / "external.py"
+    external.write_text("import rest_framework\n", encoding="utf-8")
+    (root / "linked.py").symlink_to(external)
+    monkeypatch.delattr(os, "O_NOFOLLOW")
+
+    fingerprint = fingerprint_repository(root)
+
+    assert not any(item.path == "linked.py" for item in fingerprint.evidence)
+
+
+def test_non_regular_repository_entry_is_skipped(tmp_path: Path) -> None:
+    fifo = tmp_path / "source.py"
+    os.mkfifo(fifo)
+
+    fingerprint = fingerprint_repository(tmp_path)
+
+    assert not any(item.path == "source.py" for item in fingerprint.evidence)
+
+
 def test_repository_file_limit_fails_closed(tmp_path: Path) -> None:
     for number in range(20_001):
         (tmp_path / f"{number:05}.txt").touch()
@@ -227,6 +310,33 @@ def test_marketplace_loader_rejects_malformed_json(tmp_path: Path) -> None:
     assert raised.value.code == "SANKA_MARKETPLACE_INVALID"
 
 
+def test_marketplace_loader_rejects_catalog_symlink_outside_snapshot(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    external = tmp_path / "external.json"
+    external.write_text(
+        json.dumps({"schema_version": "sanka-marketplace/v1", "extensions": []}),
+        encoding="utf-8",
+    )
+    (snapshot / "marketplace.json").symlink_to(external)
+
+    with pytest.raises(ExtensionError) as raised:
+        load_marketplace(snapshot)
+
+    assert raised.value.code == "SANKA_MARKETPLACE_PATH_INVALID"
+    assert raised.value.details == {"path": "marketplace.json"}
+
+
+def test_marketplace_loader_translates_catalog_symlink_cycle(tmp_path: Path) -> None:
+    (tmp_path / "marketplace.json").symlink_to("marketplace.json")
+
+    with pytest.raises(ExtensionError) as raised:
+        load_marketplace(tmp_path)
+
+    assert raised.value.code == "SANKA_MARKETPLACE_PATH_INVALID"
+    assert raised.value.details == {"path": "marketplace.json"}
+
+
 def test_marketplace_loader_rejects_manifest_path_outside_snapshot(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-manifest.json"
     outside.write_text(json.dumps(fixture_manifest()), encoding="utf-8")
@@ -244,6 +354,43 @@ def test_marketplace_loader_rejects_manifest_path_outside_snapshot(tmp_path: Pat
         load_marketplace(tmp_path)
 
     assert raised.value.code == "SANKA_MARKETPLACE_PATH_INVALID"
+
+
+def test_marketplace_loader_translates_manifest_symlink_cycle(tmp_path: Path) -> None:
+    (tmp_path / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sanka-marketplace/v1",
+                "extensions": [{"id": "sanka/drf-to-fastapi", "manifest": "extension.json"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "extension.json").symlink_to("extension.json")
+
+    with pytest.raises(ExtensionError) as raised:
+        load_marketplace(tmp_path)
+
+    assert raised.value.code == "SANKA_MARKETPLACE_PATH_INVALID"
+    assert raised.value.details == {"path": "extension.json"}
+
+
+def test_marketplace_loader_translates_unresolvable_manifest_path(tmp_path: Path) -> None:
+    (tmp_path / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sanka-marketplace/v1",
+                "extensions": [{"id": "sanka/drf-to-fastapi", "manifest": "bad\u0000path"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ExtensionError) as raised:
+        load_marketplace(tmp_path)
+
+    assert raised.value.code == "SANKA_MARKETPLACE_PATH_INVALID"
+    assert raised.value.details == {"path": "bad\u0000path"}
 
 
 @pytest.mark.parametrize(
@@ -272,7 +419,15 @@ def test_marketplace_loader_rejects_manifest_path_outside_snapshot(tmp_path: Pat
             "SANKA_EXTENSION_MANIFEST_INVALID",
         ),
         (
+            lambda item: item["match"]["all"][0].update(kind=[]),
+            "SANKA_EXTENSION_MANIFEST_INVALID",
+        ),
+        (
             lambda item: item["match"]["all"][0].update(value={"all": []}),
+            "SANKA_EXTENSION_MANIFEST_INVALID",
+        ),
+        (
+            lambda item: item["wheels"][0].update(url="https://[::1"),
             "SANKA_EXTENSION_MANIFEST_INVALID",
         ),
     ],
@@ -286,6 +441,41 @@ def test_manifest_schema_is_strict(tmp_path: Path, mutate: object, code: str) ->
         load_marketplace(tmp_path / "market")
 
     assert raised.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("wheel_index", "name"),
+    [
+        (1, "sanka_extension_drf_to_fastapi-0.1.0a1-not-a-wheel.whl"),
+        (1, "sanka_extension_drf_to_fastapi-0.1.0a2-py3-none-any.whl"),
+        (1, "other-0.1.0a1-py3-none-any.whl"),
+        (1, "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none.whl"),
+        (0, "sanka+extension+sdk-0.1.0a1-py3-none-any.whl"),
+    ],
+)
+def test_manifest_rejects_deceptive_or_invalid_distribution_wheel(
+    tmp_path: Path, wheel_index: int, name: str
+) -> None:
+    manifest = fixture_manifest()
+    wheel = manifest["wheels"][wheel_index]
+    wheel["name"] = name
+    wheel["url"] = f"https://example.test/{name}"
+    write_snapshot(tmp_path / "market", manifest)
+
+    with pytest.raises(ExtensionError) as raised:
+        load_marketplace(tmp_path / "market")
+
+    assert raised.value.code == "SANKA_EXTENSION_MANIFEST_INVALID"
+
+
+def test_manifest_compares_normalized_distribution_name(tmp_path: Path) -> None:
+    manifest = fixture_manifest()
+    manifest["distribution"]["name"] = "sanka.extension_drf-to-fastapi"
+    write_snapshot(tmp_path / "market", manifest)
+
+    loaded = load_marketplace(tmp_path / "market")[0]
+
+    assert loaded.distribution == "sanka.extension_drf-to-fastapi"
 
 
 def test_marketplace_loader_sorts_manifests(tmp_path: Path) -> None:

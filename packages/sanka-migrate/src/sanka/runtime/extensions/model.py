@@ -48,7 +48,7 @@ class Fingerprint:
     frameworks: tuple[str, ...]
     dependencies: tuple[str, ...]
     evidence: tuple[MatchedEvidence, ...]
-    digest: str
+    hash: str
 
 
 @dataclass(frozen=True)
