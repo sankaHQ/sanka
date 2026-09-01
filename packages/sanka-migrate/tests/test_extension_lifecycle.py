@@ -314,6 +314,78 @@ def test_plan_auto_scan_receives_the_normalized_configuration_and_explicit_envir
     assert runner.explicit_env_names[0] == ("DJANGO_SECRET_KEY",)
 
 
+def test_scan_persists_only_sorted_explicit_environment_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project(tmp_path)
+    monkeypatch.setenv("FIRST_SECRET", "first-secret-value")
+    monkeypatch.setenv("SECOND_SECRET", "second-secret-value")
+
+    _lifecycle(project, FakeStore(installed=True), FakeRunner()).scan(
+        explicit_env_names=("SECOND_SECRET", "FIRST_SECRET"),
+    )
+
+    serialized = (project / ".sanka" / "scan.json").read_text()
+    scan = json.loads(serialized)
+    assert scan["explicit_env_names"] == ["FIRST_SECRET", "SECOND_SECRET"]
+    assert "first-secret-value" not in serialized
+    assert "second-secret-value" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("saved_names", "current_names"),
+    [
+        (("FIRST_SECRET",), ("SECOND_SECRET",)),
+        (("FIRST_SECRET",), ()),
+    ],
+    ids=("changed-names", "removed-names"),
+)
+def test_plan_refreshes_scan_when_explicit_environment_names_change(
+    tmp_path: Path,
+    saved_names: tuple[str, ...],
+    current_names: tuple[str, ...],
+) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    lifecycle.scan(explicit_env_names=saved_names)
+
+    lifecycle.plan(target="fastapi", explicit_env_names=current_names)
+
+    assert [request["command"] for _lock, request in runner.calls] == [
+        "scan",
+        "scan",
+        "plan",
+    ]
+    scan = json.loads((project / ".sanka" / "scan.json").read_text())
+    assert scan["explicit_env_names"] == sorted(current_names)
+
+
+def test_plan_refreshes_scan_when_an_explicit_environment_value_may_have_changed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    monkeypatch.setenv("SANKA_CONTEXT", "first-value")
+    lifecycle.scan(explicit_env_names=("SANKA_CONTEXT",))
+    monkeypatch.setenv("SANKA_CONTEXT", "second-value")
+
+    lifecycle.plan(target="fastapi", explicit_env_names=("SANKA_CONTEXT",))
+
+    assert [request["command"] for _lock, request in runner.calls] == [
+        "scan",
+        "scan",
+        "plan",
+    ]
+    serialized = (project / ".sanka" / "scan.json").read_text()
+    assert json.loads(serialized)["explicit_env_names"] == ["SANKA_CONTEXT"]
+    assert "first-value" not in serialized
+    assert "second-value" not in serialized
+
+
 def test_plan_refreshes_an_existing_scan_for_changed_configuration(tmp_path: Path) -> None:
     project = _project(tmp_path)
     runner = FakeRunner()

@@ -2340,7 +2340,8 @@ class ExtensionStore:
         wheels: tuple[tuple[Path, str], ...],
     ) -> dict[str, tuple[int, str]]:
         records: dict[str, tuple[int, str]] = {}
-        installed_paths: set[str] = set()
+        installed_files: set[str] = set()
+        required_directories: set[str] = set()
         for path, expected_sha256 in wheels:
             if _store_file_sha256(self.user_root, path) != expected_sha256:
                 _error(
@@ -2353,17 +2354,44 @@ class ExtensionStore:
                 zipfile.ZipFile(cast(Any, source)) as archive,
             ):
                 for info in archive.infolist():
-                    if info.is_dir():
-                        continue
                     relative = self._wheel_install_path(info, path.name)
                     name = relative.as_posix()
-                    if name in installed_paths:
+                    if info.is_dir() and name == ".":
+                        continue
+                    parents = {
+                        parent.as_posix()
+                        for parent in relative.parents
+                        if parent != PurePosixPath(".")
+                    }
+                    if not info.is_dir() and name in installed_files:
                         _error(
                             "SANKA_EXTENSION_ARTIFACT_INVALID",
                             "Extension wheels install duplicate import paths",
                             path=name,
                         )
-                    installed_paths.add(name)
+                    directories = parents | ({name} if info.is_dir() else set())
+                    conflict = (
+                        name
+                        if not info.is_dir() and name in required_directories
+                        else next(
+                            (
+                                directory
+                                for directory in sorted(directories)
+                                if directory in installed_files
+                            ),
+                            None,
+                        )
+                    )
+                    if conflict is not None:
+                        _error(
+                            "SANKA_EXTENSION_ARTIFACT_INVALID",
+                            "Extension wheels require one import path as both a file and directory",
+                            path=conflict,
+                        )
+                    required_directories.update(directories)
+                    if info.is_dir():
+                        continue
+                    installed_files.add(name)
                     if any(part.endswith(".dist-info") for part in relative.parts) and (
                         relative.name == "RECORD"
                     ):

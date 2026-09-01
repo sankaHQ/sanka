@@ -875,6 +875,158 @@ def test_cross_wheel_destination_collision_is_rejected_before_materialization(
     assert raised.value.details == {"path": "shared.py"}
 
 
+@pytest.mark.parametrize(
+    "members",
+    [
+        (("collision", "file\n"), ("collision/child.py", "child\n")),
+        (("collision/child.py", "child\n"), ("collision", "file\n")),
+    ],
+    ids=("file-first", "child-first"),
+)
+def test_same_wheel_file_and_child_destination_conflict_is_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    members: tuple[tuple[str, str], ...],
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source", extra_members=members)
+    name = "example_demo-0.1.0-py3-none-any.whl"
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        pytest.fail("file/child conflict reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.details == {"path": "collision"}
+
+
+@pytest.mark.parametrize(
+    ("primary_member", "dependency_member"),
+    [
+        (("collision", "file\n"), ("collision/child.py", "child\n")),
+        (("collision/child.py", "child\n"), ("collision", "file\n")),
+    ],
+    ids=("file-first", "child-first"),
+)
+def test_cross_wheel_file_and_child_destination_conflict_is_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    primary_member: tuple[str, str],
+    dependency_member: tuple[str, str],
+) -> None:
+    source, _ = _marketplace(tmp_path / "source")
+    primary_name, primary, primary_digest = _wheel(
+        "example-demo",
+        "0.1.0",
+        "example-demo",
+        requires=("example-sdk==1.0.0",),
+        extra_members=(primary_member,),
+    )
+    sdk_name, sdk, sdk_digest = _wheel(
+        "example-sdk",
+        "1.0.0",
+        "example-sdk",
+        extra_members=(dependency_member,),
+    )
+    manifest_path = next(path for path in source.glob("*.json") if path.name != "marketplace.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wheels"] = [
+        {
+            "name": primary_name,
+            "url": f"https://fixtures.invalid/{primary_name}",
+            "sha256": primary_digest,
+        },
+        {
+            "name": sdk_name,
+            "url": f"https://fixtures.invalid/{sdk_name}",
+            "sha256": sdk_digest,
+        },
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {primary_name: primary, sdk_name: sdk})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        pytest.fail("cross-wheel file/child conflict reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.details == {"path": "collision"}
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        (
+            ("collision", "file\n"),
+            ("example_demo-0.1.0.data/purelib/collision/", ""),
+        ),
+        (
+            ("collision/", ""),
+            ("example_demo-0.1.0.data/purelib/collision", "file\n"),
+        ),
+    ],
+    ids=("file-first", "directory-first"),
+)
+def test_explicit_directory_and_file_destination_conflict_is_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    members: tuple[tuple[str, str], ...],
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source", extra_members=members)
+    name = "example_demo-0.1.0-py3-none-any.whl"
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        pytest.fail("directory/file conflict reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.details == {"path": "collision"}
+
+
+def test_sibling_wheel_destinations_reach_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, wheel = _marketplace(
+        tmp_path / "source",
+        extra_members=(("siblings/left.py", "left\n"), ("siblings/right.py", "right\n")),
+    )
+    name = "example_demo-0.1.0-py3-none-any.whl"
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+
+    class Materialized(RuntimeError):
+        pass
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        raise Materialized
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(Materialized):
+        store.add_extension("example/demo")
+
+
 def test_declared_dependency_version_must_satisfy_requires_dist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

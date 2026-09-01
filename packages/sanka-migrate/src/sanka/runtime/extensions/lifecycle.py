@@ -19,7 +19,11 @@ from sanka.runtime.extensions.model import (
     MatchedEvidence,
     Recommendation,
 )
-from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
+from sanka.runtime.extensions.runner import (
+    ExtensionResult,
+    ExtensionRunner,
+    _canonical_environment_names,
+)
 from sanka.runtime.extensions.store import DEFAULT_EXTENSION_ID, ExtensionStore, LockEntry
 from sanka.runtime.hashing import content_hash
 from sanka.runtime.safe_local_io import (
@@ -370,6 +374,7 @@ class ApplicationLifecycle:
         configuration: Mapping[str, Any] | None = None,
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
+        explicit_env_names = _canonical_environment_names(explicit_env_names)
         fingerprint = fingerprint_repository(self.project_root)
         self._ensure_enabled(
             fingerprint,
@@ -439,6 +444,7 @@ class ApplicationLifecycle:
         scan_payload = {
             "schema_version": SCAN_SCHEMA,
             "configuration": normalized,
+            "explicit_env_names": list(explicit_env_names),
             **data,
         }
         scan_path = _write_json(self.artifact_root / "scan.json", scan_payload)
@@ -487,8 +493,10 @@ class ApplicationLifecycle:
                 isinstance(saved, dict)
                 and saved.get("hash") == fingerprint.hash
                 and scan.get("configuration") == normalized
+                and scan.get("explicit_env_names") == list(explicit_env_names)
                 and saved_locks == expected_locks
                 and scan.get("recommendations") == expected_recommendations
+                and not explicit_env_names
             ):
                 return
         self._scan_locked(
@@ -506,6 +514,7 @@ class ApplicationLifecycle:
         configuration: Mapping[str, Any] | None = None,
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
+        explicit_env_names = _canonical_environment_names(explicit_env_names)
         normalized = _normalized_json_object(configuration)
         fingerprint = fingerprint_repository(self.project_root)
         self._ensure_enabled(

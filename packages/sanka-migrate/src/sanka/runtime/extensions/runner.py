@@ -40,6 +40,14 @@ def _error(code: str, message: str, **details: Any) -> NoReturn:
     raise ExtensionError(code, message, details=details)
 
 
+def _canonical_environment_names(names: tuple[str, ...]) -> tuple[str, ...]:
+    if len(names) != len(set(names)) or any(
+        ENVIRONMENT_NAME.fullmatch(name) is None for name in names
+    ):
+        _error("SANKA_EXTENSION_ENVIRONMENT", "Explicit environment names are invalid")
+    return tuple(sorted(names))
+
+
 def _json_value(value: object, field: str) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
@@ -401,10 +409,7 @@ class ExtensionRunner:
         self._validate_request(lock, request)
         if not allowed_roots:
             _error("SANKA_EXTENSION_PATH", "At least one artifact root is required")
-        if len(explicit_env_names) != len(set(explicit_env_names)) or any(
-            ENVIRONMENT_NAME.fullmatch(name) is None for name in explicit_env_names
-        ):
-            _error("SANKA_EXTENSION_ENVIRONMENT", "Explicit environment names are invalid")
+        explicit_env_names = _canonical_environment_names(explicit_env_names)
         environment = {name: os.environ[name] for name in SAFE_ENV if name in os.environ}
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment.update(
