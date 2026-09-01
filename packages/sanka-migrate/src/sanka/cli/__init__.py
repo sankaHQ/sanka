@@ -37,7 +37,6 @@ import json
 import shlex
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -51,29 +50,10 @@ from sanka.cli._research import (
 from sanka.runtime.__about__ import __version__
 from sanka.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
-from sanka.runtime.frameworks import (
-    COMPATIBILITY_STRATEGY,
-    DEFAULT_ARTIFACT_DIR,
-    DEFAULT_FASTAPI_OUTPUT,
-    NATIVE_STRATEGY,
-    FrameworkMigrationError,
-    GeneratedEnvironmentError,
-    apply_fastapi_plan,
-    load_fastapi_plan,
-    load_framework_scan,
-    plan_fastapi,
-    scan_django,
-    test_fastapi_app,
-    verify_fastapi_migration,
-    write_bench_candidate,
-    write_gap_report,
-)
-from sanka.runtime.frameworks.model import FrameworkPlan, FrameworkScan
-from sanka.runtime.frameworks.native_async import (
-    DEFAULT_SQL_ENGINE,
-    SQL_ENGINE_LABELS,
-    SQL_ENGINES,
-)
+from sanka.runtime.extensions import ExtensionError
+from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
+from sanka.runtime.extensions.runner import ExtensionResult
+from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
@@ -81,10 +61,11 @@ from sanka.runtime.state import SqliteStateStore
 
 DEFAULT_SPEC_FILE = "sanka-migrate.yaml"
 DEFAULT_STATE_FILE = ".sanka/migrate/state.db"
+DEFAULT_ARTIFACT_DIR = ".sanka"
 # Stable subprocess protocol consumed by sanka-sdk. Success is exit 0; migration
 # failures are exit 1; usage failures are exit 2. Each emits one JSON document.
 CLI_SCHEMA_VERSION = "sanka-cli/v1"
-SDK_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify"})
+SDK_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify", "extension"})
 
 
 class CliUsageError(ValueError):
@@ -124,12 +105,20 @@ def main(argv: list[str] | None = None) -> int:
         return int(asyncio.run(args.handler(args)))
     except CliUsageError as error:
         return _print_cli_error(args, error, exit_code=2)
+    except ExtensionError as error:
+        return _print_cli_error(
+            args,
+            error,
+            exit_code=(
+                2
+                if args.command == "plan" and error.code == "SANKA_EXTENSION_TARGET_REQUIRED"
+                else 1
+            ),
+        )
     except (
         SpecError,
         UnknownConnectorError,
         ExecutionError,
-        FrameworkMigrationError,
-        GeneratedEnvironmentError,
         FileNotFoundError,
     ) as error:
         return _print_cli_error(args, error, exit_code=1)
@@ -163,6 +152,11 @@ def _json_result(
     limitations: list[str] | None = None,
     next_actions: list[str] | None = None,
 ) -> dict[str, Any]:
+    if outcome == "error" and "error" not in data:
+        data = {
+            **data,
+            "error": {"code": "SANKA_FAILED", "message": f"{command} failed"},
+        }
     envelope: dict[str, Any] = {
         "schema_version": CLI_SCHEMA_VERSION,
         "command": command,
@@ -185,15 +179,18 @@ def _print_json(payload: dict[str, Any]) -> None:
 
 def _print_cli_error(args: argparse.Namespace, error: Exception, *, exit_code: int) -> int:
     if getattr(args, "json", False):
+        code = getattr(error, "code", None)
+        details = getattr(error, "details", None)
+        structured_error: dict[str, Any] = {
+            "code": code or ("SANKA_USAGE" if exit_code == 2 else "SANKA_FAILED"),
+            "message": str(error),
+        }
+        if isinstance(details, dict) and details:
+            structured_error["details"] = details
         _print_json(
             _json_result(
                 str(getattr(args, "command", "sanka") or "sanka"),
-                {
-                    "error": {
-                        "code": "SANKA_USAGE" if exit_code == 2 else "SANKA_FAILED",
-                        "message": str(error),
-                    }
-                },
+                {"error": structured_error},
                 outcome="error",
                 migration_state="not_started" if exit_code == 2 else "failed",
             )
@@ -232,6 +229,22 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         detail.add_argument("--quiet", action="store_true", help="print only outcome and errors")
         detail.add_argument("--verbose", action="store_true", help="print diagnostic details")
 
+    def extension_options(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument(
+            "--extension-config",
+            action="append",
+            default=[],
+            metavar="JSON_OBJECT",
+            help="merge a JSON object into extension configuration",
+        )
+        sub.add_argument(
+            "--extension-env",
+            action="append",
+            default=[],
+            metavar="NAME",
+            help="forward one explicitly named environment variable",
+        )
+
     scan = commands.add_parser(
         "scan",
         help="inspect a source application and write its semantic scan artifact",
@@ -245,6 +258,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     scan.add_argument("root", nargs="?", default=".", help="Django repository root")
     scan.add_argument("--settings", help="Django settings module (auto-detected by default)")
     scan.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
+    extension_options(scan)
     presentation(scan)
     scan.set_defaults(handler=_cmd_scan)
 
@@ -265,10 +279,10 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     common(plan)
     plan.add_argument("root", nargs="?", default=".", help="application repository root")
-    plan.add_argument("--to", choices=("fastapi",), help="target application framework")
+    plan.add_argument("--to", help="target application framework")
     plan.add_argument(
         "--strategy",
-        choices=(NATIVE_STRATEGY, COMPATIBILITY_STRATEGY),
+        choices=("native", "compatibility"),
         default=None,
         help="native FastAPI generation or the in-process compatibility bridge",
     )
@@ -288,10 +302,11 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     plan.add_argument(
         "--orm",
-        choices=SQL_ENGINES,
+        choices=("tortoise", "sqlalchemy", "psycopg"),
         default=None,
         help="async SQL engine for native FastAPI (default: tortoise, closest to Django)",
     )
+    extension_options(plan)
     presentation(plan)
     plan.set_defaults(handler=_cmd_plan)
 
@@ -335,24 +350,23 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         required=True,
         help="exact reviewed plan hash printed by `sanka plan`",
     )
-    apply_.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    apply_.add_argument("--to", help="select an application plan")
     apply_.add_argument("--root", default=".", help="application repository root")
     apply_.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     apply_.add_argument("--output", default=None, help="generated FastAPI output directory")
     apply_.add_argument("--force", action="store_true", help="replace existing generated files")
     apply_.add_argument(
         "--orm",
-        choices=SQL_ENGINES,
+        choices=("tortoise", "sqlalchemy", "psycopg"),
         default=None,
         help="assert the reviewed ORM selection; cannot change it during apply",
     )
     apply_.add_argument(
         "--min-readiness",
         type=float,
-        default=50.0,
+        default=None,
         metavar="PCT",
-        help="minimum native readiness percentage for generation (default: 50; "
-        "use 0 to explicitly allow a partial scaffold)",
+        help="minimum native readiness percentage for generation",
     )
     apply_.add_argument(
         "--gap-report-only",
@@ -364,6 +378,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         default=None,
         help="also emit a Sanka Migration Bench candidate (overlay + candidate.yaml) here",
     )
+    extension_options(apply_)
     presentation(apply_)
     apply_.set_defaults(handler=_cmd_apply)
 
@@ -386,9 +401,10 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         default=None,
         help="application repository root",
     )
-    test.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    test.add_argument("--to", help="select an application plan")
     test.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     test.add_argument("--output", default=None, help="generated FastAPI output directory")
+    extension_options(test)
     presentation(test)
     test.set_defaults(handler=_cmd_test)
 
@@ -414,7 +430,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         default=None,
         help="application repository root",
     )
-    verify.add_argument("--to", choices=("fastapi",), help="select an application plan")
+    verify.add_argument("--to", help="select an application plan")
     verify.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     verify.add_argument("--output", default=None, help="generated FastAPI output directory")
     verify.add_argument(
@@ -423,6 +439,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="JSON file with additional read-only HTTP verification cases",
     )
     verify.add_argument("--no-http", action="store_true", help="skip safe read-only HTTP probes")
+    extension_options(verify)
     presentation(verify)
     verify.set_defaults(handler=_cmd_verify)
 
@@ -485,6 +502,59 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     assess.add_argument("--json", action="store_true", help="print the API data payload as JSON")
     assess.set_defaults(handler=_cmd_assess, form_started_at_ms=int(time.time() * 1000))
 
+    extension = commands.add_parser(
+        "extension",
+        help="manage migration extensions",
+        description="manage migration extensions and trusted marketplace snapshots.",
+    )
+    extension_commands = extension.add_subparsers(dest="extension_command", required=True)
+
+    extension_add = extension_commands.add_parser("add", help="install and lock an extension")
+    extension_add.add_argument("extension_id")
+    extension_add.add_argument("--marketplace")
+    presentation(extension_add)
+    extension_add.set_defaults(handler=_cmd_extension_add)
+
+    extension_list = extension_commands.add_parser("list", help="list available extensions")
+    presentation(extension_list)
+    extension_list.set_defaults(handler=_cmd_extension_list)
+
+    extension_remove = extension_commands.add_parser("remove", help="unpin or disable an extension")
+    extension_remove.add_argument("extension_id")
+    presentation(extension_remove)
+    extension_remove.set_defaults(handler=_cmd_extension_remove)
+
+    marketplace = extension_commands.add_parser(
+        "marketplace", help="manage trusted marketplace sources"
+    )
+    marketplace_commands = marketplace.add_subparsers(dest="marketplace_command", required=True)
+    marketplace_add = marketplace_commands.add_parser("add", help="add a trusted snapshot")
+    marketplace_add.add_argument("source")
+    marketplace_add.add_argument("--name")
+    marketplace_add.add_argument(
+        "--trust", action="store_true", help="explicitly trust a third-party source"
+    )
+    presentation(marketplace_add)
+    marketplace_add.set_defaults(handler=_cmd_extension_marketplace_add)
+
+    marketplace_list = marketplace_commands.add_parser("list", help="list trusted snapshots")
+    presentation(marketplace_list)
+    marketplace_list.set_defaults(handler=_cmd_extension_marketplace_list)
+
+    marketplace_upgrade = marketplace_commands.add_parser(
+        "upgrade", help="refresh marketplace snapshots without changing project pins"
+    )
+    marketplace_upgrade.add_argument("name", nargs="?")
+    presentation(marketplace_upgrade)
+    marketplace_upgrade.set_defaults(handler=_cmd_extension_marketplace_upgrade)
+
+    marketplace_remove = marketplace_commands.add_parser(
+        "remove", help="remove an unused marketplace"
+    )
+    marketplace_remove.add_argument("name")
+    presentation(marketplace_remove)
+    marketplace_remove.set_defaults(handler=_cmd_extension_marketplace_remove)
+
     _set_json_errors(parser, json_errors)
     return parser
 
@@ -511,6 +581,76 @@ def _engine(state_path: str) -> MigrationEngine:
     return MigrationEngine(
         store=SqliteStateStore(state_path), registry=ConnectorRegistry.discover()
     )
+
+
+def _extension_result(
+    args: argparse.Namespace,
+    operation: str,
+    records: list[dict[str, Any]],
+) -> int:
+    data = {"operation": operation, "records": records}
+    if args.json:
+        _print_json(_json_result("extension", data, migration_state="not_started"))
+    else:
+        for record in records:
+            print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _extension_store() -> ExtensionStore:
+    return ExtensionStore(Path.cwd())
+
+
+async def _cmd_extension_list(args: argparse.Namespace) -> int:
+    return _extension_result(
+        args,
+        "list",
+        [record.to_dict() for record in _extension_store().list_extensions()],
+    )
+
+
+async def _cmd_extension_add(args: argparse.Namespace) -> int:
+    record = _extension_store().add_extension(
+        args.extension_id,
+        marketplace=args.marketplace,
+    )
+    return _extension_result(args, "add", [record.to_dict()])
+
+
+async def _cmd_extension_remove(args: argparse.Namespace) -> int:
+    _extension_store().remove_extension(args.extension_id)
+    return _extension_result(args, "remove", [{"id": args.extension_id}])
+
+
+async def _cmd_extension_marketplace_list(args: argparse.Namespace) -> int:
+    return _extension_result(
+        args,
+        "marketplace_list",
+        [record.to_dict() for record in _extension_store().marketplaces()],
+    )
+
+
+async def _cmd_extension_marketplace_add(args: argparse.Namespace) -> int:
+    record = _extension_store().add_marketplace(
+        args.source,
+        name=args.name,
+        trust=args.trust,
+    )
+    return _extension_result(args, "marketplace_add", [record.to_dict()])
+
+
+async def _cmd_extension_marketplace_upgrade(args: argparse.Namespace) -> int:
+    records = _extension_store().upgrade_marketplace(args.name)
+    return _extension_result(
+        args,
+        "marketplace_upgrade",
+        [record.to_dict() for record in records],
+    )
+
+
+async def _cmd_extension_marketplace_remove(args: argparse.Namespace) -> int:
+    record = _extension_store().remove_marketplace(args.name)
+    return _extension_result(args, "marketplace_remove", [record.to_dict()])
 
 
 async def _cmd_connect(args: argparse.Namespace) -> int:
@@ -540,13 +680,6 @@ def _load_spec(path: str) -> MigrationSpec:
     return MigrationSpec.from_yaml(spec_path.read_text(encoding="utf-8"))
 
 
-def _framework_scan_exists(root: str, artifact_dir: str) -> bool:
-    artifact = Path(artifact_dir)
-    if not artifact.is_absolute():
-        artifact = Path(root) / artifact
-    return (artifact / "scan.json").is_file()
-
-
 def _interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -574,202 +707,93 @@ def _prompt_choice(
     raise CliUsageError(f"invalid choice {raw!r}; choose {', '.join(item[0] for item in choices)}")
 
 
-def _target_manifest(root: str, output: str) -> dict[str, Any] | None:
-    path = Path(output)
-    if not path.is_absolute():
-        path = Path(root) / path
-    manifest = path / "sanka-manifest.json"
-    if not manifest.is_file():
-        return None
-    try:
-        payload = json.loads(manifest.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    return payload if isinstance(payload, dict) else None
+def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
+    configuration: dict[str, Any] = {}
+    for document in getattr(args, "extension_config", []):
+        try:
+            value = json.loads(document)
+        except json.JSONDecodeError as error:
+            raise CliUsageError(f"--extension-config must be a JSON object: {error}") from error
+        if not isinstance(value, dict):
+            raise CliUsageError("--extension-config must be a JSON object")
+        configuration.update(value)
+    for source, target in (
+        ("settings", "settings_module"),
+        ("strategy", "strategy"),
+        ("generation", "generation"),
+        ("package_manager", "package_manager"),
+        ("orm", "orm"),
+        ("output", "output"),
+        ("min_readiness", "min_readiness"),
+        ("bench_candidate", "bench_candidate"),
+        ("cases", "cases"),
+    ):
+        value = getattr(args, source, None)
+        if value is not None:
+            configuration[target] = value
+    for name in ("force", "gap_report_only", "no_http"):
+        if getattr(args, name, False):
+            configuration[name] = True
+    return configuration
 
 
-def _target_is_generated(root: str, output: str) -> bool:
-    return _target_manifest(root, output) is not None
+def _lifecycle_prompt(label: str, choices: tuple[str, ...] | None = None) -> str | None:
+    if choices:
+        return _prompt_choice(
+            f"{label}:",
+            tuple((choice, choice) for choice in choices),
+            default=choices[0],
+        )
+    return input(f"{label}: ").strip() or None
 
 
-def _scan_requires_database(scan: FrameworkScan, strategy: str) -> bool:
-    return strategy == NATIVE_STRATEGY and any(
-        route.native and route.serializer is not None and "{format}" not in route.path
-        for route in scan.routes
+def _application_lifecycle(args: argparse.Namespace) -> ApplicationLifecycle:
+    return ApplicationLifecycle(
+        Path(args.root),
+        artifact_dir=args.artifact_dir,
+        interactive=_interactive_terminal() and not args.json,
+        prompt=_lifecycle_prompt,
     )
 
 
-def _interactive_framework_choices(
+def _application_lifecycle_requested(args: argparse.Namespace) -> bool:
+    return args.file == DEFAULT_SPEC_FILE and not Path(args.file).is_file()
+
+
+def _print_application_result(
     args: argparse.Namespace,
-) -> tuple[str, str, str, str, str | None]:
-    scan = load_framework_scan(args.root, artifact_dir=args.artifact_dir)
-    print("Detected source")
-    print(f"  Django {scan.django_version} + DRF {scan.drf_version}")
-    print(f"  {len(scan.routes)} routes, {len(scan.serializers)} serializers")
-    print()
-    if args.to is None:
-        args.to = _prompt_choice(
-            "Choose target framework:",
-            (("fastapi", "FastAPI"),),
-            default="fastapi",
+    command: str,
+    result: ExtensionResult,
+    *,
+    migration_state: str,
+) -> int:
+    if args.json:
+        _print_json(
+            _json_result(
+                command,
+                result.data,
+                migration_state=migration_state,
+                artifacts=list(result.artifacts),
+                limitations=list(result.limitations),
+                next_actions=list(result.next_actions),
+            )
         )
-        print()
-    candidate_output = args.output or (
-        "fastapi-app"
-        if _target_is_generated(args.root, "fastapi-app")
-        or not _target_is_generated(args.root, DEFAULT_FASTAPI_OUTPUT)
-        else DEFAULT_FASTAPI_OUTPUT
-    )
-    if args.generation is None:
-        recommended = "update" if _target_is_generated(args.root, candidate_output) else "full"
-        args.generation = _prompt_choice(
-            "Choose generation mode:",
-            (
-                ("full", "Full project — standalone structured application"),
-                ("update", "Update project — preserve unrelated and modified files"),
-                ("minimal", "Minimal project — generated endpoints and dependencies"),
-            ),
-            default=recommended,
-        )
-        print()
-    if args.output is None:
-        default_output = (
-            DEFAULT_FASTAPI_OUTPUT if args.generation == "minimal" else candidate_output
-        )
-        args.output = input(f"Target directory [{default_output}]: ").strip() or default_output
-        print()
-    if args.strategy is None:
-        target_manifest = _target_manifest(args.root, str(args.output))
-        recommended_strategy = (
-            str(target_manifest.get("mode"))
-            if args.generation == "update" and target_manifest is not None
-            else NATIVE_STRATEGY
-        )
-        args.strategy = _prompt_choice(
-            "Choose migration strategy:",
-            (
-                (NATIVE_STRATEGY, "Native — DRF-free FastAPI request runtime"),
-                (COMPATIBILITY_STRATEGY, "Compatibility — FastAPI bridge retaining Django"),
-            ),
-            default=recommended_strategy,
-        )
-        print()
-    database_required = _scan_requires_database(scan, args.strategy)
-    orm = args.orm
-    if database_required and orm is None:
-        orm = _prompt_choice(
-            "Choose ORM for generated database routes:",
-            tuple((name, SQL_ENGINE_LABELS[name]) for name in SQL_ENGINES),
-            default=DEFAULT_SQL_ENGINE,
-        )
-        print()
-    if args.package_manager is None:
-        target_manifest = _target_manifest(args.root, str(args.output))
-        recommended_manager = (
-            str(target_manifest.get("package_manager"))
-            if args.generation == "update" and target_manifest is not None
-            else "uv"
-        )
-        args.package_manager = _prompt_choice(
-            "Choose dependency manager:",
-            (("uv", "uv"), ("pip", "pip + venv")),
-            default=recommended_manager,
-        )
-        print()
-    return (
-        str(args.output),
-        str(args.strategy),
-        str(args.generation),
-        str(args.package_manager),
-        orm,
-    )
+    else:
+        terminal = _terminal(args)
+        terminal.success(f"{command} complete")
+        if command == "plan" and isinstance(result.data.get("plan_hash"), str):
+            print(f"plan {result.data['plan_hash']}")
+    return 0
 
 
 async def _cmd_plan(args: argparse.Namespace) -> int:
-    framework_requested = args.to == "fastapi" or _framework_scan_exists(
-        args.root, args.artifact_dir
-    )
-    if framework_requested:
-        terminal = _terminal(args)
-        package_manager: str | None
-        if _interactive_terminal() and not args.json:
-            output, strategy, generation, package_manager, orm = _interactive_framework_choices(
-                args
-            )
-        else:
-            if args.to is None:
-                raise CliUsageError(
-                    "target selection is required outside a TTY; choose `--to fastapi`. "
-                    "Example: sanka plan . --to fastapi --generation full "
-                    "--output ./fastapi-app --strategy native --orm tortoise "
-                    "--package-manager uv"
-                )
-            generation = args.generation or "minimal"
-            if generation == "update" and args.output is None:
-                raise CliUsageError("--output is required with --generation update")
-            output = args.output or (
-                "fastapi-app" if generation == "full" else DEFAULT_FASTAPI_OUTPUT
-            )
-            target_manifest = _target_manifest(args.root, output)
-            strategy = args.strategy or (
-                str(target_manifest.get("mode"))
-                if generation == "update" and target_manifest is not None
-                else NATIVE_STRATEGY
-            )
-            package_manager = args.package_manager or (None if generation == "update" else "uv")
-            orm = args.orm
-        terminal.diagnostic(f"source={Path(args.root).resolve()} target={output}")
-        with terminal.spinner("Building the DRF to FastAPI plan"):
-            framework_plan = plan_fastapi(
-                args.root,
-                artifact_dir=args.artifact_dir,
-                output=output,
-                strategy=strategy,
-                sql_engine=orm,
-                generation_mode=generation,
-                package_manager=package_manager,
-            )
-        if args.json:
-            plan_data = framework_plan.to_dict()
-            artifact = Path(args.artifact_dir)
-            if not artifact.is_absolute():
-                artifact = Path(args.root) / artifact
-            limitations = [risk.code for risk in framework_plan.risks]
-            limitations.extend(
-                reason.code
-                for route in framework_plan.routes
-                for reason in route.adaptation_reasons
-            )
-            _print_json(
-                _json_result(
-                    "plan",
-                    plan_data,
-                    migration_state=(
-                        "planned"
-                        if not framework_plan.needs_adaptation_routes
-                        else "planned_with_gaps"
-                    ),
-                    artifacts=[str((artifact / "plan-fastapi.json").resolve())],
-                    limitations=list(set(limitations)),
-                    next_actions=[
-                        shlex.join(
-                            [
-                                "sanka",
-                                "apply",
-                                "--root",
-                                str(args.root),
-                                "--plan-hash",
-                                framework_plan.plan_hash,
-                            ]
-                        )
-                    ],
-                )
-            )
-        elif args.quiet:
-            terminal.success(f"plan created: {framework_plan.plan_hash}")
-        else:
-            _print_framework_plan(framework_plan, terminal=terminal, root=args.root)
-        return 0
+    if _application_lifecycle_requested(args):
+        result = _application_lifecycle(args).plan(
+            target=args.to,
+            configuration=_extension_configuration(args),
+            explicit_env_names=tuple(args.extension_env),
+        )
+        return _print_application_result(args, "plan", result, migration_state="planned")
     spec = _load_spec(args.file)
     engine = _engine(args.state)
     run_id = engine.create(spec)
@@ -824,121 +848,18 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 async def _cmd_apply(args: argparse.Namespace) -> int:
-    if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
-        terminal = _terminal(args)
-        sql_engine = args.orm
-        plan = load_fastapi_plan(args.root, artifact_dir=args.artifact_dir)
-        if plan.mode == NATIVE_STRATEGY:
-            if not 0 <= args.min_readiness <= 100:
-                raise FrameworkMigrationError("--min-readiness must be between 0 and 100")
-            terminal.diagnostic(
-                f"native readiness={plan.readiness:.0%} "
-                f"generated={plan.native_routes}/{plan.native_eligible_routes} "
-                f"manual={plan.needs_adaptation_routes}"
-            )
-            if not args.json and not args.quiet:
-                print(
-                    f"native readiness: {plan.readiness:.0%} "
-                    f"({plan.native_routes}/{plan.native_eligible_routes} non-alias routes); "
-                    f"{plan.needs_adaptation_routes} route(s) need manual adaptation"
-                )
-            below_min = plan.readiness * 100.0 < args.min_readiness
-            if args.gap_report_only or below_min or plan.native_routes == 0:
-                destination = args.bench_candidate or args.output or "gap-report"
-                report_path = write_gap_report(
-                    args.root, destination, artifact_dir=args.artifact_dir
-                )
-                if args.gap_report_only:
-                    if args.json:
-                        _print_json(
-                            _json_result(
-                                "apply",
-                                {"gap_report": str(report_path), "plan_hash": plan.plan_hash},
-                                migration_state="gap_reported",
-                                artifacts=[str(report_path)],
-                            )
-                        )
-                    else:
-                        terminal.success(f"gap report written to {report_path}")
-                    return 0
-                reason = (
-                    "the native plan contains no generatable routes"
-                    if plan.native_routes == 0
-                    else f"readiness is below --min-readiness {args.min_readiness:g}%"
-                )
-                if args.json:
-                    _print_json(
-                        _json_result(
-                            "apply",
-                            {
-                                "error": {"code": "SANKA_READINESS", "message": reason},
-                                "gap_report": str(report_path),
-                                "plan_hash": plan.plan_hash,
-                            },
-                            outcome="error",
-                            migration_state="not_applied",
-                            artifacts=[str(report_path)],
-                            limitations=[reason],
-                        )
-                    )
-                else:
-                    print(f"not applying: {reason}; gap report written to {report_path}")
-                    terminal.failure(reason)
-                return 1
-        if plan.mode != NATIVE_STRATEGY and args.gap_report_only:
-            raise FrameworkMigrationError(
-                "gap reports describe native plans; run `sanka plan --to fastapi`"
-            )
-        with terminal.spinner("Generating the reviewed FastAPI target"):
-            output, routes = apply_fastapi_plan(
-                args.root,
-                artifact_dir=args.artifact_dir,
-                output=args.output,
-                plan_hash=args.plan_hash,
-                force=args.force,
-                sql_engine=sql_engine,
-            )
-        artifacts = [str(output)]
-        if args.bench_candidate:
-            candidate = write_bench_candidate(
-                args.root,
-                args.bench_candidate,
-                artifact_dir=args.artifact_dir,
-            )
-            artifacts.append(str(candidate))
-        if args.json:
-            _print_json(
-                _json_result(
-                    "apply",
-                    {
-                        "output": str(output),
-                        "routes_generated": routes,
-                        "mode": plan.mode,
-                        "generation_mode": plan.generation_mode,
-                        "database_required": plan.database_required,
-                        "sql_engine": plan.sql_engine if plan.database_required else None,
-                        "plan_hash": plan.plan_hash,
-                    },
-                    migration_state="generated_not_verified",
-                    artifacts=artifacts,
-                    limitations=[f"{plan.needs_adaptation_routes} route(s) need manual adaptation"]
-                    if plan.needs_adaptation_routes
-                    else [],
-                    next_actions=["sanka test"],
-                )
-            )
-        else:
-            route_kind = "native FastAPI" if plan.mode == NATIVE_STRATEGY else "FastAPI"
-            terminal.success(f"generated {routes} {route_kind} routes in {output}")
-            if not args.quiet:
-                print(f"Applied plan: {plan.plan_hash}")
-                if plan.database_required:
-                    print(f"SQL engine: {sql_engine or plan.sql_engine}")
-                if args.bench_candidate:
-                    print(f"Benchmark candidate: {candidate}")
-                print("Scope: generated, not yet tested or verified")
-                print("next: sanka test")
-        return 0
+    if _application_lifecycle_requested(args):
+        result = _application_lifecycle(args).apply(
+            reviewed_plan_hash=args.plan_hash,
+            configuration=_extension_configuration(args),
+            explicit_env_names=tuple(args.extension_env),
+        )
+        return _print_application_result(
+            args,
+            "apply",
+            result,
+            migration_state="generated_not_verified",
+        )
     spec = _load_spec(args.file)
     engine = _engine(args.state)
     run_id = engine.create(spec)
@@ -976,79 +897,30 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
 
 
 async def _cmd_test(args: argparse.Namespace) -> int:
-    if not _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
-        raise FrameworkMigrationError(
-            "`sanka test` runs unit tests for a FastAPI apply; run `sanka apply` first"
-        )
-    terminal = _terminal(args)
-    with terminal.spinner("Testing the generated FastAPI application"):
-        report = await asyncio.to_thread(
-            lambda: test_fastapi_app(
-                args.root,
-                artifact_dir=args.artifact_dir,
-                output=args.output,
-            )
-        )
-    if args.json:
-        _print_json(
-            _json_result(
-                "test",
-                report,
-                outcome="success" if report["ok"] else "error",
-                migration_state="generated_app_tested" if report["ok"] else "test_failed",
-                artifacts=[str(report["file"])],
-                limitations=["Generated-app tests do not prove source parity"],
-                next_actions=["sanka verify"] if report["ok"] else ["sanka test"],
-            )
-        )
-    elif args.quiet:
-        (terminal.success if report["ok"] else terminal.failure)(
-            f"generated-app tests {'passed' if report['ok'] else 'failed'}"
-        )
-    else:
-        _print_framework_test(report, terminal=terminal)
-    return 0 if report["ok"] else 1
+    result = _application_lifecycle(args).test(
+        configuration=_extension_configuration(args),
+        explicit_env_names=tuple(args.extension_env),
+    )
+    return _print_application_result(
+        args,
+        "test",
+        result,
+        migration_state="generated_app_tested",
+    )
 
 
 async def _cmd_verify(args: argparse.Namespace) -> int:
-    if _use_framework_lifecycle(args.root, args.file, args.artifact_dir, args.to):
-        # The framework verifier still boots Django for the source Client;
-        # run it off the CLI event loop so Django's async-context guard stays quiet.
-        terminal = _terminal(args)
-        with terminal.spinner("Verifying generated routes and read-only behavior"):
-            framework_report = await asyncio.to_thread(
-                lambda: verify_fastapi_migration(
-                    args.root,
-                    artifact_dir=args.artifact_dir,
-                    output=args.output,
-                    probe_http=not args.no_http,
-                    cases=args.cases,
-                )
-            )
-        if args.json:
-            limitations = ["Automatic HTTP comparison covers only configured read-only probes"]
-            if args.no_http:
-                limitations.append("HTTP probes were disabled")
-            _print_json(
-                _json_result(
-                    "verify",
-                    framework_report,
-                    outcome="success" if framework_report["ok"] else "error",
-                    migration_state=(
-                        "verified_within_scope" if framework_report["ok"] else "verification_failed"
-                    ),
-                    artifacts=list(framework_report.get("generated_files") or []),
-                    limitations=limitations,
-                    next_actions=[],
-                )
-            )
-        elif args.quiet:
-            (terminal.success if framework_report["ok"] else terminal.failure)(
-                "verified within scope" if framework_report["ok"] else "verification failed"
-            )
-        else:
-            _print_framework_verify(framework_report, terminal=terminal)
-        return 0 if framework_report["ok"] else 1
+    if _application_lifecycle_requested(args):
+        result = _application_lifecycle(args).verify(
+            configuration=_extension_configuration(args),
+            explicit_env_names=tuple(args.extension_env),
+        )
+        return _print_application_result(
+            args,
+            "verify",
+            result,
+            migration_state="verified_within_scope",
+        )
     spec = _load_spec(args.file)
     engine = _engine(args.state)
     run_id = engine.create(spec)
@@ -1085,32 +957,11 @@ async def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 async def _cmd_scan(args: argparse.Namespace) -> int:
-    terminal = _terminal(args)
-    with terminal.spinner("Scanning Django URL graph"):
-        scan = scan_django(
-            args.root,
-            settings_module=args.settings,
-            artifact_dir=args.artifact_dir,
-        )
-    if args.json:
-        artifact = Path(args.artifact_dir)
-        if not artifact.is_absolute():
-            artifact = Path(args.root) / artifact
-        _print_json(
-            _json_result(
-                "scan",
-                scan.to_dict(),
-                migration_state="scanned",
-                artifacts=[str((artifact / "scan.json").resolve())],
-                limitations=[risk.code for risk in scan.risks],
-                next_actions=["sanka plan ."],
-            )
-        )
-    elif args.quiet:
-        terminal.success(f"scanned {len(scan.routes)} DRF routes")
-    else:
-        _print_framework_scan(scan, terminal=terminal)
-    return 0
+    result = _application_lifecycle(args).scan(
+        configuration=_extension_configuration(args),
+        explicit_env_names=tuple(args.extension_env),
+    )
+    return _print_application_result(args, "scan", result, migration_state="scanned")
 
 
 async def _cmd_status(args: argparse.Namespace) -> int:
@@ -1287,307 +1138,6 @@ def _infer_endpoint(value: str, *, role: str) -> EndpointSpec:
         f"cannot infer the {role} connector from {value!r}; use a URL-style endpoint"
         " (e.g. sqlite://out.db) or a directory path"
     )
-
-
-def _use_framework_lifecycle(
-    root: str, spec_file: str, artifact_dir: str, target: str | None
-) -> bool:
-    """Select the application-migration lifecycle only when no data spec exists."""
-    if target == "fastapi":
-        return True
-    if spec_file != DEFAULT_SPEC_FILE or Path(spec_file).is_file():
-        return False
-    artifact = Path(artifact_dir)
-    if not artifact.is_absolute():
-        artifact = Path(root) / artifact
-    return (artifact / "plan-fastapi.json").is_file()
-
-
-def _print_framework_scan(scan: FrameworkScan, *, terminal: TerminalOutput | None = None) -> None:
-    terminal = terminal or TerminalOutput(no_color=True)
-    custom_actions = {
-        route.operation
-        for route in scan.routes
-        if route.operation
-        not in {
-            "get",
-            "post",
-            "put",
-            "patch",
-            "delete",
-            "list",
-            "retrieve",
-            "create",
-            "update",
-            "partial_update",
-            "destroy",
-        }
-    }
-    terminal.heading("Sanka scan")
-    print()
-    print("Scanning repository...")
-    print()
-    print("Detected")
-    print(f"  Python       {scan.python_version}")
-    print(f"  Django       {scan.django_version}")
-    print(f"  DRF          {scan.drf_version}")
-    db = scan.database
-    db_label = db.vendor if not db.name else f"{db.vendor} ({db.name})"
-    print(f"  Database     {db_label}")
-    print()
-    print("Application")
-    print(f"  {len(scan.routes)} endpoints")
-    print(f"  {len(scan.serializers)} serializers")
-    print(f"  {len(scan.models)} models")
-    print(f"  {len(scan.permissions)} permissions")
-    if scan.skipped_routes:
-        print()
-        print("Not scanned (non-DRF views — port these by hand)")
-        for skipped in scan.skipped_routes:
-            print(f"  {skipped.pattern} -> {skipped.view}")
-    print(f"  {len(custom_actions)} custom actions")
-    print(f"  {scan.test_files} test files")
-    print()
-    print("Migration candidates")
-    print("  → FastAPI     Supported (native async SQL + compatibility strategies)")
-    if scan.risks:
-        print()
-        print(f"Risks: {len(scan.risks)} route(s) need adaptation")
-    print()
-    print(f"scan hash: {scan.scan_hash}")
-    terminal.success("Scan complete.")
-    print()
-    print("Run:")
-    print("  sanka plan --to fastapi")
-
-
-def _print_framework_plan(
-    plan: FrameworkPlan,
-    *,
-    terminal: TerminalOutput | None = None,
-    root: str = ".",
-) -> None:
-    terminal = terminal or TerminalOutput(no_color=True)
-    native = plan.mode == NATIVE_STRATEGY
-    dropped = sum(route.strategy == "dropped-format-suffix-alias" for route in plan.routes)
-    terminal.heading(
-        "DRF → FastAPI Migration Plan" + (" (native)" if native else " (compatibility)")
-    )
-    print()
-    print(f"  {len(plan.routes)} endpoints")
-    print()
-    print("Generation")
-    print(f"  Mode          {plan.generation_mode}")
-    if plan.target_generation_mode:
-        print(f"  Target mode   {plan.target_generation_mode}")
-    print(f"  Output        {plan.default_output}")
-    print(f"  Dependencies  {plan.package_manager}")
-    database = (
-        "retained by compatibility bridge"
-        if plan.mode == COMPATIBILITY_STRATEGY
-        else ("required" if plan.database_required else "not required")
-    )
-    print(f"  Database      {database}")
-    print("  Capabilities  " + ", ".join(plan.capabilities))
-    if plan.omissions:
-        print("  Omissions     " + ", ".join(plan.omissions))
-    print()
-    if native:
-        print("Native FastAPI generation")
-        print(f"  {plan.native_routes} endpoints")
-        if dropped:
-            print()
-            print("Dropped format-suffix aliases (disclosed contract change)")
-            print(f"  {dropped} endpoints")
-    else:
-        print("Automatic compatibility bridge")
-        print(f"  {plan.automatic_routes} endpoints")
-    print()
-    print("Needs adaptation")
-    print(f"  {plan.needs_adaptation_routes} endpoints")
-    if native and plan.needs_adaptation_routes:
-        reason_counts = Counter(
-            (reason.code, reason.feature, reason.message)
-            for route in plan.routes
-            for reason in route.adaptation_reasons
-        )
-        if reason_counts:
-            print()
-            print("Why routes need adaptation")
-            for (code, feature, message), count in reason_counts.most_common(10):
-                print(f"  {count} endpoints — {code} ({feature})")
-                print(f"    {message}")
-            if len(reason_counts) > 10:
-                remaining = sum(count for _, count in reason_counts.most_common()[10:])
-                print(
-                    f"  {remaining} additional reason occurrences; "
-                    "run `sanka plan --to fastapi --json` for per-route details"
-                )
-    print()
-    print("Retained in native mode" if native else "Retained in compatibility mode")
-    for retained in plan.retained:
-        print(f"  - {retained}")
-    if native and plan.database_required:
-        print()
-        print("SQL engine")
-        print(f"  {plan.sql_engine} — {SQL_ENGINE_LABELS.get(plan.sql_engine, plan.sql_engine)}")
-        print("  change with `sanka plan --to fastapi --orm tortoise|sqlalchemy|psycopg`")
-    if plan.risks:
-        print()
-        print("Potential issues")
-        for risk in plan.risks:
-            location = f" ({risk.file}:{risk.line})" if risk.file and risk.line else ""
-            print(f"  {risk.severity.upper()} {risk.code}{location}")
-            print(f"    {risk.message}")
-    if plan.file_operations:
-        print()
-        print("Target file operations")
-        operation_counts = Counter(operation.action for operation in plan.file_operations)
-        print(
-            "  " + "  ".join(f"{name}={count}" for name, count in sorted(operation_counts.items()))
-        )
-        for operation in plan.file_operations:
-            marker = "!" if operation.action == "conflict" else "-"
-            print(f"  {marker} {operation.action:9} {operation.path}")
-    print()
-    if native:
-        print(
-            f"Native migration readiness: {plan.readiness:.0%} "
-            f"({plan.native_routes}/{plan.native_eligible_routes} non-alias routes generated)"
-        )
-        if dropped:
-            print(
-                f"Format-suffix aliases dropped: {dropped} "
-                f"({plan.alias_drop_rate:.0%} of scanned routes)"
-            )
-    else:
-        print(f"Bridge generation readiness: {plan.readiness:.0%}")
-    print(f"plan hash: {plan.plan_hash}")
-    terminal.success("Plan written; target was not modified.")
-    print("next: " + shlex.join(["sanka", "apply", "--root", root, "--plan-hash", plan.plan_hash]))
-
-
-def _print_framework_test(
-    report: dict[str, Any], *, terminal: TerminalOutput | None = None
-) -> None:
-    terminal = terminal or TerminalOutput(no_color=True)
-    verdict = "OK" if report["ok"] else "FAILED"
-    terminal.heading("Generated FastAPI application tests")
-    print()
-    print(f"Wrote {report['file']}")
-    if report.get("environment"):
-        print(f"Generated environment: {report['environment']}")
-        print(f"Generated Python: {report['python']}")
-        print(f"Dependency metadata: {report['pyproject']}")
-        print(f"Locked dependencies: {report['lockfile']}")
-    print(f"Ran {report['tests']} tests")
-    if report.get("allow_writes"):
-        print("Writes ran against an isolated SQLite copy")
-    if report["ok"]:
-        terminal.success(f"Generated API tests: {verdict}")
-    else:
-        print(f"Generated API tests: {verdict}")
-        terminal.failure("Generated API tests failed")
-    if not report["ok"] and report.get("log"):
-        print()
-        print(report["log"])
-    print()
-    if report["ok"]:
-        print("next: sanka verify")
-        return
-    missing = report.get("missing_dependency")
-    if missing:
-        print(
-            f"Generated app dependency is missing: {missing['module']} "
-            f"(package `{missing['package']}`)."
-        )
-        print("The generated dependency metadata may be incomplete; rerun:")
-        print("  sanka apply --plan-hash <hash> --force")
-        print("  sanka test")
-        return
-    print("Fix the test failure above, then rerun:")
-    print("  sanka test")
-
-
-def _print_framework_verify(
-    report: dict[str, Any], *, terminal: TerminalOutput | None = None
-) -> None:
-    terminal = terminal or TerminalOutput(no_color=True)
-    routes = report["routes"]
-    http = report["http"]
-    native = report.get("mode") == NATIVE_STRATEGY
-    verdict = "complete" if report["ok"] else "FAILED"
-    if native:
-        terminal.heading("Verifying the native DRF → FastAPI migration")
-    else:
-        terminal.heading("Verifying the DRF → FastAPI compatibility bridge")
-    print()
-    paths = report["paths"]
-    print("Verified paths")
-    print(f"  Source app:    {paths['source']}")
-    print(f"  Scan:          {paths['scan']}")
-    print(f"  Plan:          {paths['plan']}")
-    print(f"  Generated app: {paths['generated']}")
-    print(f"  Manifest:      {paths['manifest']}")
-    print(f"  Dependencies:  {paths['pyproject']}")
-    if paths.get("environment"):
-        print(f"  Environment:   {paths['environment']}")
-        print(f"  Python:        {paths['python']}")
-        print(f"  Lockfile:      {paths['lockfile']}")
-    generated_files = report.get("generated_files") or []
-    if generated_files:
-        print("Generated Python checked")
-        for path in generated_files:
-            print(f"  - {path}")
-    print()
-    print("Routes")
-    expected_total = routes["planned"] - len(routes.get("dropped", []))
-    print(f"  {routes['generated']} / {expected_total} generated")
-    if not routes["missing"] and not routes.get("extra"):
-        print("  generated route declarations match the reviewed plan ✓")
-    if routes.get("dropped"):
-        print(f"  {len(routes['dropped'])} format-suffix aliases dropped by design")
-    print("Generated code")
-    print("  generated Python files exist and compile ✓")
-    print("  manifest matches the current scan and reviewed plan ✓")
-    if native:
-        print("  generated serving path has no Django imports ✓")
-    print("Safe HTTP behavior")
-    if not http.get("enabled", True):
-        print("  skipped with --no-http")
-    else:
-        print(f"  {http['passed']} / {http['probed']} source-vs-generated probes matched")
-        print("  automatic coverage is limited to parameter-free GET/HEAD routes")
-        print("  compared status, content type, body, Allow, Location, and WWW-Authenticate")
-        if http["safe_routes"] == 0:
-            print("  no parameter-free GET/HEAD routes were available for automatic probing")
-    if routes["missing"]:
-        print("Missing routes")
-        for route in routes["missing"]:
-            print(f"  - {route}")
-    if routes.get("extra"):
-        print("Unexpected routes")
-        for route in routes["extra"]:
-            print(f"  - {route}")
-    if routes["needs_adaptation"]:
-        print("Needs adaptation")
-        for route in routes["needs_adaptation"]:
-            print(f"  - {route}")
-    if http["failed"]:
-        print("HTTP mismatches")
-        for probe in http["failed"]:
-            print(
-                f"  - {probe['method']} {probe['path']}:"
-                f" source={probe['source_status']} target={probe['target_status']}"
-            )
-    print()
-    scope = "Native migration" if native else "Compatibility bridge"
-    if report["ok"]:
-        terminal.success(f"{scope} verification: {verdict} within configured scope")
-    else:
-        print(f"{scope} verification: {verdict} within configured scope")
-        terminal.failure(f"{scope} verification failed")
-    print(f"plan hash: {report['plan_hash']}")
 
 
 def _print_plan(run_id: str, plan: MigrationPlan) -> None:

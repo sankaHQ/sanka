@@ -13,6 +13,7 @@ from urllib.request import Request
 
 import pytest
 
+import sanka.cli as cli
 import sanka.connector
 import sanka.runtime
 from sanka.cli import DEFAULT_SPEC_FILE, DEFAULT_STATE_FILE, main
@@ -45,7 +46,173 @@ def test_no_args_prints_help_and_returns_zero(capsys: pytest.CaptureFixture[str]
     # `validate` joined the subcommand set in F-6; argparse renders the choices
     # line from the full set, so this is the one pre-existing assertion the
     # additive subcommand forces to grow.
-    assert "{scan,plan,validate,apply,test,verify,status,migrate,connect,research,assess}" in output
+    assert (
+        "{scan,plan,validate,apply,test,verify,status,migrate,connect,research,assess,extension}"
+        in output
+    )
+
+
+def test_extension_management_uses_stable_json_envelopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class Record:
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+
+        def to_dict(self) -> dict[str, object]:
+            return {"kind": self.kind}
+
+    class Store:
+        def __init__(self, project_root: Path) -> None:
+            assert project_root == tmp_path
+
+        def marketplaces(self) -> tuple[Record, ...]:
+            calls.append(("marketplace_list", None))
+            return (Record("marketplace"),)
+
+        def add_marketplace(self, source: str, *, name: str | None, trust: bool) -> Record:
+            calls.append(("marketplace_add", (source, name, trust)))
+            return Record("marketplace")
+
+        def upgrade_marketplace(self, name: str | None) -> tuple[Record, ...]:
+            calls.append(("marketplace_upgrade", name))
+            return (Record("marketplace"),)
+
+        def remove_marketplace(self, name: str) -> Record:
+            calls.append(("marketplace_remove", name))
+            return Record("marketplace")
+
+        def list_extensions(self) -> tuple[Record, ...]:
+            calls.append(("list", None))
+            return (Record("extension"),)
+
+        def add_extension(self, extension_id: str, *, marketplace: str | None) -> Record:
+            calls.append(("add", (extension_id, marketplace)))
+            return Record("lock")
+
+        def remove_extension(self, extension_id: str) -> None:
+            calls.append(("remove", extension_id))
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "ExtensionStore", Store)
+    commands = [
+        (["extension", "list", "--json"], "list", "extension"),
+        (
+            ["extension", "add", "example/demo", "--marketplace", "fixtures", "--json"],
+            "add",
+            "lock",
+        ),
+        (["extension", "remove", "example/demo", "--json"], "remove", None),
+        (
+            [
+                "extension",
+                "marketplace",
+                "add",
+                "https://example.invalid/extensions.git",
+                "--name",
+                "fixtures",
+                "--trust",
+                "--json",
+            ],
+            "marketplace_add",
+            "marketplace",
+        ),
+        (
+            ["extension", "marketplace", "list", "--json"],
+            "marketplace_list",
+            "marketplace",
+        ),
+        (
+            ["extension", "marketplace", "upgrade", "fixtures", "--json"],
+            "marketplace_upgrade",
+            "marketplace",
+        ),
+        (
+            ["extension", "marketplace", "remove", "fixtures", "--json"],
+            "marketplace_remove",
+            "marketplace",
+        ),
+    ]
+    for arguments, operation, kind in commands:
+        assert main(arguments) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["schema_version"] == "sanka-cli/v1"
+        assert payload["command"] == "extension"
+        assert payload["outcome"] == "success"
+        assert payload["migration_state"] == "not_started"
+        record = {"id": "example/demo"} if kind is None else {"kind": kind}
+        assert payload["data"] == {"operation": operation, "records": [record]}
+
+    assert calls == [
+        ("list", None),
+        ("add", ("example/demo", "fixtures")),
+        ("remove", "example/demo"),
+        (
+            "marketplace_add",
+            ("https://example.invalid/extensions.git", "fixtures", True),
+        ),
+        ("marketplace_list", None),
+        ("marketplace_upgrade", "fixtures"),
+        ("marketplace_remove", "fixtures"),
+    ]
+
+
+def test_extension_errors_preserve_stable_code_and_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "marketplace"
+    source.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SANKA_HOME", str(tmp_path / "sanka-home"))
+
+    assert (
+        main(
+            [
+                "extension",
+                "marketplace",
+                "add",
+                str(source),
+                "--name",
+                "third-party",
+                "--json",
+            ]
+        )
+        == 1
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "extension"
+    assert payload["data"]["error"]["code"] == "SANKA_MARKETPLACE_TRUST_REQUIRED"
+    assert payload["data"]["error"]["details"] == {
+        "identity": f"local:{source.resolve().as_posix()}"
+    }
+
+
+def test_extension_invalid_store_path_emits_one_clean_json_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    invalid_home = tmp_path / "sanka-home"
+    invalid_home.write_text("not a directory", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SANKA_HOME", str(invalid_home))
+
+    assert main(["extension", "list", "--json"]) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
+    assert captured.out.count('"schema_version"') == 1
+    assert payload["schema_version"] == "sanka-cli/v1"
+    assert payload["command"] == "extension"
+    assert payload["data"]["error"]["code"] == "SANKA_EXTENSION_PATH"
 
 
 def test_sdk_command_parser_errors_use_the_versioned_json_contract(
@@ -151,6 +318,62 @@ def test_spec_lifecycle_uses_the_versioned_json_contract(
     assert verified["outcome"] == "success"
     assert verified["migration_state"] == "verified_within_scope"
     assert verified["data"]["ok"] is True
+
+
+def test_spec_verify_failure_keeps_report_in_structured_error_envelope(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _spec_file_path, _db, base = _spec_file(tmp_path)
+
+    assert main(["plan", "--json", *base]) == 0
+    planned = json.loads(capsys.readouterr().out)
+
+    assert main(["verify", "--json", *base]) == 1
+    failed = json.loads(capsys.readouterr().out)
+
+    assert failed["schema_version"] == "sanka-cli/v1"
+    assert failed["command"] == "verify"
+    assert failed["outcome"] == "error"
+    assert failed["migration_state"] == "verification_failed"
+    error = failed["data"]["error"]
+    assert isinstance(error, dict)
+    assert isinstance(error.get("code"), str) and error["code"]
+    assert isinstance(error.get("message"), str) and error["message"]
+    assert "details" not in error or isinstance(error["details"], dict)
+    assert failed["data"]["run_id"] == planned["data"]["run_id"]
+    assert failed["data"]["ok"] is False
+    assert failed["data"]["routes"] == [
+        {
+            "destination_count": None,
+            "failed": 0,
+            "migrated": 0,
+            "ok": False,
+            "route_key": "documents|documents",
+            "source_count": 2,
+        }
+    ]
+
+
+def test_explicit_data_spec_wins_over_application_artifacts_for_all_shared_commands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _spec_file_path, _db, base = _spec_file(tmp_path)
+    root = tmp_path / "application"
+    artifact_root = root / ".sanka"
+    artifact_root.mkdir(parents=True)
+
+    assert main(["plan", str(root), "--json", *base]) == 0
+    first_plan = json.loads(capsys.readouterr().out)
+    plan_hash = first_plan["data"]["plan_hash"]
+    (artifact_root / "scan.json").write_text("{}", encoding="utf-8")
+    (artifact_root / "plan.json").write_text("{}", encoding="utf-8")
+
+    assert main(["plan", str(root), "--json", *base]) == 0
+    assert json.loads(capsys.readouterr().out)["migration_state"] == "planned"
+    assert main(["apply", "--root", str(root), "--json", *base, "--plan-hash", plan_hash]) == 0
+    assert json.loads(capsys.readouterr().out)["migration_state"] == "applied_not_verified"
+    assert main(["verify", str(root), "--json", *base]) == 0
+    assert json.loads(capsys.readouterr().out)["migration_state"] == "verified_within_scope"
 
 
 def test_validate_help_lists_its_flags(capsys: pytest.CaptureFixture[str]) -> None:

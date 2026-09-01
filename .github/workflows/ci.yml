@@ -47,9 +47,5 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen --all-packages
-      - name: Smoke generated FastAPI app against current Tortoise
-        run: |
-          uv pip install --upgrade "tortoise-orm>=1.1,<2"
-          uv run pytest packages/sanka-migrate/tests/test_native_fastapi.py::test_native_lifecycle_generates_verifiable_output -q
       - run: make check
       - run: make build-release

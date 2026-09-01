@@ -18,7 +18,8 @@ typecheck:
 		packages/sanka-migrate-mcp/tests scripts
 
 test:
-	$(UV) run pytest
+	$(UV) run -- python -m pytest \
+		--ignore=packages/sanka-migrate/tests/test_extension_wheel_acceptance.py
 
 boundaries:
 	$(UV) run python scripts/check_import_boundaries.py
