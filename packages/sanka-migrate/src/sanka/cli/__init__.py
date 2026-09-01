@@ -51,6 +51,8 @@ from sanka.cli._research import (
 from sanka.runtime.__about__ import __version__
 from sanka.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
+from sanka.runtime.extensions import ExtensionError
+from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.frameworks import (
     COMPATIBILITY_STRATEGY,
     DEFAULT_ARTIFACT_DIR,
@@ -84,7 +86,7 @@ DEFAULT_STATE_FILE = ".sanka/migrate/state.db"
 # Stable subprocess protocol consumed by sanka-sdk. Success is exit 0; migration
 # failures are exit 1; usage failures are exit 2. Each emits one JSON document.
 CLI_SCHEMA_VERSION = "sanka-cli/v1"
-SDK_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify"})
+SDK_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify", "extension"})
 
 
 class CliUsageError(ValueError):
@@ -130,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         ExecutionError,
         FrameworkMigrationError,
         GeneratedEnvironmentError,
+        ExtensionError,
         FileNotFoundError,
     ) as error:
         return _print_cli_error(args, error, exit_code=1)
@@ -185,15 +188,18 @@ def _print_json(payload: dict[str, Any]) -> None:
 
 def _print_cli_error(args: argparse.Namespace, error: Exception, *, exit_code: int) -> int:
     if getattr(args, "json", False):
+        code = getattr(error, "code", None)
+        details = getattr(error, "details", None)
+        structured_error: dict[str, Any] = {
+            "code": code or ("SANKA_USAGE" if exit_code == 2 else "SANKA_FAILED"),
+            "message": str(error),
+        }
+        if isinstance(details, dict) and details:
+            structured_error["details"] = details
         _print_json(
             _json_result(
                 str(getattr(args, "command", "sanka") or "sanka"),
-                {
-                    "error": {
-                        "code": "SANKA_USAGE" if exit_code == 2 else "SANKA_FAILED",
-                        "message": str(error),
-                    }
-                },
+                {"error": structured_error},
                 outcome="error",
                 migration_state="not_started" if exit_code == 2 else "failed",
             )
@@ -485,6 +491,59 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     assess.add_argument("--json", action="store_true", help="print the API data payload as JSON")
     assess.set_defaults(handler=_cmd_assess, form_started_at_ms=int(time.time() * 1000))
 
+    extension = commands.add_parser(
+        "extension",
+        help="manage migration extensions",
+        description="manage migration extensions and trusted marketplace snapshots.",
+    )
+    extension_commands = extension.add_subparsers(dest="extension_command", required=True)
+
+    extension_add = extension_commands.add_parser("add", help="install and lock an extension")
+    extension_add.add_argument("extension_id")
+    extension_add.add_argument("--marketplace")
+    presentation(extension_add)
+    extension_add.set_defaults(handler=_cmd_extension_add)
+
+    extension_list = extension_commands.add_parser("list", help="list available extensions")
+    presentation(extension_list)
+    extension_list.set_defaults(handler=_cmd_extension_list)
+
+    extension_remove = extension_commands.add_parser("remove", help="unpin or disable an extension")
+    extension_remove.add_argument("extension_id")
+    presentation(extension_remove)
+    extension_remove.set_defaults(handler=_cmd_extension_remove)
+
+    marketplace = extension_commands.add_parser(
+        "marketplace", help="manage trusted marketplace sources"
+    )
+    marketplace_commands = marketplace.add_subparsers(dest="marketplace_command", required=True)
+    marketplace_add = marketplace_commands.add_parser("add", help="add a trusted snapshot")
+    marketplace_add.add_argument("source")
+    marketplace_add.add_argument("--name")
+    marketplace_add.add_argument(
+        "--trust", action="store_true", help="explicitly trust a third-party source"
+    )
+    presentation(marketplace_add)
+    marketplace_add.set_defaults(handler=_cmd_extension_marketplace_add)
+
+    marketplace_list = marketplace_commands.add_parser("list", help="list trusted snapshots")
+    presentation(marketplace_list)
+    marketplace_list.set_defaults(handler=_cmd_extension_marketplace_list)
+
+    marketplace_upgrade = marketplace_commands.add_parser(
+        "upgrade", help="refresh marketplace snapshots without changing project pins"
+    )
+    marketplace_upgrade.add_argument("name", nargs="?")
+    presentation(marketplace_upgrade)
+    marketplace_upgrade.set_defaults(handler=_cmd_extension_marketplace_upgrade)
+
+    marketplace_remove = marketplace_commands.add_parser(
+        "remove", help="remove an unused marketplace"
+    )
+    marketplace_remove.add_argument("name")
+    presentation(marketplace_remove)
+    marketplace_remove.set_defaults(handler=_cmd_extension_marketplace_remove)
+
     _set_json_errors(parser, json_errors)
     return parser
 
@@ -511,6 +570,76 @@ def _engine(state_path: str) -> MigrationEngine:
     return MigrationEngine(
         store=SqliteStateStore(state_path), registry=ConnectorRegistry.discover()
     )
+
+
+def _extension_result(
+    args: argparse.Namespace,
+    operation: str,
+    records: list[dict[str, Any]],
+) -> int:
+    data = {"operation": operation, "records": records}
+    if args.json:
+        _print_json(_json_result("extension", data, migration_state="not_started"))
+    else:
+        for record in records:
+            print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _extension_store() -> ExtensionStore:
+    return ExtensionStore(Path.cwd())
+
+
+async def _cmd_extension_list(args: argparse.Namespace) -> int:
+    return _extension_result(
+        args,
+        "list",
+        [record.to_dict() for record in _extension_store().list_extensions()],
+    )
+
+
+async def _cmd_extension_add(args: argparse.Namespace) -> int:
+    record = _extension_store().add_extension(
+        args.extension_id,
+        marketplace=args.marketplace,
+    )
+    return _extension_result(args, "add", [record.to_dict()])
+
+
+async def _cmd_extension_remove(args: argparse.Namespace) -> int:
+    _extension_store().remove_extension(args.extension_id)
+    return _extension_result(args, "remove", [{"id": args.extension_id}])
+
+
+async def _cmd_extension_marketplace_list(args: argparse.Namespace) -> int:
+    return _extension_result(
+        args,
+        "marketplace_list",
+        [record.to_dict() for record in _extension_store().marketplaces()],
+    )
+
+
+async def _cmd_extension_marketplace_add(args: argparse.Namespace) -> int:
+    record = _extension_store().add_marketplace(
+        args.source,
+        name=args.name,
+        trust=args.trust,
+    )
+    return _extension_result(args, "marketplace_add", [record.to_dict()])
+
+
+async def _cmd_extension_marketplace_upgrade(args: argparse.Namespace) -> int:
+    records = _extension_store().upgrade_marketplace(args.name)
+    return _extension_result(
+        args,
+        "marketplace_upgrade",
+        [record.to_dict() for record in records],
+    )
+
+
+async def _cmd_extension_marketplace_remove(args: argparse.Namespace) -> int:
+    record = _extension_store().remove_marketplace(args.name)
+    return _extension_result(args, "marketplace_remove", [record.to_dict()])
 
 
 async def _cmd_connect(args: argparse.Namespace) -> int:

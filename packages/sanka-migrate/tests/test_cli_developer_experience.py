@@ -28,6 +28,35 @@ from sanka.runtime.frameworks import (
 FIXTURE = Path(__file__).parent / "fixtures" / "drf_crud_project"
 
 
+def test_extension_help_exposes_only_the_management_command_tree(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(["extension", "--help"])
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    assert "{add,list,remove,marketplace}" in output
+    assert "manage migration extensions" in output
+
+    with pytest.raises(SystemExit) as raised:
+        main(["extension", "marketplace", "add", "--help"])
+    assert raised.value.code == 0
+    output = capsys.readouterr().out
+    assert "--name" in output
+    assert "--trust" in output
+    assert "--json" in output
+
+
+def test_extension_parser_errors_keep_the_extension_outer_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["extension", "add", "--json"]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "extension"
+    assert payload["outcome"] == "error"
+    assert payload["data"]["error"]["code"] == "SANKA_USAGE"
+
+
 def _run_cli(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
