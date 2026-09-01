@@ -2099,9 +2099,19 @@ class ExtensionStore:
                 "Only valid Python wheels may be installed",
                 artifact=artifact,
             )
-        if parts and parts[0] == f"{identity[0]}-{identity[1]}.data":
+        data_root = f"{identity[0]}-{identity[1]}.data"
+        if parts and parts[0].endswith(".data"):
+            if parts[0] != data_root:
+                _error(
+                    "SANKA_EXTENSION_ARTIFACT_INVALID",
+                    "Extension wheel .data root does not match its wheel identity",
+                    artifact=artifact,
+                    root=parts[0],
+                )
+            if len(parts) == 1 and info.is_dir():
+                return PurePosixPath()
             scheme = parts[1] if len(parts) > 1 else ""
-            if len(parts) < 3 or scheme != "purelib":
+            if scheme != "purelib" or (len(parts) < 3 and not info.is_dir()):
                 _error(
                     "SANKA_EXTENSION_ARTIFACT_INVALID",
                     "Extension wheel uses an unsupported .data installation scheme",
@@ -2160,8 +2170,7 @@ class ExtensionStore:
                         artifact=wheel.name,
                     )
                 for info in members:
-                    if not info.is_dir():
-                        self._wheel_install_path(info, wheel.name)
+                    self._wheel_install_path(info, wheel.name)
                 package = BytesParser().parsebytes(
                     self._zip_member(archive, ".dist-info/METADATA", wheel.name)
                 )
@@ -2279,7 +2288,7 @@ class ExtensionStore:
         wheels: tuple[tuple[Path, str], ...],
         executable: str,
     ) -> str:
-        targets: list[str] = []
+        generated: list[tuple[str, str, str]] = []
         for path, expected_sha256 in wheels:
             if _store_file_sha256(self.user_root, path) != expected_sha256:
                 _error(
@@ -2299,16 +2308,32 @@ class ExtensionStore:
                 if not members:
                     continue
                 parser = configparser.ConfigParser(interpolation=None)
-                parser.read_string(archive.read(members[0]).decode("utf-8"))
-                if parser.has_option("console_scripts", executable):
-                    targets.append(parser.get("console_scripts", executable).strip())
-        if len(targets) != 1 or _ENTRY_POINT.fullmatch(targets[0]) is None:
+                try:
+                    parser.read_string(archive.read(members[0]).decode("utf-8"))
+                except (configparser.Error, UnicodeDecodeError) as error:
+                    raise ExtensionError(
+                        "SANKA_EXTENSION_ARTIFACT_INVALID",
+                        "Extension wheel entry-point metadata is invalid",
+                        details={"artifact": path.name, "reason": str(error)},
+                    ) from error
+                for group in ("console_scripts", "gui_scripts"):
+                    if parser.has_section(group):
+                        generated.extend(
+                            (group, name, target.strip()) for name, target in parser.items(group)
+                        )
+        selected = [
+            target
+            for group, name, target in generated
+            if group == "console_scripts" and name == executable
+        ]
+        if len(generated) != 1 or len(selected) != 1 or _ENTRY_POINT.fullmatch(selected[0]) is None:
             _error(
                 "SANKA_EXTENSION_ARTIFACT_INVALID",
-                "Extension wheel set does not define one exact executable entry point",
+                "Extension wheel set must define only its exact executable entry point",
                 executable=executable,
+                generated_scripts=[f"{group}:{name}" for group, name, _target in generated],
             )
-        return targets[0]
+        return selected[0]
 
     def _wheel_import_records(
         self,
@@ -2706,6 +2731,7 @@ class ExtensionStore:
                     for path, wheel in zip(cached, manifest.wheels, strict=True)
                 )
                 self._wheel_import_records(verified_wheels)
+                self._wheel_entry_point(verified_wheels, manifest.executable)
                 artifact_digest = self._manifest_artifact_digest(manifest)
                 prior = next(
                     (

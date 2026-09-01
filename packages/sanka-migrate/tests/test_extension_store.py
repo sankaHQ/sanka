@@ -668,7 +668,7 @@ def test_purelib_data_scheme_is_installed_and_verified(
 
 
 @pytest.mark.parametrize("distribution", ["example-demo", "example_demo", "example.demo"])
-def test_only_the_exact_normalized_prerelease_wheel_data_root_is_relocated(
+def test_only_the_exact_normalized_prerelease_wheel_data_root_is_materialized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     distribution: str,
@@ -679,27 +679,117 @@ def test_only_the_exact_normalized_prerelease_wheel_data_root_is_relocated(
         version="1.2.0rc1",
         distribution=distribution,
         data_scheme="purelib",
-        extra_members=(
-            ("README.data", "ordinary file\n"),
-            ("assets.data/templates/x.txt", "ordinary directory\n"),
-            ("other-9.9.data/purelib/mismatched.py", "MISMATCHED = True\n"),
-        ),
     )
     name = f"{normalized}-1.2.0rc1-py3-none-any.whl"
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, {name: wheel})
-    manifest = load_marketplace(store.marketplaces()[0].snapshot_root)[0]
-    artifact = manifest.wheels[0]
-    cached = store._cache_wheel(artifact)
-    store._inspect_wheel(cached, artifact, manifest, {normalized: "1.2.0rc1"})
 
-    records = store._wheel_import_records(((cached, artifact.sha256),))
+    lock = store.add_extension("example/demo")
 
-    assert f"{normalized}/from_data.py" in records
-    assert "README.data" in records
-    assert "assets.data/templates/x.txt" in records
-    assert "other-9.9.data/purelib/mismatched.py" in records
+    installed = (
+        store.user_root
+        / "environments"
+        / lock.artifact_digest
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+        / normalized
+        / "from_data.py"
+    )
+    assert installed.read_text(encoding="utf-8") == "SCHEME = 'purelib'\n"
+
+
+@pytest.mark.parametrize(
+    ("member", "contents"),
+    [
+        ("README.data", "ordinary file\n"),
+        ("assets.data/templates/x.txt", "ordinary directory\n"),
+        ("other-9.9.data/purelib/mismatched.py", "MISMATCHED = True\n"),
+    ],
+)
+def test_non_identity_data_roots_are_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    member: str,
+    contents: str,
+) -> None:
+    source, wheel = _marketplace(
+        tmp_path / "source",
+        extra_members=((member, contents),),
+    )
+    name = "example_demo-0.1.0-py3-none-any.whl"
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        pytest.fail("non-identity .data root reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+
+
+@pytest.mark.parametrize(
+    "dependency_scripts",
+    [
+        (("dep-one", "dep-one-cli"),),
+        (("dep-one", "shared-cli"), ("dep-two", "shared-cli")),
+    ],
+    ids=("unique-auxiliary", "duplicate-auxiliary"),
+)
+def test_dependency_entry_points_are_rejected_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependency_scripts: tuple[tuple[str, str], ...],
+) -> None:
+    source, _ = _marketplace(tmp_path / "source")
+    requirements = tuple(f"{distribution}==1.0.0" for distribution, _ in dependency_scripts)
+    primary_name, primary, primary_digest = _wheel(
+        "example-demo",
+        "0.1.0",
+        "example-demo",
+        requires=requirements,
+    )
+    wheels = {primary_name: primary}
+    wheel_records = [
+        {
+            "name": primary_name,
+            "url": f"https://fixtures.invalid/{primary_name}",
+            "sha256": primary_digest,
+        }
+    ]
+    for distribution, executable in dependency_scripts:
+        name, wheel, digest = _wheel(distribution, "1.0.0", executable)
+        wheels[name] = wheel
+        wheel_records.append(
+            {
+                "name": name,
+                "url": f"https://fixtures.invalid/{name}",
+                "sha256": digest,
+            }
+        )
+    manifest_path = next(path for path in source.glob("*.json") if path.name != "marketplace.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wheels"] = wheel_records
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, wheels)
+
+    def materialize(*_args: object, **_kwargs: object) -> Path:
+        pytest.fail("auxiliary generated script reached materialization")
+
+    monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
 
 
 @pytest.mark.parametrize(

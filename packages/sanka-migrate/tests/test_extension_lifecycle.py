@@ -34,6 +34,28 @@ def _lock(*, digest: str = "3" * 64) -> LockEntry:
     )
 
 
+def _recommendation(
+    lock: LockEntry,
+    *,
+    marketplace: str,
+    targets: tuple[str, ...],
+    status: tuple[str, ...] = ("available", "installed", "locked"),
+) -> Recommendation:
+    return Recommendation(
+        id=lock.id,
+        version=lock.version,
+        marketplace=marketplace,
+        marketplace_identity=lock.marketplace_identity,
+        snapshot_digest=lock.snapshot_digest,
+        manifest_digest=lock.manifest_digest,
+        commands=lock.commands,
+        targets=targets,
+        evidence=(),
+        status=status,
+        add_command=f"sanka-migrate extension add {lock.id}",
+    )
+
+
 class FakeStore:
     def __init__(self, *, installed: bool = False, default_available: bool = False) -> None:
         self.installed = installed
@@ -336,6 +358,95 @@ def test_plan_refreshes_an_existing_scan_after_a_legitimate_repin(tmp_path: Path
     ]
     scan = json.loads((project / ".sanka" / "scan.json").read_text())
     assert scan["extensions"][0]["extension"] == store.lock.to_dict()
+
+
+def test_plan_only_repin_refreshes_the_persisted_scan_recommendation(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    store = FakeStore(installed=True)
+    store.lock = replace(store.lock, commands=("plan",))
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, store, runner)
+    lifecycle.scan()
+    store.lock = replace(
+        store.lock,
+        version="0.2.0",
+        snapshot_digest="9" * 40,
+        manifest_digest="sha256:" + "8" * 64,
+        artifact_digest="7" * 64,
+    )
+
+    lifecycle.plan(target="fastapi")
+
+    assert [(request["command"], lock.version) for lock, request in runner.calls] == [
+        ("plan", "0.2.0")
+    ]
+    scan = json.loads((project / ".sanka" / "scan.json").read_text())
+    assert scan["recommendations"][0]["version"] == "0.2.0"
+    assert scan["recommendations"][0]["marketplace_identity"] == ("github.com/sankaHQ/extensions")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "serialized"),
+    [
+        ("version", "0.2.0", "0.2.0"),
+        ("marketplace", "renamed-marketplace", "renamed-marketplace"),
+        ("marketplace_identity", "marketplace-b-new", "marketplace-b-new"),
+        ("commands", ("plan", "verify"), ["plan", "verify"]),
+        ("targets", ("flask", "starlette"), ["flask", "starlette"]),
+        (
+            "status",
+            ("available", "installed", "locked", "update_available"),
+            ["available", "installed", "locked", "update_available"],
+        ),
+        ("status", ("available", "disabled"), ["available", "disabled"]),
+    ],
+)
+def test_plan_refreshes_the_full_plan_only_recommendation_envelope(
+    tmp_path: Path,
+    field: str,
+    value: object,
+    serialized: object,
+) -> None:
+    project = _project(tmp_path)
+    active_lock = replace(
+        _lock(),
+        id="a/active",
+        marketplace_identity="marketplace-a",
+        commands=("plan",),
+    )
+    observed_lock = replace(
+        _lock(),
+        id="b/observed",
+        marketplace_identity="marketplace-b",
+        manifest_digest="sha256:" + "b" * 64,
+        commands=("plan",),
+    )
+    active = _recommendation(active_lock, marketplace="a", targets=("fastapi",))
+    observed = _recommendation(observed_lock, marketplace="b", targets=("flask",))
+
+    class Store:
+        recommendations_value = (observed, active)
+
+        def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
+            return self.recommendations_value
+
+        def resolve_locked(self, extension_id: str) -> LockEntry:
+            assert extension_id == active_lock.id
+            return active_lock
+
+    store = Store()
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, cast(FakeStore, store), runner)
+    lifecycle.scan()
+    changed = replace(observed, **cast(Any, {field: value}))
+    store.recommendations_value = (changed, active)
+
+    lifecycle.plan(target="fastapi")
+
+    scan = json.loads((project / ".sanka" / "scan.json").read_text())
+    saved = next(item for item in scan["recommendations"] if item["id"] == changed.id)
+    assert saved[field] == serialized
+    assert [item["id"] for item in scan["recommendations"]] == ["a/active", "b/observed"]
 
 
 def test_scan_dispatches_every_scan_capable_lock_under_its_exact_identity(

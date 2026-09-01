@@ -72,6 +72,13 @@ def _recommendation(value: Recommendation) -> dict[str, Any]:
     }
 
 
+def _serialized_recommendations(values: tuple[Recommendation, ...]) -> list[dict[str, Any]]:
+    return sorted(
+        (_recommendation(value) for value in values),
+        key=lambda value: json.dumps(value, separators=(",", ":"), sort_keys=True),
+    )
+
+
 def _normalized_json_object(value: Mapping[str, Any] | None) -> dict[str, Any]:
     try:
         encoded = json.dumps(
@@ -428,7 +435,7 @@ class ApplicationLifecycle:
             data.update(extension_result.data)
             data["extension"] = extension_result.data
         data["fingerprint"] = _fingerprint(fingerprint)
-        data["recommendations"] = [_recommendation(item) for item in recommendations]
+        data["recommendations"] = _serialized_recommendations(recommendations)
         scan_payload = {
             "schema_version": SCAN_SCHEMA,
             "configuration": normalized,
@@ -462,6 +469,7 @@ class ApplicationLifecycle:
     ) -> None:
         locks = self._scan_locks(recommendations)
         expected_locks = [lock.to_dict() for lock in locks]
+        expected_recommendations = _serialized_recommendations(recommendations)
         try:
             scan = _read_json(self.artifact_root / "scan.json", SCAN_SCHEMA)
         except ExtensionError:
@@ -480,6 +488,7 @@ class ApplicationLifecycle:
                 and saved.get("hash") == fingerprint.hash
                 and scan.get("configuration") == normalized
                 and saved_locks == expected_locks
+                and scan.get("recommendations") == expected_recommendations
             ):
                 return
         self._scan_locked(
