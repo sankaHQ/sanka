@@ -393,6 +393,50 @@ def test_marketplace_loader_translates_unresolvable_manifest_path(tmp_path: Path
     assert raised.value.details == {"path": "bad\u0000path"}
 
 
+def test_descriptor_marketplace_close_failure_propagates_and_closes_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = tmp_path / "snapshot"
+    write_snapshot(snapshot, fixture_manifest())
+    nested = snapshot / "nested"
+    nested.mkdir()
+    (snapshot / "extension.json").rename(nested / "extension.json")
+    catalog = json.loads((snapshot / "marketplace.json").read_text(encoding="utf-8"))
+    catalog["extensions"][0]["manifest"] = "nested/extension.json"
+    (snapshot / "marketplace.json").write_text(json.dumps(catalog), encoding="utf-8")
+    root_descriptor = os.open(snapshot, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    original_open = os.open
+    original_close = os.close
+    opened: list[int] = []
+    close_count = 0
+
+    def tracking_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+        opened.append(descriptor)
+        return descriptor
+
+    def failing_close(descriptor: int) -> None:
+        nonlocal close_count
+        original_close(descriptor)
+        close_count += 1
+        if close_count == 2:
+            raise OSError("injected descriptor close failure")
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "close", failing_close)
+
+    try:
+        with pytest.raises(OSError, match="injected descriptor close failure"):
+            load_marketplace(snapshot, root_descriptor=root_descriptor)
+    finally:
+        original_close(root_descriptor)
+
+    assert len(opened) == 3
+    for descriptor in opened:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
 @pytest.mark.parametrize(
     ("mutate", "code"),
     [

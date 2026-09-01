@@ -411,6 +411,43 @@ def test_snapshot_final_entry_swap_is_rejected_at_catalog_consumption(
     assert raised.value.code == "SANKA_MARKETPLACE_SNAPSHOT_INVALID"
 
 
+def test_store_catalog_rejects_nul_manifest_with_stable_error(tmp_path: Path) -> None:
+    source, _wheel_bytes = _marketplace(tmp_path / "source")
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "user.name=Sanka Test",
+            "-c",
+            "user.email=test@sanka.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+    )
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    record = store.add_marketplace(source.as_uri(), name="fixtures", trust=True)
+    catalog_path = record.snapshot_root / "marketplace.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog["extensions"][0]["manifest"] = "bad\0path"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    tree_digest = _tree_digest(record.snapshot_root)
+    state = json.loads(store._marketplace_path.read_text(encoding="utf-8"))
+    state["marketplaces"][0]["tree_digest"] = tree_digest
+    state["snapshots"][0]["tree_digest"] = tree_digest
+    store._marketplace_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ExtensionError) as raised:
+        store.list_extensions()
+
+    assert raised.value.code == "SANKA_MARKETPLACE_INVALID"
+
+
 def test_source_collision_requires_explicit_marketplace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -8,9 +8,9 @@ import json
 import os
 import re
 import stat
+import sys
 import tomllib
 from collections.abc import Iterable, Mapping
-from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 from urllib.parse import urlparse
@@ -566,13 +566,26 @@ def _confined_marketplace_path(root: Path, candidate: Path, display: str) -> Pat
     return resolved
 
 
+def _close_descriptors(descriptors: Iterable[int]) -> None:
+    primary_active = sys.exc_info()[0] is not None
+    first_error: OSError | None = None
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError as error:
+            if not primary_active and first_error is None:
+                first_error = error
+    if first_error is not None:
+        raise first_error
+
+
 def _descriptor_bytes(
     root_descriptor: int, relative: PurePosixPath, path: Path, code: str
 ) -> bytes:
     if (
         relative.is_absolute()
         or not relative.parts
-        or any(part in {"", ".", ".."} or "\\" in part for part in relative.parts)
+        or any(part in {"", ".", ".."} or "\\" in part or "\0" in part for part in relative.parts)
     ):
         _invalid(code, path, "marketplace path is not confined to its snapshot")
     parent = root_descriptor
@@ -593,23 +606,18 @@ def _descriptor_bytes(
             os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
             dir_fd=parent,
         )
-        try:
-            status = os.fstat(descriptor)
-            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
-                _invalid(code, path, "marketplace document must be one regular file")
-            with os.fdopen(descriptor, "rb", closefd=False) as source:
-                return source.read()
-        finally:
-            with suppress(OSError):
-                os.close(descriptor)
+        opened.append(descriptor)
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+            _invalid(code, path, "marketplace document must be one regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            return source.read()
     except ExtensionError:
         raise
     except OSError as error:
         _invalid(code, path, str(error))
     finally:
-        for descriptor in reversed(opened):
-            with suppress(OSError):
-                os.close(descriptor)
+        _close_descriptors(reversed(opened))
 
 
 def load_marketplace(
