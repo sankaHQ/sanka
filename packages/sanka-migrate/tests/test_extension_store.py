@@ -127,9 +127,10 @@ def _installed_default(
     if tamper == "hash":
         records[0].hash = metadata.FileHash("sha256=" + "A" * 43)
     elif tamper == "size":
+        assert records[0].size is not None
         records[0].size += 1
     monkeypatch.setattr(store, "resolve_locked", lambda _extension_id: entry)
-    monkeypatch.setattr(extension_store.metadata, "distribution", lambda _name: distribution)
+    monkeypatch.setattr(metadata, "distribution", lambda _name: distribution)
     script_directory = "Scripts" if os.name == "nt" else "bin"
     return store, entry, environment / script_directory / _DEFAULT_EXECUTABLE
 
