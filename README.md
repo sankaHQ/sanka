@@ -1,7 +1,8 @@
-# Sanka Migrate
+# Sanka migration runtime
 
-Sanka Migrate is the local engine behind Sanka's migration CLI. It owns the
-`scan`, `plan`, `apply`, `test`, and `verify` lifecycle. Framework-specific
+The `sanka-migrate` package is the local engine behind Sanka's migration CLI.
+It owns the `scan`, `plan`, `apply`, `test`, and `verify` lifecycle.
+Framework-specific
 inspection and code generation run in separately installed extensions.
 
 The first official extension is `sanka/drf-to-fastapi`. It scans a Django REST
