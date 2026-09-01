@@ -39,7 +39,9 @@ def _descriptor_path(descriptor: int) -> Path:
     except OSError:
         import fcntl
 
-        raw = fcntl.fcntl(descriptor, fcntl.F_GETPATH, b"\0" * 1024)
+        command = getattr(fcntl, "F_GETPATH", None)
+        assert command is not None
+        raw = fcntl.fcntl(descriptor, command, b"\0" * 1024)
         assert isinstance(raw, bytes)
         return Path(raw.split(b"\0", 1)[0].decode())
 
