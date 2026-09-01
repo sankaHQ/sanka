@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -237,4 +238,22 @@ def test_runner_rejects_a_command_missing_from_the_verified_manifest_before_laun
 
     assert raised.value.code == "SANKA_EXTENSION_CAPABILITY_UNSUPPORTED"
     assert raised.value.details == {"command": "apply", "commands": ["scan"]}
+    assert not (_artifact_root(request) / "result.json").exists()
+
+
+def test_runner_requires_an_execution_lease_for_a_cached_relative_executable(
+    tmp_path: Path,
+    fake_extension: Path,
+) -> None:
+    request = _request(tmp_path, "valid")
+    lock = replace(_lock(fake_extension), executable="example-demo")
+
+    with pytest.raises(ExtensionError) as raised:
+        ExtensionRunner(user_root=tmp_path / "home").run(
+            lock,
+            request,
+            allowed_roots=(_artifact_root(request),),
+        )
+
+    assert raised.value.code == "SANKA_EXTENSION_IDENTITY"
     assert not (_artifact_root(request) / "result.json").exists()

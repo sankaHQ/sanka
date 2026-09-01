@@ -364,12 +364,30 @@ class ApplicationLifecycle:
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
         fingerprint = fingerprint_repository(self.project_root)
-        recommendations = self._ensure_enabled(
+        self._ensure_enabled(
             fingerprint,
             self._recommendations(fingerprint),
         )
-        enabled = self._enabled(recommendations)
         normalized = _normalized_json_object(configuration)
+        with self.store.execution_guard():
+            recommendations = self._recommendations(fingerprint)
+            if recommendations and not self._enabled(recommendations):
+                self._required(fingerprint, recommendations)
+            return self._scan_locked(
+                fingerprint,
+                recommendations,
+                normalized,
+                explicit_env_names,
+            )
+
+    def _scan_locked(
+        self,
+        fingerprint: Fingerprint,
+        recommendations: tuple[Recommendation, ...],
+        normalized: dict[str, Any],
+        explicit_env_names: tuple[str, ...],
+    ) -> ExtensionResult:
+        enabled = self._enabled(recommendations)
         extension_results: list[tuple[LockEntry, ExtensionResult]] = []
         for recommendation in enabled:
             if "scan" not in recommendation.commands:
@@ -378,12 +396,14 @@ class ApplicationLifecycle:
             self._verify_selection(lock, recommendation)
             request = self._request(lock, "scan", fingerprint, normalized)
             extension_root = Path(request["artifact_root"])
-            extension_result = self.runner.run(
-                lock,
-                request,
-                allowed_roots=(extension_root,),
-                explicit_env_names=explicit_env_names,
-            )
+            with self.store.execution_lease(lock) as executable_fd:
+                extension_result = self.runner.run(
+                    lock,
+                    request,
+                    allowed_roots=(extension_root,),
+                    explicit_env_names=explicit_env_names,
+                    executable_fd=executable_fd,
+                )
             if extension_result.outcome != "success":
                 self._raise_failure(extension_result)
             extension_results.append((lock, extension_result))
@@ -449,10 +469,27 @@ class ApplicationLifecycle:
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
         normalized = _normalized_json_object(configuration)
-        fingerprint, recommendations = self._current_scan(
+        fingerprint, _recommendations = self._current_scan(
             normalized,
             explicit_env_names,
         )
+        with self.store.execution_guard():
+            return self._plan_locked(
+                fingerprint,
+                self._recommendations(fingerprint),
+                target,
+                normalized,
+                explicit_env_names,
+            )
+
+    def _plan_locked(
+        self,
+        fingerprint: Fingerprint,
+        recommendations: tuple[Recommendation, ...],
+        target: str | None,
+        normalized: dict[str, Any],
+        explicit_env_names: tuple[str, ...],
+    ) -> ExtensionResult:
         enabled = self._enabled(recommendations)
         targets = tuple(sorted({target for item in enabled for target in item.targets}))
         selected_target = target or self._prompt("Choose a migration target", targets)
@@ -483,12 +520,14 @@ class ApplicationLifecycle:
         extension_root = Path(request["artifact_root"])
         seen_inputs: set[str] = set()
         while True:
-            result = self.runner.run(
-                lock,
-                request,
-                allowed_roots=self._roots(normalized, extension_root, self.project_root),
-                explicit_env_names=explicit_env_names,
-            )
+            with self.store.execution_lease(lock) as executable_fd:
+                result = self.runner.run(
+                    lock,
+                    request,
+                    allowed_roots=self._roots(normalized, extension_root, self.project_root),
+                    explicit_env_names=explicit_env_names,
+                    executable_fd=executable_fd,
+                )
             if result.outcome == "success":
                 break
             details = (result.error or {}).get("details")
@@ -549,6 +588,22 @@ class ApplicationLifecycle:
         return payload
 
     def _dispatch(
+        self,
+        command: str,
+        *,
+        reviewed_plan_hash: str | None = None,
+        configuration: Mapping[str, Any] | None = None,
+        explicit_env_names: tuple[str, ...] = (),
+    ) -> ExtensionResult:
+        with self.store.execution_guard():
+            return self._dispatch_locked(
+                command,
+                reviewed_plan_hash=reviewed_plan_hash,
+                configuration=configuration,
+                explicit_env_names=explicit_env_names,
+            )
+
+    def _dispatch_locked(
         self,
         command: str,
         *,
@@ -619,12 +674,14 @@ class ApplicationLifecycle:
             reviewed_plan_hash=core_hash,
         )
         extension_root = Path(request["artifact_root"])
-        result = self.runner.run(
-            lock,
-            request,
-            allowed_roots=self._roots(merged, extension_root, self.project_root),
-            explicit_env_names=explicit_env_names,
-        )
+        with self.store.execution_lease(lock) as executable_fd:
+            result = self.runner.run(
+                lock,
+                request,
+                allowed_roots=self._roots(merged, extension_root, self.project_root),
+                explicit_env_names=explicit_env_names,
+                executable_fd=executable_fd,
+            )
         if result.outcome != "success":
             self._raise_failure(result)
         data = dict(result.data)

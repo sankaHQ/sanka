@@ -134,19 +134,21 @@ class ExtensionRunner:
 
     def _execute(
         self,
-        executable: Path,
+        command: list[str],
         request: bytes,
         *,
         cwd: str,
         environment: dict[str, str],
+        pass_fds: tuple[int, ...] = (),
     ) -> tuple[int, bytes, bytes]:
         process = subprocess.Popen(
-            [str(executable)],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=cwd,
             env=environment,
+            pass_fds=pass_fds,
         )
         assert process.stdin is not None
         assert process.stdout is not None
@@ -392,6 +394,7 @@ class ExtensionRunner:
         *,
         allowed_roots: tuple[Path, ...],
         explicit_env_names: tuple[str, ...] = (),
+        executable_fd: int | None = None,
     ) -> ExtensionResult:
         if not lock.enabled or lock.protocol_version != SCHEMA_VERSION:
             _error("SANKA_EXTENSION_IDENTITY", "Extension lock is disabled or incompatible")
@@ -403,12 +406,42 @@ class ExtensionRunner:
         ):
             _error("SANKA_EXTENSION_ENVIRONMENT", "Explicit environment names are invalid")
         environment = {name: os.environ[name] for name in SAFE_ENV if name in os.environ}
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment.update(
             {name: os.environ[name] for name in explicit_env_names if name in os.environ}
         )
         try:
+            if executable_fd is None and not Path(lock.executable).is_absolute():
+                _error(
+                    "SANKA_EXTENSION_IDENTITY",
+                    "Cached extension execution requires a verified execution lease",
+                )
+            executable = self._executable(lock)
+            command = [str(executable)]
+            pass_fds: tuple[int, ...] = ()
+            if executable_fd is not None:
+                opened = os.fstat(executable_fd)
+                linked = executable.lstat()
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or not stat.S_ISREG(linked.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino)
+                ):
+                    _error(
+                        "SANKA_EXTENSION_PATH",
+                        "Extension executable changed after verification",
+                        path=str(executable),
+                    )
+                interpreter = (
+                    Path(sys.executable)
+                    if lock.id == DEFAULT_EXTENSION_ID
+                    else executable.parent / "python"
+                )
+                command = [str(interpreter), f"/dev/fd/{executable_fd}"]
+                pass_fds = (executable_fd,)
             returncode, stdout_bytes, stderr_bytes = self._execute(
-                self._executable(lock),
+                command,
                 json.dumps(
                     request,
                     ensure_ascii=False,
@@ -418,6 +451,7 @@ class ExtensionRunner:
                 ).encode("utf-8"),
                 cwd=request["project_root"],
                 environment=environment,
+                pass_fds=pass_fds,
             )
         except ExtensionError:
             raise

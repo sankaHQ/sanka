@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -91,7 +92,9 @@ class FakeRunner:
         *,
         allowed_roots: tuple[Path, ...],
         explicit_env_names: tuple[str, ...] = (),
+        executable_fd: int | None = None,
     ) -> ExtensionResult:
+        del executable_fd
         self.calls.append((lock, request))
         self.explicit_env_names.append(explicit_env_names)
         if request["command"] == "plan" and self.required_inputs:
@@ -145,6 +148,10 @@ def _lifecycle(
     interactive: bool = False,
     prompt: Callable[[str, tuple[str, ...] | None], str | None] | None = None,
 ) -> ApplicationLifecycle:
+    if not hasattr(store, "execution_guard"):
+        store.execution_guard = nullcontext  # type: ignore[attr-defined]
+    if not hasattr(store, "execution_lease"):
+        store.execution_lease = lambda _lock: nullcontext(None)  # type: ignore[attr-defined]
     return ApplicationLifecycle(
         project,
         store=cast(ExtensionStore, store),

@@ -19,6 +19,8 @@ import pytest
 
 from sanka.runtime.extensions import ExtensionError, fingerprint_repository, load_marketplace
 from sanka.runtime.extensions import store as extension_store
+from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
+from sanka.runtime.extensions.runner import ExtensionResult
 from sanka.runtime.extensions.store import (
     OFFICIAL_IDENTITY,
     ExtensionStore,
@@ -48,6 +50,7 @@ def _wheel(
     requires: tuple[str, ...] = (),
     purelib: bool = True,
     tag: str = "py3-none-any",
+    cli_source: str = "def main():\n    return 0\n",
 ) -> tuple[str, bytes, str]:
     normalized = distribution.replace("-", "_")
     name = f"{normalized}-{version}-{tag}.whl"
@@ -63,7 +66,7 @@ def _wheel(
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr(f"{normalized}/__init__.py", "__version__ = 'fixture'\n")
-        archive.writestr(f"{normalized}/cli.py", "def main():\n    return 0\n")
+        archive.writestr(f"{normalized}/cli.py", cli_source)
         archive.writestr(f"{dist_info}/METADATA", "\n".join(metadata))
         archive.writestr(
             f"{dist_info}/WHEEL",
@@ -104,6 +107,7 @@ def _marketplace(
     runtime: str = ">=0.1.0a10,<0.2",
     requires: tuple[str, ...] = (),
     purelib: bool = True,
+    cli_source: str = "def main():\n    return 0\n",
 ) -> tuple[Path, bytes]:
     root.mkdir(parents=True, exist_ok=True)
     wheel_name, wheel, digest = _wheel(
@@ -112,6 +116,7 @@ def _marketplace(
         executable,
         requires=requires,
         purelib=purelib,
+        cli_source=cli_source,
     )
     manifest_name = extension_id.replace("/", "-") + ".json"
     (root / "marketplace.json").write_text(
@@ -177,17 +182,33 @@ def _fast_environments(monkeypatch: pytest.MonkeyPatch) -> None:
         root = self.user_root / "environments" / artifact_digest
         binary = root / "bin" / executable
         binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_text("#!/bin/sh\n", encoding="utf-8")
-        package = (
+        binary.write_bytes(
+            extension_store._console_script(root / "bin" / "python", "example_demo.cli:main")
+        )
+        binary.chmod(0o755)
+        for name, interpreter in extension_store.ExtensionStore._environment_symlinks().items():
+            launcher = root / name
+            launcher.parent.mkdir(parents=True, exist_ok=True)
+            if not launcher.exists():
+                launcher.symlink_to(interpreter)
+        (root / "pyvenv.cfg").write_text(
+            "include-system-site-packages = true\n",
+            encoding="utf-8",
+        )
+        site_packages = (
             root
             / "lib"
             / f"python{sys.version_info.major}.{sys.version_info.minor}"
             / "site-packages"
-            / "example_demo"
-            / "__init__.py"
         )
-        package.parent.mkdir(parents=True, exist_ok=True)
-        package.write_text("__version__ = 'fixture'\n", encoding="utf-8")
+        for wheel, _sha256 in _wheels:
+            with zipfile.ZipFile(wheel) as archive:
+                for info in archive.infolist():
+                    if info.is_dir() or info.filename.endswith(".dist-info/RECORD"):
+                        continue
+                    target = site_packages / info.filename
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.read(info))
         return root
 
     monkeypatch.setattr(ExtensionStore, "_materialize_environment", materialize)
@@ -707,12 +728,12 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
-    original_create = extension_store._create_venv
+    original_run = extension_store._run_venv_python
     project_sitecustomize = store.project_root / "sitecustomize.py"
     project_ensurepip = store.project_root / "ensurepip" / "__main__.py"
     sitecustomize_sentinel = tmp_path / "sitecustomize-ran"
     ensurepip_sentinel = tmp_path / "project-ensurepip-ran"
-    bootstrap_observations = tmp_path / "bootstrap-observations.jsonl"
+    observations: list[dict[str, Any]] = []
     project_sitecustomize.parent.mkdir(parents=True, exist_ok=True)
     project_sitecustomize.write_text(
         f"from pathlib import Path\nPath({str(sitecustomize_sentinel)!r}).touch()\n",
@@ -725,52 +746,40 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
         encoding="utf-8",
     )
 
-    def use_host_interpreter(path: Path) -> None:
-        path.unlink(missing_ok=True)
-        path.symlink_to(Path(sys.executable).resolve())
-
-    def instrument_children(environment: Path) -> None:
-        site_packages = next((environment / "lib").glob("python*/site-packages"))
-        (site_packages / "sitecustomize.py").write_text(
-            "import json, os, sys\n"
-            "from pathlib import Path\n"
-            f"marker = Path({str(bootstrap_observations)!r})\n"
-            "with marker.open('a', encoding='utf-8') as output:\n"
-            "    output.write(json.dumps({\n"
-            "        'isolated': sys.flags.isolated, 'cwd': os.getcwd(),\n"
-            "        'environment': dict(os.environ),\n"
-            "    }) + '\\n')\n",
-            encoding="utf-8",
-        )
-
-    def create_with_host_interpreter(
-        environments: int,
-        temporary: str,
+    def observe_children(
+        environment_descriptor: int,
+        arguments: list[str],
         *,
         environment: Mapping[str, str],
         cwd: Path,
     ) -> None:
-        original_create(environments, temporary, environment=environment, cwd=cwd)
-        root = _descriptor_path(environments) / temporary
-        use_host_interpreter(root / "bin" / "python")
-        instrument_children(root)
+        observations.append(
+            {
+                "arguments": tuple(arguments),
+                "cwd": _descriptor_path(environment_descriptor).name,
+                "environment": dict(environment),
+            }
+        )
+        original_run(
+            environment_descriptor,
+            arguments,
+            environment=environment,
+            cwd=cwd,
+        )
 
-    monkeypatch.setattr(extension_store, "_create_venv", create_with_host_interpreter)
+    monkeypatch.setattr(extension_store, "_run_venv_python", observe_children)
     monkeypatch.chdir(store.project_root)
 
     lock = store.add_extension("example/demo")
 
     environment = store.user_root / "environments" / lock.artifact_digest
-    observations = [
-        json.loads(line) for line in bootstrap_observations.read_text(encoding="utf-8").splitlines()
-    ]
     assert (environment / "bin" / "example-demo").is_file()
     assert "include-system-site-packages = true" in (environment / "pyvenv.cfg").read_text(
         encoding="utf-8"
     )
     assert not (environment / "requirements-hashed.txt").exists()
     assert len(observations) >= 2
-    assert all(observation["isolated"] == 1 for observation in observations)
+    assert all(observation["arguments"][0] == "-I" for observation in observations)
     assert all(
         Path(observation["cwd"]).name.startswith("environment-") for observation in observations
     )
@@ -790,6 +799,74 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
     )
     assert installed.returncode == 0
     assert store.resolve_locked("example/demo") == lock
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+def test_real_posix_materializer_installs_without_a_venv_test_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
+
+    lock = store.add_extension("example/demo")
+
+    environment = store.user_root / "environments" / lock.artifact_digest
+    interpreter = Path(sys.executable).resolve()
+    launchers = (
+        environment / "bin" / "python",
+        environment / "bin" / "python3",
+        environment / "bin" / f"python{sys.version_info.major}.{sys.version_info.minor}",
+    )
+    assert all(path.is_symlink() and Path(os.readlink(path)) == interpreter for path in launchers)
+    completed = subprocess.run(
+        [str(environment / "bin" / "example-demo")],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0
+    assert store.resolve_locked("example/demo") == lock
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor dispatch only")
+def test_real_materializer_dispatches_through_the_bound_executable_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(
+        tmp_path / "source",
+        cli_source=(
+            "import json\n"
+            "import sys\n"
+            "def main():\n"
+            "    request = json.load(sys.stdin)\n"
+            "    json.dump({\n"
+            "        'schema_version': request['schema_version'],\n"
+            "        'request_id': request['request_id'],\n"
+            "        'command': request['command'],\n"
+            "        'extension': {\n"
+            "            'id': request['extension']['id'],\n"
+            "            'version': request['extension']['version'],\n"
+            "        },\n"
+            "        'outcome': 'success',\n"
+            "        'data': {'bound_descriptor': True},\n"
+            "        'artifacts': [],\n"
+            "        'limitations': [],\n"
+            "        'next_actions': [],\n"
+            "    }, sys.stdout)\n"
+            "    return 0\n"
+        ),
+    )
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    (store.project_root / "source.py").write_text("pass\n", encoding="utf-8")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
+    store.add_extension("example/demo")
+
+    result = ApplicationLifecycle(store.project_root, store=store).scan()
+
+    assert result.data["bound_descriptor"] is True
 
 
 def test_cache_swap_after_inspection_is_rejected_by_manifest_hash_boundary(
@@ -1092,6 +1169,150 @@ def test_resolve_rejects_mutated_installed_executable_and_imported_bytes(
     with pytest.raises(ExtensionError) as raised:
         store.resolve_locked("example/demo")
     assert raised.value.code == "SANKA_EXTENSION_HASH_MISMATCH"
+
+
+@pytest.mark.parametrize("target", ["executable", "imported"])
+def test_resolve_rejects_environment_tamper_even_when_metadata_self_attests_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+) -> None:
+    store, _source, _wheel = _configured_store(tmp_path, monkeypatch)
+    lock = store.add_extension("example/demo")
+    environment = store.user_root / "environments" / lock.artifact_digest
+    path = (
+        environment / "bin" / "example-demo"
+        if target == "executable"
+        else next(environment.glob("lib/python*/site-packages/example_demo/__init__.py"))
+    )
+    path.write_text("#!/bin/sh\nexit 77\n" if target == "executable" else "TAMPERED = True\n")
+    payload = json.loads(store._installation_path.read_text(encoding="utf-8"))
+    payload["installations"][0]["environment_digest"] = store._environment_digest(environment)
+    store._installation_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ExtensionError) as raised:
+        store.resolve_locked("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_HASH_MISMATCH"
+
+
+def test_lifecycle_rejects_executable_replacement_after_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _source, _wheel = _configured_store(tmp_path, monkeypatch)
+    (store.project_root / "source.py").write_text("pass\n", encoding="utf-8")
+    lock = store.add_extension("example/demo")
+    environment = store.user_root / "environments" / lock.artifact_digest
+    executable = environment / "bin" / "example-demo"
+    resolve = store.resolve_locked
+    runner_calls: list[str] = []
+
+    def replace_after_resolution(extension_id: str) -> LockEntry:
+        resolved = resolve(extension_id)
+        executable.write_text("#!/bin/sh\nexit 77\n", encoding="utf-8")
+        payload = json.loads(store._installation_path.read_text(encoding="utf-8"))
+        payload["installations"][0]["environment_digest"] = store._environment_digest(environment)
+        store._installation_path.write_text(json.dumps(payload), encoding="utf-8")
+        return resolved
+
+    class Runner:
+        def run(
+            self,
+            resolved: LockEntry,
+            request: dict[str, Any],
+            *,
+            allowed_roots: tuple[Path, ...],
+            explicit_env_names: tuple[str, ...] = (),
+            executable_fd: int | None = None,
+        ) -> ExtensionResult:
+            del allowed_roots, explicit_env_names, executable_fd
+            runner_calls.append(resolved.version)
+            return ExtensionResult("success", {}, (), (), (), None)
+
+    monkeypatch.setattr(store, "resolve_locked", replace_after_resolution)
+
+    with pytest.raises(ExtensionError) as raised:
+        ApplicationLifecycle(store.project_root, store=store, runner=Runner()).scan()  # type: ignore[arg-type]
+
+    assert raised.value.code == "SANKA_EXTENSION_HASH_MISMATCH"
+    assert runner_calls == []
+
+
+def test_lifecycle_serializes_a_legitimate_repin_through_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, source, wheel = _configured_store(tmp_path, monkeypatch)
+    (store.project_root / "source.py").write_text("pass\n", encoding="utf-8")
+    store.add_extension("example/demo")
+    _marketplace(source, version="0.2.0")
+    upgraded_wheel = _wheel("example-demo", "0.2.0", "example-demo")[1]
+    _responses(
+        monkeypatch,
+        {
+            "example_demo-0.1.0-py3-none-any.whl": wheel,
+            "example_demo-0.2.0-py3-none-any.whl": upgraded_wheel,
+        },
+    )
+    resolved = threading.Event()
+    allow_dispatch = threading.Event()
+    mutation_started = threading.Event()
+    mutation_done = threading.Event()
+    resolve = store.resolve_locked
+    dispatched: list[str] = []
+    errors: list[BaseException] = []
+
+    def pause_after_resolution(extension_id: str) -> LockEntry:
+        lock = resolve(extension_id)
+        resolved.set()
+        assert allow_dispatch.wait(timeout=5)
+        return lock
+
+    class Runner:
+        def run(
+            self,
+            lock: LockEntry,
+            request: dict[str, Any],
+            *,
+            allowed_roots: tuple[Path, ...],
+            explicit_env_names: tuple[str, ...] = (),
+            executable_fd: int | None = None,
+        ) -> ExtensionResult:
+            del request, allowed_roots, explicit_env_names, executable_fd
+            dispatched.append(lock.version)
+            return ExtensionResult("success", {}, (), (), (), None)
+
+    def scan() -> None:
+        try:
+            ApplicationLifecycle(store.project_root, store=store, runner=Runner()).scan()  # type: ignore[arg-type]
+        except BaseException as error:  # pragma: no cover - asserted below
+            errors.append(error)
+
+    def repin() -> None:
+        try:
+            mutation_started.set()
+            store.upgrade_marketplace("fixtures")
+            store.add_extension("example/demo")
+        except BaseException as error:  # pragma: no cover - asserted below
+            errors.append(error)
+        finally:
+            mutation_done.set()
+
+    monkeypatch.setattr(store, "resolve_locked", pause_after_resolution)
+    scan_thread = threading.Thread(target=scan)
+    scan_thread.start()
+    assert resolved.wait(timeout=5)
+    mutation_thread = threading.Thread(target=repin)
+    mutation_thread.start()
+    assert mutation_started.wait(timeout=5)
+    serialized = not mutation_done.wait(timeout=0.5)
+    allow_dispatch.set()
+    scan_thread.join(timeout=5)
+    mutation_thread.join(timeout=5)
+
+    assert serialized
+    assert errors == []
+    assert dispatched == ["0.1.0"]
+    assert resolve("example/demo").version == "0.2.0"
 
 
 def test_removing_locked_marketplace_fails_closed(

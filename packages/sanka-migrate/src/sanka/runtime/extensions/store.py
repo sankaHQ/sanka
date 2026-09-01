@@ -504,12 +504,33 @@ def _create_venv(
         (
             "import os, sys, venv; "
             "os.fchdir(int(sys.argv[1])); "
-            "venv.EnvBuilder(with_pip=False, system_site_packages=True).create(sys.argv[2])"
+            "venv.EnvBuilder(with_pip=False, system_site_packages=True, "
+            "symlinks=os.name != 'nt').create(sys.argv[2])"
         ),
         [temporary],
         environment=environment,
         cwd=cwd,
     )
+
+
+def _normalize_venv_launchers(environment_descriptor: int) -> None:
+    if os.name == "nt":
+        return
+    interpreter = Path(sys.executable).resolve()
+    names = ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}")
+    with _directory_at(environment_descriptor, "bin", Path("bin")) as bin_descriptor:
+        assert bin_descriptor is not None
+        for name in names:
+            with suppress(FileNotFoundError):
+                status = os.stat(name, dir_fd=bin_descriptor, follow_symlinks=False)
+                if not (stat.S_ISLNK(status.st_mode) or stat.S_ISREG(status.st_mode)):
+                    _error(
+                        "SANKA_EXTENSION_PATH",
+                        "Virtual environment launcher is not replaceable",
+                        path=f"bin/{name}",
+                    )
+                os.unlink(name, dir_fd=bin_descriptor)
+            os.symlink(str(interpreter), name, dir_fd=bin_descriptor)
 
 
 def _run_venv_python(
@@ -733,7 +754,7 @@ def _atomic_json(root: Path, path: Path, payload: object) -> None:
 
 
 @contextmanager
-def _locked(root: Path, path: Path) -> Iterator[None]:
+def _locked(root: Path, path: Path, *, exclusive: bool = True) -> Iterator[None]:
     lock_path = path.with_name(path.name + ".lock")
     try:
         with _parent_descriptor(root, lock_path, create=True) as (parent, name):
@@ -767,7 +788,7 @@ def _locked(root: Path, path: Path) -> Iterator[None]:
                 path=str(lock_path),
             )
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            fcntl.flock(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
         except OSError as error:
             raise ExtensionError(
                 "SANKA_EXTENSION_IO",
@@ -812,6 +833,7 @@ def _rewrite_console_script(
     environment: int,
     executable: str,
     interpreter: Path,
+    target: str,
 ) -> None:
     bin_name = "Scripts" if os.name == "nt" else "bin"
     with _directory_at(environment, bin_name, interpreter.parent) as bin_descriptor:
@@ -829,29 +851,37 @@ def _rewrite_console_script(
                     "Installed extension executable is not one regular file",
                     executable=executable,
                 )
-            with os.fdopen(descriptor, "r+b", closefd=False) as script:
-                payload = script.read(MAX_WHEEL_METADATA_BYTES + 1)
-                if len(payload) > MAX_WHEEL_METADATA_BYTES or not payload.startswith(b"#!"):
-                    _error(
-                        "SANKA_EXTENSION_INSTALL_FAILED",
-                        "Installed extension executable has an invalid launcher",
-                        executable=executable,
-                    )
-                _first, separator, body = payload.partition(b"\n")
-                if not separator:
-                    _error(
-                        "SANKA_EXTENSION_INSTALL_FAILED",
-                        "Installed extension executable has an invalid launcher",
-                        executable=executable,
-                    )
-                launcher = (
-                    f"#!/bin/sh\n'''exec' {shlex.quote(str(interpreter))} \"$0\" \"$@\"\n' '''\n"
-                ).encode()
-                script.seek(0)
-                script.write(launcher + body)
-                script.truncate()
+            payload = _console_script(interpreter, target)
+            os.ftruncate(descriptor, 0)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            with os.fdopen(descriptor, "wb", closefd=False) as script:
+                script.write(payload)
+                script.flush()
+                os.fsync(script.fileno())
+            os.fchmod(descriptor, opened.st_mode | 0o111)
         finally:
             _close_descriptor(descriptor)
+
+
+def _console_script(interpreter: Path, target: str) -> bytes:
+    if _ENTRY_POINT.fullmatch(target) is None:
+        _error(
+            "SANKA_EXTENSION_ARTIFACT_INVALID",
+            "Extension executable entry point is invalid",
+            entry_point=target,
+        )
+    module, attribute = target.split(":", 1)
+    return (
+        f"#!/bin/sh\n'''exec' {shlex.quote(str(interpreter))} \"$0\" \"$@\"\n' '''\n"
+        "import importlib\n"
+        "import sys\n"
+        "sys.dont_write_bytecode = True\n"
+        f"target = importlib.import_module({module!r})\n"
+        f"for name in {attribute.split('.')!r}:\n"
+        "    target = getattr(target, name)\n"
+        "if __name__ == '__main__':\n"
+        "    sys.exit(target())\n"
+    ).encode()
 
 
 class ExtensionStore:
@@ -864,6 +894,64 @@ class ExtensionStore:
         self._installation_path = self.user_root / "installations.json"
         self._disabled_path = self.user_root / "disabled.json"
         self._project_lock_path = self.project_root / ".sanka" / "extensions.lock"
+
+    @contextmanager
+    def execution_guard(self) -> Iterator[None]:
+        """Keep the exact project pin stable through one lifecycle dispatch."""
+        with _locked(self.project_root, self._project_lock_path, exclusive=False):
+            yield
+
+    @contextmanager
+    def execution_lease(self, entry: LockEntry) -> Iterator[int]:
+        """Bind the verified console script inode until its subprocess completes."""
+        if self.resolve_locked(entry.id) != entry:
+            _error(
+                "SANKA_EXTENSION_IDENTITY",
+                "Resolved extension changed before execution",
+                extension_id=entry.id,
+            )
+        if entry.id == DEFAULT_EXTENSION_ID:
+            executable = Path(sys.executable).resolve().parent / entry.executable
+        else:
+            executable = (
+                self.user_root
+                / "environments"
+                / entry.artifact_digest
+                / ("Scripts" if os.name == "nt" else "bin")
+                / entry.executable
+            )
+        try:
+            descriptor = os.open(executable, _FILE_FLAGS)
+        except OSError as error:
+            raise ExtensionError(
+                "SANKA_EXTENSION_NOT_CACHED",
+                "Verified extension executable could not be leased",
+                details={"path": str(executable), "reason": str(error)},
+            ) from error
+        try:
+            try:
+                opened = os.fstat(descriptor)
+                linked = executable.lstat()
+            except OSError as error:
+                raise ExtensionError(
+                    "SANKA_EXTENSION_PATH",
+                    "Extension executable changed while acquiring its execution lease",
+                    details={"path": str(executable), "reason": str(error)},
+                ) from error
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or not stat.S_ISREG(linked.st_mode)
+                or (opened.st_dev, opened.st_ino) != (linked.st_dev, linked.st_ino)
+            ):
+                _error(
+                    "SANKA_EXTENSION_PATH",
+                    "Extension executable changed while acquiring its execution lease",
+                    path=str(executable),
+                )
+            yield descriptor
+        finally:
+            _close_descriptor(descriptor)
 
     @staticmethod
     def _real_root(path: Path, label: str) -> Path:
@@ -1353,7 +1441,10 @@ class ExtensionStore:
                 identity=identity,
             )
         chosen_name = self._marketplace_name(fetch_source, identity, name)
-        with _locked(self.user_root, self._marketplace_path):
+        with (
+            _locked(self.user_root, self._marketplace_path),
+            _locked(self.project_root, self._project_lock_path),
+        ):
             records, snapshots = self._marketplace_state()
             if any(item.get("name") == chosen_name for item in records):
                 _error(
@@ -1396,7 +1487,10 @@ class ExtensionStore:
 
     @_store_operation
     def upgrade_marketplace(self, name: str | None = None) -> tuple[MarketplaceRecord, ...]:
-        with _locked(self.user_root, self._marketplace_path):
+        with (
+            _locked(self.user_root, self._marketplace_path),
+            _locked(self.project_root, self._project_lock_path),
+        ):
             records, snapshots = self._marketplace_state()
             selected = [item for item in records if name is None or item.get("name") == name]
             if not selected:
@@ -2155,6 +2249,154 @@ class ExtensionStore:
                     executable=manifest.executable,
                 )
 
+    def _wheel_entry_point(
+        self,
+        wheels: tuple[tuple[Path, str], ...],
+        executable: str,
+    ) -> str:
+        targets: list[str] = []
+        for path, expected_sha256 in wheels:
+            if _store_file_sha256(self.user_root, path) != expected_sha256:
+                _error(
+                    "SANKA_EXTENSION_HASH_MISMATCH",
+                    "Cached locked extension wheel has changed",
+                    artifact=path.name,
+                )
+            with (
+                _store_file(self.user_root, path) as source,
+                zipfile.ZipFile(cast(Any, source)) as archive,
+            ):
+                members = [
+                    info
+                    for info in archive.infolist()
+                    if info.filename.endswith(".dist-info/entry_points.txt")
+                ]
+                if not members:
+                    continue
+                parser = configparser.ConfigParser(interpolation=None)
+                parser.read_string(archive.read(members[0]).decode("utf-8"))
+                if parser.has_option("console_scripts", executable):
+                    targets.append(parser.get("console_scripts", executable).strip())
+        if len(targets) != 1 or _ENTRY_POINT.fullmatch(targets[0]) is None:
+            _error(
+                "SANKA_EXTENSION_ARTIFACT_INVALID",
+                "Extension wheel set does not define one exact executable entry point",
+                executable=executable,
+            )
+        return targets[0]
+
+    def _wheel_import_records(
+        self,
+        wheels: tuple[tuple[Path, str], ...],
+    ) -> dict[str, tuple[int, str]]:
+        records: dict[str, tuple[int, str]] = {}
+        for path, expected_sha256 in wheels:
+            if _store_file_sha256(self.user_root, path) != expected_sha256:
+                _error(
+                    "SANKA_EXTENSION_HASH_MISMATCH",
+                    "Cached locked extension wheel has changed",
+                    artifact=path.name,
+                )
+            with (
+                _store_file(self.user_root, path) as source,
+                zipfile.ZipFile(cast(Any, source)) as archive,
+            ):
+                for info in archive.infolist():
+                    if info.is_dir():
+                        continue
+                    parts = PurePosixPath(info.filename).parts
+                    if parts and parts[0].endswith(".data"):
+                        if len(parts) < 3 or parts[1] != "purelib":
+                            continue
+                        relative = PurePosixPath(*parts[2:])
+                    else:
+                        relative = PurePosixPath(*parts)
+                    if any(part.endswith(".dist-info") for part in relative.parts) and (
+                        relative.name == "RECORD"
+                    ):
+                        continue
+                    name = relative.as_posix()
+                    if name in records:
+                        _error(
+                            "SANKA_EXTENSION_ARTIFACT_INVALID",
+                            "Extension wheels install duplicate import paths",
+                            path=name,
+                        )
+                    digest = hashlib.sha256()
+                    with archive.open(info) as member:
+                        for chunk in iter(lambda: member.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                    records[name] = (info.file_size, digest.hexdigest())
+        return records
+
+    def _verify_environment_artifacts(
+        self,
+        root: Path,
+        executable: str,
+        wheels: tuple[tuple[Path, str], ...],
+    ) -> None:
+        entry_point = self._wheel_entry_point(wheels, executable)
+        expected_imports = self._wheel_import_records(wheels)
+        with (
+            _parent_descriptor(self.user_root, root) as (parent, name),
+            _directory_at(parent, name, root) as descriptor,
+        ):
+            assert descriptor is not None
+            tree = _tree_records(
+                descriptor,
+                error_code="SANKA_EXTENSION_PATH",
+                subject="Extension environment",
+                allowed_symlinks=self._environment_symlinks(),
+            )
+        prefix = f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages/"
+        actual_imports = {
+            str(record["path"])[len(prefix) :]: (
+                cast(int, record["size"]),
+                cast(str, record["sha256"]),
+            )
+            for record in tree
+            if record.get("type") == "file"
+            and str(record.get("path", "")).startswith(prefix)
+            and not (
+                any(
+                    part.endswith(".dist-info")
+                    for part in PurePosixPath(str(record["path"])[len(prefix) :]).parts
+                )
+                and PurePosixPath(str(record["path"])).name
+                in {"INSTALLER", "RECORD", "REQUESTED", "direct_url.json"}
+            )
+        }
+        binary_name = "Scripts" if os.name == "nt" else "bin"
+        binary_path = f"{binary_name}/{executable}"
+        binary = next(
+            (record for record in tree if record.get("path") == binary_path),
+            None,
+        )
+        expected_script = _console_script(root / binary_name / "python", entry_point)
+        if (
+            actual_imports != expected_imports
+            or not isinstance(binary, dict)
+            or binary.get("type") != "file"
+            or binary.get("size") != len(expected_script)
+            or binary.get("sha256") != hashlib.sha256(expected_script).hexdigest()
+        ):
+            _error(
+                "SANKA_EXTENSION_HASH_MISMATCH",
+                "Installed extension executable or importable bytes differ from verified wheels",
+            )
+        if os.name != "nt":
+            symlinks = {
+                record.get("path"): record for record in tree if record.get("type") == "symlink"
+            }
+            if any(
+                name not in symlinks or symlinks[name].get("target") != str(target)
+                for name, target in self._environment_symlinks().items()
+            ):
+                _error(
+                    "SANKA_EXTENSION_HASH_MISMATCH",
+                    "Installed extension Python launchers differ from the sealed interpreter",
+                )
+
     def _materialize_environment(
         self,
         artifact_digest: str,
@@ -2167,6 +2409,7 @@ class ExtensionStore:
             self.user_root,
             self.user_root / "environments" / artifact_digest,
         )
+        entry_point = self._wheel_entry_point(wheels, executable)
         binary_name = "Scripts" if os.name == "nt" else "bin"
         binary = root / binary_name / executable
         temporary = ""
@@ -2192,7 +2435,13 @@ class ExtensionStore:
                         )
                     )
                     if digest == expected_digest:
-                        return root
+                        try:
+                            self._verify_environment_artifacts(root, executable, wheels)
+                        except ExtensionError as error:
+                            if error.code != "SANKA_EXTENSION_HASH_MISMATCH":
+                                raise
+                        else:
+                            return root
                     replace_existing = True
             if replace_existing:
                 shutil.rmtree(environment_name, dir_fd=environments)
@@ -2236,6 +2485,7 @@ class ExtensionStore:
                     root.parent / temporary,
                 ) as temporary_descriptor:
                     assert temporary_descriptor is not None
+                    _normalize_venv_launchers(temporary_descriptor)
                     _run_venv_python(
                         temporary_descriptor,
                         ["-I", "-m", "ensurepip"],
@@ -2270,6 +2520,7 @@ class ExtensionStore:
                             "install",
                             "--no-index",
                             "--no-deps",
+                            "--no-compile",
                             "--require-hashes",
                             "-r",
                             requirements_name,
@@ -2278,7 +2529,25 @@ class ExtensionStore:
                         cwd=self.user_root,
                     )
                     os.unlink(requirements_name, dir_fd=temporary_descriptor)
-                    _rewrite_console_script(temporary_descriptor, executable, root / "bin/python")
+                    declared = {
+                        identity[0]
+                        for wheel, _sha256 in wheels
+                        if (identity := _wheel_identity(wheel.name)) is not None
+                    }
+                    bootstrap = [name for name in ("pip", "setuptools") if name not in declared]
+                    if bootstrap:
+                        _run_venv_python(
+                            temporary_descriptor,
+                            ["-I", "-m", "pip", "uninstall", "--yes", *bootstrap],
+                            environment=environment,
+                            cwd=self.user_root,
+                        )
+                    _rewrite_console_script(
+                        temporary_descriptor,
+                        executable,
+                        root / "bin/python",
+                        entry_point,
+                    )
                     _require_directory_identity(root.parent, environments)
                     os.replace(
                         temporary,
@@ -2310,6 +2579,7 @@ class ExtensionStore:
                 if temporary:
                     with suppress(OSError):
                         shutil.rmtree(temporary, dir_fd=environments)
+        self._verify_environment_artifacts(root, executable, wheels)
         return root
 
     @staticmethod
@@ -2734,6 +3004,7 @@ class ExtensionStore:
                 "Exact locked extension executable is not cached",
                 extension_id=extension_id,
             )
+        verified_wheels: list[tuple[Path, str]] = []
         for wheel in installation.get("wheels", []):
             if not isinstance(wheel, dict) or not isinstance(wheel.get("path"), str):
                 _error(
@@ -2753,6 +3024,12 @@ class ExtensionStore:
                     extension_id=extension_id,
                     artifact=path.name,
                 )
+            verified_wheels.append((path, str(wheel["sha256"])))
+        self._verify_environment_artifacts(
+            root,
+            manifest.executable,
+            tuple(verified_wheels),
+        )
         if self._environment_digest(root) != installation.get("environment_digest"):
             _error(
                 "SANKA_EXTENSION_HASH_MISMATCH",
