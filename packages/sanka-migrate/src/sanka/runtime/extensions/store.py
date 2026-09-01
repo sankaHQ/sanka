@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import configparser
 import fcntl
 import hashlib
@@ -2700,12 +2701,40 @@ class ExtensionStore:
                     path=str(relative),
                 )
             status = path.lstat()
+            sha256 = _sha256_file(path, require_single_link=False)
+            record_hash = getattr(relative, "hash", None)
+            if record_hash is not None:
+                mode = getattr(record_hash, "mode", None)
+                value = getattr(record_hash, "value", None)
+                expected_hash = (
+                    base64.urlsafe_b64encode(bytes.fromhex(sha256)).rstrip(b"=").decode()
+                )
+                if (
+                    mode != "sha256"
+                    or not isinstance(value, str)
+                    or re.fullmatch(r"[A-Za-z0-9_-]{43}", value) is None
+                    or value != expected_hash
+                ):
+                    _error(
+                        "SANKA_EXTENSION_IDENTITY",
+                        "Installed default extension RECORD hash is invalid",
+                        path=str(relative),
+                    )
+            record_size = getattr(relative, "size", None)
+            if record_size is not None and (
+                type(record_size) is not int or record_size != status.st_size
+            ):
+                _error(
+                    "SANKA_EXTENSION_IDENTITY",
+                    "Installed default extension RECORD size is invalid",
+                    path=str(relative),
+                )
             records.append(
                 {
                     "type": "file",
                     "path": str(relative).replace(os.sep, "/"),
                     "size": status.st_size,
-                    "sha256": _sha256_file(path, require_single_link=False),
+                    "sha256": sha256,
                 }
             )
         return content_hash(records).removeprefix("sha256:")
@@ -3136,20 +3165,51 @@ def _default_executable(entry: LockEntry) -> Path:
             "Installed default extension does not match the project lock",
             distribution=entry.distribution,
         )
-    scripts = [
-        relative
-        for relative in distribution.files or ()
-        if PurePosixPath(str(relative).replace("\\", "/")).parts[-2:]
-        in {("bin", entry.executable), ("Scripts", entry.executable)}
-    ]
+    site_packages = Path(cast(str | os.PathLike[str], distribution.locate_file(""))).resolve()
+    if site_packages.name != "site-packages":
+        _error(
+            "SANKA_EXTENSION_IDENTITY",
+            "Installed default extension environment is invalid",
+            distribution=entry.distribution,
+        )
+    if os.name == "nt":
+        valid_layout = (
+            len(site_packages.parents) >= 2 and site_packages.parent.name.casefold() == "lib"
+        )
+        environment_parent = 1
+        script_directory = "Scripts"
+    else:
+        valid_layout = (
+            len(site_packages.parents) >= 3
+            and site_packages.parent.parent.name in {"lib", "lib64"}
+            and re.fullmatch(r"python\d+\.\d+", site_packages.parent.name) is not None
+        )
+        environment_parent = 2
+        script_directory = "bin"
+    if not valid_layout:
+        _error(
+            "SANKA_EXTENSION_IDENTITY",
+            "Installed default extension environment is invalid",
+            distribution=entry.distribution,
+        )
+    environment = site_packages.parents[environment_parent]
+    expected = environment / script_directory / entry.executable
+    expected_record = os.path.relpath(expected, site_packages).replace(os.sep, "/")
+    scripts = []
+    for relative in distribution.files or ():
+        raw = str(relative)
+        located = Path(
+            os.path.abspath(cast(str | os.PathLike[str], distribution.locate_file(relative)))
+        )
+        if located == expected and raw == expected_record:
+            scripts.append(relative)
     if len(scripts) != 1:
         _error(
             "SANKA_EXTENSION_NOT_CACHED",
             "Installed default extension does not expose its exact executable",
             executable=entry.executable,
         )
-    located = cast(str | os.PathLike[str], distribution.locate_file(scripts[0]))
-    return Path(os.path.abspath(located))
+    return expected
 
 
 __all__ = [

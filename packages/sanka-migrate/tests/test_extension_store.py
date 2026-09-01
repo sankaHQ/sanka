@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -43,43 +44,130 @@ def _descriptor_path(descriptor: int) -> Path:
         return Path(raw.split(b"\0", 1)[0].decode())
 
 
-def test_default_execution_lease_uses_the_installed_distribution_script(
+_DEFAULT_EXECUTABLE = "sanka-extension-drf-to-fastapi"
+_DEFAULT_SCRIPT = b"#!/bin/sh\nexit 0\n"
+_CANONICAL_SCRIPT = (
+    f"../../Scripts/{_DEFAULT_EXECUTABLE}"
+    if os.name == "nt"
+    else f"../../../bin/{_DEFAULT_EXECUTABLE}"
+)
+_INVALID_SCRIPT_RECORDS = (
+    pytest.param(
+        (
+            f"../../../outside/Scripts/{_DEFAULT_EXECUTABLE}"
+            if os.name == "nt"
+            else f"../../../../outside/bin/{_DEFAULT_EXECUTABLE}",
+        ),
+        id="traversal",
+    ),
+    pytest.param(
+        (
+            f"../../bin/{_DEFAULT_EXECUTABLE}"
+            if os.name == "nt"
+            else f"../../../Scripts/{_DEFAULT_EXECUTABLE}",
+        ),
+        id="wrong-platform",
+    ),
+    pytest.param(
+        (
+            f"../../../wheel-environment/Scripts/{_DEFAULT_EXECUTABLE}"
+            if os.name == "nt"
+            else f"../../../../wheel-environment/bin/{_DEFAULT_EXECUTABLE}",
+        ),
+        id="alias",
+    ),
+    pytest.param((_CANONICAL_SCRIPT, _CANONICAL_SCRIPT), id="duplicate"),
+)
+
+
+def _installed_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project = tmp_path / "project"
-    user = tmp_path / "user"
-    store = ExtensionStore(project, user_root=user)
-    site_packages = tmp_path / "wheel-environment" / "lib" / "python3.12" / "site-packages"
-    executable = tmp_path / "wheel-environment" / "bin" / "sanka-extension-drf-to-fastapi"
-    executable.parent.mkdir(parents=True)
+    *record_paths: str,
+    tamper: str | None = None,
+) -> tuple[ExtensionStore, LockEntry, Path]:
+    environment = tmp_path / "wheel-environment"
+    site_packages = environment / (
+        Path("Lib/site-packages") if os.name == "nt" else Path("lib/python3.12/site-packages")
+    )
     site_packages.mkdir(parents=True)
-    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    records = tuple(metadata.PackagePath(path) for path in record_paths)
+    for record in records:
+        target = Path(os.path.abspath(site_packages / record))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(_DEFAULT_SCRIPT)
+        record.hash = metadata.FileHash(
+            "sha256="
+            + base64.urlsafe_b64encode(hashlib.sha256(_DEFAULT_SCRIPT).digest())
+            .rstrip(b"=")
+            .decode()
+        )
+        record.size = len(_DEFAULT_SCRIPT)
     distribution = SimpleNamespace(
-        files=(metadata.PackagePath("../../../bin/sanka-extension-drf-to-fastapi"),),
+        files=records,
         locate_file=lambda relative: site_packages / relative,
-        metadata={"Name": "sanka-extension-drf-to-fastapi"},
+        metadata={"Name": _DEFAULT_EXECUTABLE},
         version="0.1.0a1",
     )
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "user")
     entry = LockEntry(
         id="sanka/drf-to-fastapi",
         version="0.1.0a1",
         marketplace_identity="github.com/sankaHQ/extensions",
         snapshot_digest="1" * 40,
         manifest_digest="sha256:" + "2" * 64,
-        distribution="sanka-extension-drf-to-fastapi",
+        distribution=_DEFAULT_EXECUTABLE,
         artifact_digest=store._distribution_digest(distribution),
         protocol_version="sanka-extension/v1",
-        executable="sanka-extension-drf-to-fastapi",
+        executable=_DEFAULT_EXECUTABLE,
         commands=("apply", "plan", "scan", "test", "verify"),
         enabled=True,
         configuration_digest="sha256:" + "3" * 64,
     )
+    if tamper == "hash":
+        records[0].hash = metadata.FileHash("sha256=" + "A" * 43)
+    elif tamper == "size":
+        records[0].size += 1
     monkeypatch.setattr(store, "resolve_locked", lambda _extension_id: entry)
     monkeypatch.setattr(extension_store.metadata, "distribution", lambda _name: distribution)
+    script_directory = "Scripts" if os.name == "nt" else "bin"
+    return store, entry, environment / script_directory / _DEFAULT_EXECUTABLE
+
+
+def test_default_execution_lease_uses_the_installed_distribution_script(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, entry, executable = _installed_default(tmp_path, monkeypatch, _CANONICAL_SCRIPT)
 
     with store.execution_lease(entry) as descriptor:
         assert _descriptor_path(descriptor).resolve() == executable.resolve()
+
+
+@pytest.mark.parametrize("record_paths", _INVALID_SCRIPT_RECORDS)
+def test_default_execution_rejects_invalid_script_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record_paths: tuple[str, ...],
+) -> None:
+    with pytest.raises(ExtensionError):
+        store, entry, _executable = _installed_default(tmp_path, monkeypatch, *record_paths)
+        with store.execution_lease(entry):
+            pass
+
+
+@pytest.mark.parametrize("tamper", ["hash", "size"])
+def test_default_execution_rejects_incorrect_record_integrity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+) -> None:
+    with pytest.raises(ExtensionError):
+        store, entry, _executable = _installed_default(
+            tmp_path, monkeypatch, _CANONICAL_SCRIPT, tamper=tamper
+        )
+        with store.execution_lease(entry):
+            pass
 
 
 def _wheel(
