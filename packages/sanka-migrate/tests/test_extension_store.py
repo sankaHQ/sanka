@@ -144,6 +144,37 @@ def test_default_execution_lease_uses_the_installed_distribution_script(
         assert _descriptor_path(descriptor).resolve() == executable.resolve()
 
 
+def test_default_execution_rejects_a_symlinked_script_directory_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, entry, executable = _installed_default(tmp_path, monkeypatch, _CANONICAL_SCRIPT)
+    outside = tmp_path / "outside" / executable.parent.name
+    outside.mkdir(parents=True)
+    (outside / executable.name).write_bytes(_DEFAULT_SCRIPT)
+    (outside / "python").write_bytes(b"outside interpreter\n")
+    shutil.rmtree(executable.parent)
+    executable.parent.symlink_to(outside, target_is_directory=True)
+
+    resolve = extension_store._default_executable
+    with pytest.raises(ExtensionError):
+        resolve(entry)
+
+    executable.parent.unlink()
+    executable.parent.mkdir()
+    executable.write_bytes(_DEFAULT_SCRIPT)
+
+    def swap_script_directory(resolved: LockEntry) -> Path:
+        selected = resolve(resolved)
+        shutil.rmtree(selected.parent)
+        selected.parent.symlink_to(outside, target_is_directory=True)
+        return selected
+
+    monkeypatch.setattr(extension_store, "_default_executable", swap_script_directory)
+    with pytest.raises(ExtensionError), store.execution_lease(entry):
+        pass
+
+
 @pytest.mark.parametrize("record_paths", _INVALID_SCRIPT_RECORDS)
 def test_default_execution_rejects_invalid_script_records(
     tmp_path: Path,

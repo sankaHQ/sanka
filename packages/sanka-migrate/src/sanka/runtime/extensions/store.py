@@ -922,7 +922,25 @@ class ExtensionStore:
                 / entry.executable
             )
         try:
-            descriptor = os.open(executable, _FILE_FLAGS)
+            if entry.id == DEFAULT_EXTENSION_ID:
+                environment = executable.parent.parent
+                environment_descriptor = os.open(environment, _DIRECTORY_FLAGS)
+                try:
+                    with _directory_at(
+                        environment_descriptor,
+                        executable.parent.name,
+                        executable.parent,
+                    ) as script_directory:
+                        assert script_directory is not None
+                        descriptor = os.open(
+                            executable.name,
+                            _FILE_FLAGS,
+                            dir_fd=script_directory,
+                        )
+                finally:
+                    _close_descriptor(environment_descriptor)
+            else:
+                descriptor = os.open(executable, _FILE_FLAGS)
         except OSError as error:
             raise ExtensionError(
                 "SANKA_EXTENSION_NOT_CACHED",
@@ -3209,7 +3227,26 @@ def _default_executable(entry: LockEntry) -> Path:
             "Installed default extension does not expose its exact executable",
             executable=entry.executable,
         )
-    return expected
+    try:
+        physical_script_directory = expected.parent.resolve(strict=True)
+        physical_executable = expected.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_PATH",
+            "Installed default extension executable cannot be resolved",
+            details={"path": str(expected), "reason": str(error)},
+        ) from error
+    if (
+        physical_script_directory != expected.parent
+        or physical_executable != expected
+        or not physical_executable.is_relative_to(environment)
+    ):
+        _error(
+            "SANKA_EXTENSION_PATH",
+            "Installed default extension executable escaped its environment",
+            path=str(expected),
+        )
+    return physical_executable
 
 
 __all__ = [
