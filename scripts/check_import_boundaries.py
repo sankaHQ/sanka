@@ -7,7 +7,8 @@ Rules (see docs/ARCHITECTURE.md):
   ``sankaHQ/extensions`` repository, whose CI owns their boundary checks.
 - ``packages/sanka-migrate-mcp`` (Apache-2.0) must not import ``sanka`` at all;
   it is a standalone REST shim outside the runtime namespace.
-- the remaining ``packages/sanka-migrate`` runtime modules may import anything.
+- ``packages/sanka-migrate`` must not import target framework implementations or
+  generated destination dependencies; those belong in extensions.
 
 Usage: ``python scripts/check_import_boundaries.py [repo_root]``
 """
@@ -19,6 +20,21 @@ import sys
 from pathlib import Path
 
 RESTRICTED_ZONES: tuple[tuple[str, str | None], ...] = (("packages/sanka-migrate-mcp", None),)
+TARGET_SPECIFIC_MODULES = frozenset(
+    {
+        "aiosqlite",
+        "asyncpg",
+        "django",
+        "fastapi",
+        "httpx",
+        "psycopg",
+        "rest_framework",
+        "sanka.runtime.frameworks",
+        "sqlalchemy",
+        "tortoise",
+        "uvicorn",
+    }
+)
 
 
 def _imported_modules(tree: ast.AST) -> list[str]:
@@ -37,6 +53,10 @@ def _violates(module: str, allowed_prefix: str | None) -> bool:
     return module == "sanka" or module.startswith("sanka.")
 
 
+def _target_specific(module: str) -> bool:
+    return any(module == name or module.startswith(name + ".") for name in TARGET_SPECIFIC_MODULES)
+
+
 def check(root: Path) -> list[str]:
     violations: list[str] = []
     for zone, allowed_prefix in RESTRICTED_ZONES:
@@ -53,6 +73,16 @@ def check(root: Path) -> list[str]:
                         else "the standalone MCP package cannot import the sanka namespace"
                     )
                     violations.append(f"{path.relative_to(root)}: imports {module!r} ({allowed})")
+    runtime = root / "packages" / "sanka-migrate" / "src" / "sanka"
+    if runtime.is_dir():
+        for path in sorted(runtime.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for module in _imported_modules(tree):
+                if _target_specific(module):
+                    violations.append(
+                        f"{path.relative_to(root)}: imports {module!r} "
+                        "(target-specific migration logic belongs in an extension)"
+                    )
     return violations
 
 

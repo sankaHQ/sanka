@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -41,8 +42,11 @@ def write_snapshot(root: Path, manifest: dict[str, object]) -> None:
     (root / "extension.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
-def fixture_manifest() -> dict[str, object]:
-    return json.loads((FIXTURE / "drf-to-fastapi.json").read_text(encoding="utf-8"))
+def fixture_manifest() -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads((FIXTURE / "drf-to-fastapi.json").read_text(encoding="utf-8")),
+    )
 
 
 def test_drf_fingerprint_matches_with_exact_evidence(tmp_path: Path) -> None:

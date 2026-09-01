@@ -19,7 +19,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from email.parser import BytesParser
 from functools import wraps
 from importlib import metadata
@@ -36,8 +36,15 @@ from sanka.runtime.extensions.discovery import (
     _valid_specifier,
     _wheel_identity,
     load_marketplace,
+    recommend,
 )
-from sanka.runtime.extensions.model import ExtensionError, Manifest, Wheel
+from sanka.runtime.extensions.model import (
+    ExtensionError,
+    Fingerprint,
+    Manifest,
+    Recommendation,
+    Wheel,
+)
 from sanka.runtime.hashing import content_hash
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
@@ -1704,6 +1711,26 @@ class ExtensionStore:
                 )
             )
         return tuple(sorted(records, key=lambda item: (item.id, item.version, item.marketplace)))
+
+    @_store_operation
+    def recommendations(self, fingerprint: Fingerprint) -> tuple[Recommendation, ...]:
+        """Match only manifests read through the verified snapshot boundary."""
+        records = {
+            (item.id, item.version, item.marketplace_identity): item
+            for item in self.list_extensions()
+        }
+        recommendations: list[Recommendation] = []
+        for marketplace, manifest in self._catalog():
+            matched = recommend(
+                fingerprint,
+                (replace(manifest, marketplace=marketplace.name),),
+                {},
+            )
+            if not matched:
+                continue
+            record = records[(manifest.id, manifest.version, marketplace.identity)]
+            recommendations.append(replace(matched[0], status=record.status))
+        return tuple(sorted(recommendations, key=lambda item: (item.id, item.version)))
 
     def _select(
         self, extension_id: str, marketplace: str | None

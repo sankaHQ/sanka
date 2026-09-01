@@ -17,6 +17,20 @@ EXPECTED_LICENSES = {
     "sanka-migrate-mcp": "Apache-2.0",
 }
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
+FORBIDDEN_RUNTIME_DEPENDENCIES = frozenset(
+    {
+        "aiosqlite",
+        "asyncpg",
+        "django",
+        "djangorestframework",
+        "fastapi",
+        "httpx",
+        "psycopg",
+        "sqlalchemy",
+        "tortoise-orm",
+        "uvicorn",
+    }
+)
 
 
 def _wheel_prefix(name: str) -> str:
@@ -50,6 +64,16 @@ def _metadata_from_wheel(path: Path) -> tuple[EmailMessage, str, set[str]]:
 def _sdist_has_license(path: Path) -> bool:
     with tarfile.open(path, mode="r:gz") as archive:
         return any(member.name.endswith("/LICENSE") for member in archive.getmembers())
+
+
+def _runtime_boundary_errors(requirement_names: set[str], wheel_members: set[str]) -> list[str]:
+    errors = [
+        f"sanka-migrate: target dependency {dependency} leaked into core"
+        for dependency in sorted(requirement_names & FORBIDDEN_RUNTIME_DEPENDENCIES)
+    ]
+    if any(name.startswith("sanka/runtime/frameworks/") for name in wheel_members):
+        errors.append("sanka-migrate: wheel must not ship sanka/runtime/frameworks/")
+    return errors
 
 
 def main() -> int:
@@ -110,11 +134,7 @@ def main() -> int:
                     "sanka-migrate: core dependencies must be exactly "
                     f"{sorted(expected_core_dependencies)}, found {sorted(core_requirement_names)}"
                 )
-            for dependency in ("aiosqlite", "tortoise-orm"):
-                if dependency in requirement_names:
-                    errors.append(
-                        f"sanka-migrate: generated target dependency {dependency} leaked into core"
-                    )
+            errors.extend(_runtime_boundary_errors(requirement_names, wheel_members))
             if "sanka-migrate = sanka.cli:main" not in entry_points:
                 errors.append("sanka-migrate: primary CLI entry point is missing")
             if "[sanka.connectors]" in entry_points:

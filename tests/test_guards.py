@@ -32,6 +32,23 @@ def test_boundaries_catch_mcp_importing_runtime_namespace() -> None:
     assert "standalone MCP package" in result.stdout
 
 
+def test_boundaries_catch_target_logic_in_the_runtime(tmp_path: Path) -> None:
+    runtime = tmp_path / "packages" / "sanka-migrate" / "src" / "sanka" / "runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "leak.py").write_text(
+        "from sanka.runtime.frameworks import scan_django\nimport asyncpg\nimport fastapi\n",
+        encoding="utf-8",
+    )
+
+    result = _run("check_import_boundaries.py", str(tmp_path))
+
+    assert result.returncode == 1
+    assert "asyncpg" in result.stdout
+    assert "sanka.runtime.frameworks" in result.stdout
+    assert "fastapi" in result.stdout
+    assert "target-specific" in result.stdout
+
+
 def test_license_headers_pass_on_repo() -> None:
     result = _run("check_license_headers.py")
     assert result.returncode == 0, result.stdout + result.stderr

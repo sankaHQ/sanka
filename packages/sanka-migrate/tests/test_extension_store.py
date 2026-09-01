@@ -13,6 +13,7 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -335,9 +336,9 @@ def test_new_snapshot_rejects_staging_mutation_after_digest(
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     original_place = store._place_snapshot
 
-    def mutate_after_digest(staging: Path, *args: object, **kwargs: object) -> Path:
+    def mutate_after_digest(staging: Path, *args: Any, **kwargs: Any) -> tuple[Path, int]:
         (staging / "marketplace.json").write_text("{}", encoding="utf-8")
-        return original_place(staging, *args, **kwargs)  # type: ignore[arg-type]
+        return original_place(staging, *args, **kwargs)
 
     monkeypatch.setattr(store, "_place_snapshot", mutate_after_digest)
 
@@ -357,10 +358,10 @@ def test_reused_snapshot_rejects_matching_mutation_after_expected_digest(
     store.remove_marketplace("fixtures")
     original_place = store._place_snapshot
 
-    def poison_both_trees(staging: Path, *args: object, **kwargs: object) -> Path:
+    def poison_both_trees(staging: Path, *args: Any, **kwargs: Any) -> tuple[Path, int]:
         (staging / "marketplace.json").write_text("{}", encoding="utf-8")
         (record.snapshot_root / "marketplace.json").write_text("{}", encoding="utf-8")
-        return original_place(staging, *args, **kwargs)  # type: ignore[arg-type]
+        return original_place(staging, *args, **kwargs)
 
     monkeypatch.setattr(store, "_place_snapshot", poison_both_trees)
 

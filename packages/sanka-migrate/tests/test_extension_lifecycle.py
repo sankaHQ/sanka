@@ -1,0 +1,340 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+
+from sanka.runtime.extensions import ExtensionError, Recommendation, fingerprint_repository
+from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
+from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
+from sanka.runtime.extensions.store import ExtensionStore, LockEntry
+
+
+def _lock(*, digest: str = "3" * 64) -> LockEntry:
+    return LockEntry(
+        id="sanka/drf-to-fastapi",
+        version="0.1.0a1",
+        marketplace_identity="github.com/sankaHQ/extensions",
+        snapshot_digest="1" * 40,
+        manifest_digest="sha256:" + "2" * 64,
+        distribution="sanka-extension-drf-to-fastapi",
+        artifact_digest=digest,
+        protocol_version="sanka-extension/v1",
+        executable="sanka-extension-drf-to-fastapi",
+        enabled=True,
+        configuration_digest="sha256:" + "4" * 64,
+    )
+
+
+class FakeStore:
+    def __init__(self, *, installed: bool = False, default_available: bool = False) -> None:
+        self.installed = installed
+        self.disabled = False
+        self.default_available = default_available
+        self.lock = _lock()
+        self.added = 0
+
+    def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
+        status = (
+            ("available", "disabled")
+            if self.disabled
+            else (("available", "installed", "locked") if self.installed else ("available",))
+        )
+        return (
+            Recommendation(
+                id=self.lock.id,
+                version=self.lock.version,
+                marketplace="official",
+                targets=("fastapi",),
+                evidence=(),
+                status=status,
+                add_command="sanka-migrate extension add sanka/drf-to-fastapi",
+            ),
+        )
+
+    def resolve_locked(self, extension_id: str) -> LockEntry:
+        if not self.installed or extension_id != self.lock.id:
+            raise ExtensionError("SANKA_EXTENSION_REQUIRED", "not installed")
+        return self.lock
+
+    def add_extension(self, extension_id: str, **_kwargs: object) -> LockEntry:
+        self.added += 1
+        if not self.default_available:
+            raise ExtensionError("SANKA_EXTENSION_NOT_CACHED", "not installed")
+        assert extension_id == self.lock.id
+        self.installed = True
+        self.disabled = False
+        return self.lock
+
+
+class FakeRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[LockEntry, dict[str, Any]]] = []
+        self.required_inputs: list[str] = []
+
+    def run(
+        self,
+        lock: LockEntry,
+        request: dict[str, Any],
+        *,
+        allowed_roots: tuple[Path, ...],
+        explicit_env_names: tuple[str, ...] = (),
+    ) -> ExtensionResult:
+        self.calls.append((lock, request))
+        if request["command"] == "plan" and self.required_inputs:
+            missing = [
+                name for name in self.required_inputs if name not in request["configuration"]
+            ]
+            if missing:
+                return ExtensionResult(
+                    outcome="error",
+                    data={},
+                    artifacts=(),
+                    limitations=(),
+                    next_actions=(),
+                    error={
+                        "code": "SANKA_EXTENSION_INPUT_REQUIRED",
+                        "message": "need input",
+                        "details": {"inputs": missing},
+                    },
+                )
+        artifact_root = Path(request["artifact_root"])
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        command = request["command"]
+        artifact = artifact_root / f"{command}.json"
+        artifact.write_text(json.dumps({"command": command}), encoding="utf-8")
+        data: dict[str, Any] = {"extension_command": command}
+        if command == "plan":
+            data["plan_hash"] = "sha256:extension-plan"
+        return ExtensionResult(
+            outcome="success",
+            data=data,
+            artifacts=(str(artifact.resolve()),),
+            limitations=(),
+            next_actions=(),
+            error=None,
+        )
+
+
+def _project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "manage.py").write_text("import rest_framework\n", encoding="utf-8")
+    (project / "requirements.txt").write_text("djangorestframework==3.16\n", encoding="utf-8")
+    return project
+
+
+def _lifecycle(
+    project: Path,
+    store: FakeStore,
+    runner: FakeRunner,
+    *,
+    interactive: bool = False,
+    prompt: Callable[[str, tuple[str, ...] | None], str | None] | None = None,
+) -> ApplicationLifecycle:
+    return ApplicationLifecycle(
+        project,
+        store=cast(ExtensionStore, store),
+        runner=cast(ExtensionRunner, runner),
+        interactive=interactive,
+        prompt=prompt,
+    )
+
+
+def test_json_scan_fails_closed_with_structured_recommendations(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(), FakeRunner())
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.scan()
+
+    assert raised.value.code == "SANKA_EXTENSION_REQUIRED"
+    assert raised.value.details["fingerprint"]["frameworks"] == ["django-rest-framework"]
+    assert raised.value.details["recommendations"][0]["add_command"] == (
+        "sanka-migrate extension add sanka/drf-to-fastapi"
+    )
+    assert not (project / ".sanka" / "scan.json").exists()
+
+
+def test_scan_auto_pins_the_installed_default_and_namespaces_its_data(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    store = FakeStore(default_available=True)
+    runner = FakeRunner()
+
+    result = _lifecycle(project, store, runner).scan()
+
+    assert store.added == 1
+    assert result.data["extension"] == {"extension_command": "scan"}
+    assert result.data["extension_command"] == "scan"
+    assert result.data["recommendations"][0]["status"] == [
+        "available",
+        "installed",
+        "locked",
+    ]
+    assert (
+        json.loads((project / ".sanka" / "scan.json").read_text())["fingerprint"]["hash"]
+        == result.data["fingerprint"]["hash"]
+    )
+
+
+def test_interactive_scan_decline_keeps_the_project_unpinned(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    store = FakeStore()
+
+    with pytest.raises(ExtensionError) as raised:
+        _lifecycle(
+            project,
+            store,
+            FakeRunner(),
+            interactive=True,
+            prompt=lambda *_args: None,
+        ).scan()
+
+    assert raised.value.code == "SANKA_EXTENSION_REQUIRED"
+    assert store.installed is False
+
+
+def test_plan_selects_target_and_binds_a_generic_core_plan(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    store = FakeStore(installed=True)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, store, runner)
+    lifecycle.scan()
+
+    result = lifecycle.plan(
+        target="fastapi",
+        configuration={"generation": "minimal", "output": ".sanka/output"},
+    )
+
+    plan = json.loads((project / ".sanka" / "plan.json").read_text())
+    assert plan["schema_version"] == "sanka-application-plan/v1"
+    assert plan["extension"] == store.lock.to_dict()
+    assert plan["extension_plan"] == {
+        "extension_command": "plan",
+        "plan_hash": "sha256:extension-plan",
+    }
+    assert result.data["plan_hash"] == plan["plan_hash"]
+    assert plan["plan_hash"].startswith("sha256:")
+
+
+def test_plan_requires_a_target_outside_a_tty(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    lifecycle.scan()
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.plan(target=None)
+
+    assert raised.value.code == "SANKA_EXTENSION_TARGET_REQUIRED"
+    assert raised.value.details == {"targets": ["fastapi"]}
+
+
+def test_interactive_plan_retries_only_requested_structured_inputs(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    runner.required_inputs = ["output"]
+    answers = iter(["fastapi", "generated"])
+
+    def answer(_label: str, _choices: tuple[str, ...] | None = None) -> str:
+        return next(answers)
+
+    lifecycle = _lifecycle(
+        project,
+        FakeStore(installed=True),
+        runner,
+        interactive=True,
+        prompt=answer,
+    )
+    lifecycle.scan()
+
+    result = lifecycle.plan(target=None)
+
+    assert result.outcome == "success"
+    assert runner.calls[-1][1]["configuration"]["output"] == "generated"
+
+
+def test_apply_rejects_stale_fingerprint_and_wrong_core_hash(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    lifecycle.scan()
+    planned = lifecycle.plan(target="fastapi")
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.apply(reviewed_plan_hash="sha256:wrong")
+    assert raised.value.code == "SANKA_EXTENSION_PLAN_HASH_MISMATCH"
+
+    (project / "new.py").write_text("print('changed')\n", encoding="utf-8")
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+    assert raised.value.code == "SANKA_FINGERPRINT_STALE"
+
+
+def test_apply_rejects_configuration_not_bound_by_the_core_plan(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    lifecycle.scan()
+    planned = lifecycle.plan(target="fastapi")
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.apply(
+            reviewed_plan_hash=str(planned.data["plan_hash"]),
+            configuration={"output": "unreviewed"},
+        )
+
+    assert raised.value.code == "SANKA_EXTENSION_PLAN_HASH_MISMATCH"
+
+
+@pytest.mark.parametrize("change", ["lock", "artifact"])
+def test_later_phases_reject_lock_or_artifact_drift(tmp_path: Path, change: str) -> None:
+    project = _project(tmp_path)
+    store = FakeStore(installed=True)
+    lifecycle = _lifecycle(project, store, FakeRunner())
+    lifecycle.scan()
+    planned = lifecycle.plan(target="fastapi")
+    plan = json.loads((project / ".sanka" / "plan.json").read_text())
+    if change == "lock":
+        store.lock = replace(store.lock, artifact_digest="9" * 64)
+    else:
+        Path(plan["artifacts"][0]).write_text("changed", encoding="utf-8")
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+
+    assert raised.value.code == "SANKA_EXTENSION_IDENTITY"
+
+
+def test_disable_add_and_retry_restores_scan(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    store = FakeStore(installed=True, default_available=True)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, store, runner)
+    assert lifecycle.scan().outcome == "success"
+
+    store.installed = False
+    store.disabled = True
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.scan()
+    assert raised.value.code == "SANKA_EXTENSION_REQUIRED"
+
+    store.add_extension(store.lock.id)
+    assert lifecycle.scan().outcome == "success"
+
+
+def test_store_recommendations_keep_verified_marketplace_identity(tmp_path: Path) -> None:
+    from sanka.runtime.extensions.store import ExtensionStore
+
+    project = _project(tmp_path)
+    market = Path(__file__).parent / "fixtures" / "extension_marketplace"
+    store = ExtensionStore(project, user_root=tmp_path / "home")
+    store.add_marketplace(market, name="fixtures", trust=True)
+
+    recommendations = store.recommendations(fingerprint_repository(project))
+
+    assert [(item.id, item.marketplace) for item in recommendations] == [
+        ("sanka/drf-to-fastapi", "fixtures")
+    ]

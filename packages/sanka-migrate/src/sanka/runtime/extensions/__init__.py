@@ -15,9 +15,12 @@ from sanka.runtime.extensions.model import (
     Recommendation,
     Wheel,
 )
+from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
 
 __all__ = [
     "ExtensionError",
+    "ExtensionResult",
+    "ExtensionRunner",
     "Fingerprint",
     "Manifest",
     "MatchedEvidence",
