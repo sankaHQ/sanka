@@ -152,6 +152,11 @@ def _json_result(
     limitations: list[str] | None = None,
     next_actions: list[str] | None = None,
 ) -> dict[str, Any]:
+    if outcome == "error" and "error" not in data:
+        data = {
+            **data,
+            "error": {"code": "SANKA_FAILED", "message": f"{command} failed"},
+        }
     envelope: dict[str, Any] = {
         "schema_version": CLI_SCHEMA_VERSION,
         "command": command,

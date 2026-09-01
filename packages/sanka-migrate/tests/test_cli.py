@@ -320,6 +320,40 @@ def test_spec_lifecycle_uses_the_versioned_json_contract(
     assert verified["data"]["ok"] is True
 
 
+def test_spec_verify_failure_keeps_report_in_structured_error_envelope(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _spec_file_path, _db, base = _spec_file(tmp_path)
+
+    assert main(["plan", "--json", *base]) == 0
+    planned = json.loads(capsys.readouterr().out)
+
+    assert main(["verify", "--json", *base]) == 1
+    failed = json.loads(capsys.readouterr().out)
+
+    assert failed["schema_version"] == "sanka-cli/v1"
+    assert failed["command"] == "verify"
+    assert failed["outcome"] == "error"
+    assert failed["migration_state"] == "verification_failed"
+    error = failed["data"]["error"]
+    assert isinstance(error, dict)
+    assert isinstance(error.get("code"), str) and error["code"]
+    assert isinstance(error.get("message"), str) and error["message"]
+    assert "details" not in error or isinstance(error["details"], dict)
+    assert failed["data"]["run_id"] == planned["data"]["run_id"]
+    assert failed["data"]["ok"] is False
+    assert failed["data"]["routes"] == [
+        {
+            "destination_count": None,
+            "failed": 0,
+            "migrated": 0,
+            "ok": False,
+            "route_key": "documents|documents",
+            "source_count": 2,
+        }
+    ]
+
+
 def test_explicit_data_spec_wins_over_application_artifacts_for_all_shared_commands(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
