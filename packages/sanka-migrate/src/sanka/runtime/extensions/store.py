@@ -10,11 +10,12 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
-import venv
 import zipfile
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
@@ -83,6 +84,23 @@ def _store_operation[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
     return protected
 
 
+def _close_descriptors(descriptors: Iterator[int]) -> None:
+    primary_active = sys.exc_info()[0] is not None
+    first_error: OSError | None = None
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError as error:
+            if not primary_active and first_error is None:
+                first_error = error
+    if first_error is not None:
+        raise first_error
+
+
+def _close_descriptor(descriptor: int) -> None:
+    _close_descriptors(iter((descriptor,)))
+
+
 @contextmanager
 def _regular_file(path: Path, *, require_single_link: bool = True) -> Iterator[Any]:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -132,7 +150,7 @@ def _regular_file(path: Path, *, require_single_link: bool = True) -> Iterator[A
             details={"path": str(path)},
         ) from error
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)
 
 
 def _sha256_file(path: Path, *, require_single_link: bool = True) -> str:
@@ -189,7 +207,7 @@ def _tree_records(descriptor: int, prefix: str = "") -> list[dict[str, object]]:
                     for chunk in iter(lambda: source.read(1024 * 1024), b""):
                         digest.update(chunk)
             finally:
-                os.close(file_descriptor)
+                _close_descriptor(file_descriptor)
             records.append(
                 {
                     "type": "file",
@@ -214,7 +232,7 @@ def _tree_records(descriptor: int, prefix: str = "") -> list[dict[str, object]]:
                     )
                 records.extend(_tree_records(directory, relative))
             finally:
-                os.close(directory)
+                _close_descriptor(directory)
     return records
 
 
@@ -223,7 +241,7 @@ def _tree_digest(root: Path) -> str:
     try:
         records = _tree_records(descriptor)
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)
     return content_hash(records)
 
 
@@ -291,6 +309,7 @@ class MarketplaceRecord:
     snapshot_digest: str
     resolved_commit: str | None
     content_digest: str | None
+    tree_digest: str
     snapshot_root: Path
 
     def to_dict(self) -> dict[str, Any]:
@@ -413,6 +432,89 @@ _DIRECTORY_FLAGS = (
 _FILE_FLAGS = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 
 
+def _run_fd_helper(
+    descriptor: int,
+    source: str,
+    arguments: list[str],
+    *,
+    environment: Mapping[str, str],
+    cwd: Path,
+) -> None:
+    subprocess.run(
+        [str(Path(sys.executable).resolve()), "-I", "-c", source, str(descriptor), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=dict(environment),
+        pass_fds=(descriptor,),
+    )
+
+
+def _create_venv(
+    environments: int,
+    temporary: str,
+    *,
+    environment: Mapping[str, str],
+    cwd: Path,
+) -> None:
+    _run_fd_helper(
+        environments,
+        (
+            "import os, sys, venv; "
+            "os.fchdir(int(sys.argv[1])); "
+            "venv.EnvBuilder(with_pip=False, system_site_packages=True).create(sys.argv[2])"
+        ),
+        [temporary],
+        environment=environment,
+        cwd=cwd,
+    )
+
+
+def _run_venv_python(
+    environment_descriptor: int,
+    arguments: list[str],
+    *,
+    environment: Mapping[str, str],
+    cwd: Path,
+) -> None:
+    _run_fd_helper(
+        environment_descriptor,
+        (
+            "import os, sys; "
+            "os.fchdir(int(sys.argv[1])); "
+            "os.set_inheritable(int(sys.argv[1]), False); "
+            "os.execv(sys.argv[2], [sys.argv[2], *sys.argv[3:]])"
+        ),
+        ["bin/python", *arguments],
+        environment=environment,
+        cwd=cwd,
+    )
+
+
+def _require_directory_identity(path: Path, descriptor: int) -> None:
+    try:
+        linked = path.lstat()
+        opened = os.fstat(descriptor)
+    except OSError as error:
+        raise ExtensionError(
+            "SANKA_EXTENSION_PATH",
+            "Extension directory placement cannot be verified",
+            details={"path": str(path), "reason": str(error)},
+        ) from error
+    if (
+        stat.S_ISLNK(linked.st_mode)
+        or not stat.S_ISDIR(linked.st_mode)
+        or not stat.S_ISDIR(opened.st_mode)
+        or (linked.st_dev, linked.st_ino) != (opened.st_dev, opened.st_ino)
+    ):
+        _error(
+            "SANKA_EXTENSION_PATH",
+            "Extension directory changed during a store operation",
+            path=str(path),
+        )
+
+
 @contextmanager
 def _parent_descriptor(
     root: Path,
@@ -441,11 +543,16 @@ def _parent_descriptor(
                 with suppress(FileExistsError):
                     os.mkdir(part, mode=0o700, dir_fd=descriptor)
             child = os.open(part, _DIRECTORY_FLAGS, dir_fd=descriptor)
-            os.close(descriptor)
+            try:
+                _close_descriptor(descriptor)
+            except BaseException:
+                with suppress(OSError):
+                    _close_descriptor(child)
+                raise
             descriptor = child
         yield descriptor, relative.parts[-1]
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)
 
 
 @contextmanager
@@ -474,7 +581,7 @@ def _regular_at(
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             yield source
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)
 
 
 @contextmanager
@@ -537,7 +644,7 @@ def _directory_at(
             )
         yield descriptor
     finally:
-        os.close(descriptor)
+        _close_descriptor(descriptor)
 
 
 def _atomic_json(root: Path, path: Path, payload: object) -> None:
@@ -630,7 +737,7 @@ def _locked(root: Path, path: Path) -> Iterator[None]:
     finally:
         with suppress(OSError):
             fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+        _close_descriptor(descriptor)
 
 
 def _remove_store_tree(root: Path, path: Path) -> None:
@@ -658,6 +765,52 @@ def _unlink_store_file(root: Path, path: Path) -> None:
                 path=str(path),
             )
         os.unlink(name, dir_fd=parent)
+
+
+def _rewrite_console_script(
+    environment: int,
+    executable: str,
+    interpreter: Path,
+) -> None:
+    bin_name = "Scripts" if os.name == "nt" else "bin"
+    with _directory_at(environment, bin_name, interpreter.parent) as bin_descriptor:
+        assert bin_descriptor is not None
+        descriptor = os.open(
+            executable,
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=bin_descriptor,
+        )
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                _error(
+                    "SANKA_EXTENSION_INSTALL_FAILED",
+                    "Installed extension executable is not one regular file",
+                    executable=executable,
+                )
+            with os.fdopen(descriptor, "r+b", closefd=False) as script:
+                payload = script.read(MAX_WHEEL_METADATA_BYTES + 1)
+                if len(payload) > MAX_WHEEL_METADATA_BYTES or not payload.startswith(b"#!"):
+                    _error(
+                        "SANKA_EXTENSION_INSTALL_FAILED",
+                        "Installed extension executable has an invalid launcher",
+                        executable=executable,
+                    )
+                _first, separator, body = payload.partition(b"\n")
+                if not separator:
+                    _error(
+                        "SANKA_EXTENSION_INSTALL_FAILED",
+                        "Installed extension executable has an invalid launcher",
+                        executable=executable,
+                    )
+                launcher = (
+                    f"#!/bin/sh\n'''exec' {shlex.quote(str(interpreter))} \"$0\" \"$@\"\n' '''\n"
+                ).encode()
+                script.seek(0)
+                script.write(launcher + body)
+                script.truncate()
+        finally:
+            _close_descriptor(descriptor)
 
 
 class ExtensionStore:
@@ -741,15 +894,18 @@ class ExtensionStore:
     def _state_path(cls, root: Path, path: Path) -> Path:
         return cls._confined(root, path, expected=path)
 
-    def _raw_marketplaces(self) -> list[dict[str, Any]]:
+    def _marketplace_state(self) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
         path = self._state_path(self.user_root, self._marketplace_path)
         payload = self._load_json(
             self.user_root,
             path,
-            {"schema_version": MARKETPLACE_SCHEMA, "marketplaces": []},
+            {"schema_version": MARKETPLACE_SCHEMA, "marketplaces": [], "snapshots": []},
         )
-        if payload.get("schema_version") != MARKETPLACE_SCHEMA or not isinstance(
-            payload.get("marketplaces"), list
+        if (
+            set(payload) != {"schema_version", "marketplaces", "snapshots"}
+            or payload.get("schema_version") != MARKETPLACE_SCHEMA
+            or not isinstance(payload.get("marketplaces"), list)
+            or not isinstance(payload.get("snapshots"), list)
         ):
             _error(
                 "SANKA_EXTENSION_STATE_INVALID",
@@ -757,14 +913,37 @@ class ExtensionStore:
                 path=str(self._marketplace_path),
             )
         records = payload["marketplaces"]
+        snapshots = payload["snapshots"]
         if any(not isinstance(item, dict) for item in records):
             _error(
                 "SANKA_EXTENSION_STATE_INVALID",
                 "Marketplace configuration records must be objects",
                 path=str(self._marketplace_path),
             )
+        if any(
+            not isinstance(item, dict)
+            or set(item) != {"identity", "snapshot_digest", "tree_digest"}
+            or any(not isinstance(item.get(field), str) or not item[field] for field in item)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", item["tree_digest"]) is None
+            for item in snapshots
+        ):
+            _error(
+                "SANKA_EXTENSION_STATE_INVALID",
+                "Marketplace snapshot history is invalid",
+                path=str(self._marketplace_path),
+            )
+        snapshot_keys = [(item["identity"], item["snapshot_digest"]) for item in snapshots]
+        if len(snapshot_keys) != len(set(snapshot_keys)):
+            _error(
+                "SANKA_EXTENSION_STATE_INVALID",
+                "Marketplace snapshot history contains duplicate identities",
+                path=str(self._marketplace_path),
+            )
+        history = {
+            (item["identity"], item["snapshot_digest"]): item["tree_digest"] for item in snapshots
+        }
         for item in records:
-            self._record(item)
+            self._record(item, history)
         names = [item["name"] for item in records]
         if len(names) != len(set(names)):
             _error(
@@ -772,9 +951,16 @@ class ExtensionStore:
                 "Marketplace configuration contains duplicate names",
                 path=str(self._marketplace_path),
             )
-        return cast(list[dict[str, Any]], records)
+        return cast(list[dict[str, Any]], records), cast(list[dict[str, str]], snapshots)
 
-    def _record(self, value: Mapping[str, Any]) -> MarketplaceRecord:
+    def _raw_marketplaces(self) -> list[dict[str, Any]]:
+        return self._marketplace_state()[0]
+
+    def _record(
+        self,
+        value: Mapping[str, Any],
+        history: Mapping[tuple[str, str], str],
+    ) -> MarketplaceRecord:
         keys = {
             "content_digest",
             "identity",
@@ -785,6 +971,7 @@ class ExtensionStore:
             "snapshot_root",
             "source",
             "trusted",
+            "tree_digest",
         }
         if set(value) != keys or not isinstance(value.get("snapshot_root"), str):
             _error(
@@ -792,7 +979,7 @@ class ExtensionStore:
                 "Marketplace record is invalid",
                 path=str(self._marketplace_path),
             )
-        strings = ("identity", "kind", "name", "snapshot_digest", "source")
+        strings = ("identity", "kind", "name", "snapshot_digest", "source", "tree_digest")
         if any(not isinstance(value.get(field), str) or not value[field] for field in strings):
             _error(
                 "SANKA_EXTENSION_STATE_INVALID",
@@ -809,6 +996,8 @@ class ExtensionStore:
             or (
                 value["content_digest"] is not None and not isinstance(value["content_digest"], str)
             )
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", value["tree_digest"]) is None
+            or history.get((value["identity"], value["snapshot_digest"])) != value["tree_digest"]
         ):
             _error(
                 "SANKA_EXTENSION_STATE_INVALID",
@@ -826,6 +1015,7 @@ class ExtensionStore:
             valid_snapshot = (
                 value["resolved_commit"] is None
                 and value["content_digest"] == value["snapshot_digest"]
+                and value["tree_digest"] == value["snapshot_digest"]
                 and isinstance(value["snapshot_digest"], str)
                 and re.fullmatch(r"sha256:[0-9a-f]{64}", value["snapshot_digest"]) is not None
             )
@@ -861,17 +1051,99 @@ class ExtensionStore:
             snapshot_digest=value["snapshot_digest"],
             resolved_commit=value["resolved_commit"],
             content_digest=value["content_digest"],
+            tree_digest=value["tree_digest"],
             snapshot_root=root,
         )
 
     @_store_operation
     def marketplaces(self) -> tuple[MarketplaceRecord, ...]:
+        records, snapshots = self._marketplace_state()
+        history = {
+            (item["identity"], item["snapshot_digest"]): item["tree_digest"] for item in snapshots
+        }
         return tuple(
             sorted(
-                (self._record(item) for item in self._raw_marketplaces()),
+                (self._record(item, history) for item in records),
                 key=lambda item: item.name,
             )
         )
+
+    def _write_marketplace_state(
+        self,
+        records: list[dict[str, Any]],
+        snapshots: list[dict[str, str]],
+    ) -> None:
+        records.sort(key=_marketplace_sort_key)
+        snapshots.sort(key=lambda item: (item["identity"], item["snapshot_digest"]))
+        _atomic_json(
+            self.user_root,
+            self._marketplace_path,
+            {
+                "schema_version": MARKETPLACE_SCHEMA,
+                "marketplaces": records,
+                "snapshots": snapshots,
+            },
+        )
+
+    @staticmethod
+    def _remember_snapshot(
+        snapshots: list[dict[str, str]],
+        identity: str,
+        snapshot_digest: str,
+        tree_digest: str,
+    ) -> None:
+        existing = next(
+            (
+                item
+                for item in snapshots
+                if item["identity"] == identity and item["snapshot_digest"] == snapshot_digest
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing["tree_digest"] != tree_digest:
+                _error(
+                    "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
+                    "Marketplace snapshot identity has conflicting tree content",
+                    identity=identity,
+                    snapshot_digest=snapshot_digest,
+                )
+            return
+        snapshots.append(
+            {
+                "identity": identity,
+                "snapshot_digest": snapshot_digest,
+                "tree_digest": tree_digest,
+            }
+        )
+
+    @staticmethod
+    def _load_verified_snapshot(
+        root: Path,
+        descriptor: int,
+        expected_tree_digest: str,
+    ) -> tuple[Manifest, ...]:
+        _require_directory_identity(root, descriptor)
+        if content_hash(_tree_records(descriptor)) != expected_tree_digest:
+            _error(
+                "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
+                "Immutable marketplace snapshot no longer matches its expected tree",
+                path=str(root),
+            )
+        return load_marketplace(root, root_descriptor=descriptor)
+
+    @contextmanager
+    def _verified_snapshot(
+        self,
+        root: Path,
+        expected_tree_digest: str,
+    ) -> Iterator[tuple[Manifest, ...]]:
+        with (
+            _parent_descriptor(self.user_root, root) as (parent, name),
+            _directory_at(parent, name, root) as descriptor,
+        ):
+            assert descriptor is not None
+            yield self._load_verified_snapshot(root, descriptor, expected_tree_digest)
 
     def _snapshot_destination(self, identity: str, digest: str) -> Path:
         return self._confined(
@@ -885,7 +1157,7 @@ class ExtensionStore:
         identity: str,
         snapshot_digest: str,
         expected_tree_digest: str,
-    ) -> Path:
+    ) -> tuple[Path, int]:
         destination = self._snapshot_destination(identity, snapshot_digest)
         with (
             _parent_descriptor(self.user_root, source) as (source_parent, source_name),
@@ -916,7 +1188,7 @@ class ExtensionStore:
                             path=str(destination),
                         )
                     shutil.rmtree(source_name, dir_fd=source_parent)
-                    return destination
+                    return destination, os.dup(existing_descriptor)
                 os.replace(
                     source_name,
                     destination_name,
@@ -931,7 +1203,9 @@ class ExtensionStore:
                     ) as placed_descriptor:
                         assert placed_descriptor is not None
                         placed_digest = content_hash(_tree_records(placed_descriptor))
+                        retained_descriptor = os.dup(placed_descriptor)
                     if placed_digest != expected_tree_digest:
+                        _close_descriptor(retained_descriptor)
                         _error(
                             "SANKA_MARKETPLACE_SNAPSHOT_INVALID",
                             "Placed immutable marketplace snapshot does not match expected content",
@@ -941,9 +1215,9 @@ class ExtensionStore:
                     with suppress(OSError, ExtensionError):
                         shutil.rmtree(destination_name, dir_fd=destination_parent)
                     raise
-                return destination
+                return destination, retained_descriptor
 
-    def _snapshot_local(self, source: Path, identity: str) -> tuple[Path, str]:
+    def _snapshot_local(self, source: Path, identity: str) -> tuple[Path, str, str, int]:
         temporary_root = self._confined(self.user_root, self.user_root / "tmp")
         temporary_root.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix="snapshot-", dir=temporary_root)) / "content"
@@ -956,12 +1230,13 @@ class ExtensionStore:
             )
             digest = _tree_digest(staging)
             load_marketplace(staging)
-            return self._place_snapshot(staging, identity, digest, digest), digest
+            root, descriptor = self._place_snapshot(staging, identity, digest, digest)
+            return root, digest, digest, descriptor
         finally:
             with suppress(OSError, ExtensionError):
                 _remove_store_tree(self.user_root, staging.parent)
 
-    def _snapshot_git(self, source: str, identity: str) -> tuple[Path, str]:
+    def _snapshot_git(self, source: str, identity: str) -> tuple[Path, str, str, int]:
         temporary_root = self._confined(self.user_root, self.user_root / "tmp")
         temporary_root.mkdir(parents=True, exist_ok=True)
         parent = Path(tempfile.mkdtemp(prefix="git-", dir=temporary_root))
@@ -995,10 +1270,10 @@ class ExtensionStore:
             shutil.rmtree(git_directory)
             expected_tree_digest = _tree_digest(checkout)
             load_marketplace(checkout)
-            return (
-                self._place_snapshot(checkout, identity, commit, expected_tree_digest),
-                commit,
+            root, descriptor = self._place_snapshot(
+                checkout, identity, commit, expected_tree_digest
             )
+            return root, commit, expected_tree_digest, descriptor
         except subprocess.CalledProcessError as error:
             raise ExtensionError(
                 "SANKA_MARKETPLACE_GIT_FAILED",
@@ -1038,7 +1313,7 @@ class ExtensionStore:
             )
         chosen_name = self._marketplace_name(fetch_source, identity, name)
         with _locked(self.user_root, self._marketplace_path):
-            records = self._raw_marketplaces()
+            records, snapshots = self._marketplace_state()
             if any(item.get("name") == chosen_name for item in records):
                 _error(
                     "SANKA_MARKETPLACE_EXISTS",
@@ -1046,39 +1321,42 @@ class ExtensionStore:
                     name=chosen_name,
                 )
             if kind == "git":
-                root, digest = self._snapshot_git(fetch_source, identity)
+                root, digest, tree_digest, descriptor = self._snapshot_git(fetch_source, identity)
                 commit, content_digest = digest, None
             else:
-                root, digest = self._snapshot_local(Path(fetch_source), identity)
+                root, digest, tree_digest, descriptor = self._snapshot_local(
+                    Path(fetch_source), identity
+                )
                 commit, content_digest = None, digest
-            load_marketplace(root)
-            raw = {
-                "content_digest": content_digest,
-                "identity": identity,
-                "kind": kind,
-                "name": chosen_name,
-                "resolved_commit": commit,
-                "snapshot_digest": digest,
-                "snapshot_root": root.relative_to(self.user_root).as_posix(),
-                "source": fetch_source,
-                "trusted": trusted,
-            }
-            records.append(raw)
-            records.sort(key=_marketplace_sort_key)
-            _atomic_json(
-                self.user_root,
-                self._marketplace_path,
-                {
-                    "schema_version": MARKETPLACE_SCHEMA,
-                    "marketplaces": records,
-                },
-            )
-            return self._record(raw)
+            try:
+                self._load_verified_snapshot(root, descriptor, tree_digest)
+                self._remember_snapshot(snapshots, identity, digest, tree_digest)
+                history = {
+                    (item["identity"], item["snapshot_digest"]): item["tree_digest"]
+                    for item in snapshots
+                }
+                raw = {
+                    "content_digest": content_digest,
+                    "identity": identity,
+                    "kind": kind,
+                    "name": chosen_name,
+                    "resolved_commit": commit,
+                    "snapshot_digest": digest,
+                    "snapshot_root": root.relative_to(self.user_root).as_posix(),
+                    "source": fetch_source,
+                    "tree_digest": tree_digest,
+                    "trusted": trusted,
+                }
+                records.append(raw)
+                self._write_marketplace_state(records, snapshots)
+                return self._record(raw, history)
+            finally:
+                _close_descriptor(descriptor)
 
     @_store_operation
     def upgrade_marketplace(self, name: str | None = None) -> tuple[MarketplaceRecord, ...]:
         with _locked(self.user_root, self._marketplace_path):
-            records = self._raw_marketplaces()
+            records, snapshots = self._marketplace_state()
             selected = [item for item in records if name is None or item.get("name") == name]
             if not selected:
                 _error(
@@ -1086,43 +1364,48 @@ class ExtensionStore:
                     "Marketplace is not configured",
                     name=name,
                 )
-            upgraded: list[MarketplaceRecord] = []
-            for raw in selected:
-                kind = raw["kind"]
-                identity = raw["identity"]
-                source = raw["source"]
-                if kind == "git":
-                    root, digest = self._snapshot_git(source, identity)
-                    raw["resolved_commit"], raw["content_digest"] = digest, None
-                elif kind == "local":
-                    current_kind, current_source, current_identity = _canonical_source(source)
-                    if current_kind != "local" or current_identity != identity:
-                        _error(
-                            "SANKA_MARKETPLACE_SOURCE_INVALID",
-                            "Local marketplace source no longer matches its trusted identity",
-                            source=source,
+            descriptors: list[int] = []
+            try:
+                for raw in selected:
+                    kind = raw["kind"]
+                    identity = raw["identity"]
+                    source = raw["source"]
+                    if kind == "git":
+                        root, digest, tree_digest, descriptor = self._snapshot_git(source, identity)
+                        raw["resolved_commit"], raw["content_digest"] = digest, None
+                    elif kind == "local":
+                        current_kind, current_source, current_identity = _canonical_source(source)
+                        if current_kind != "local" or current_identity != identity:
+                            _error(
+                                "SANKA_MARKETPLACE_SOURCE_INVALID",
+                                "Local marketplace source no longer matches its trusted identity",
+                                source=source,
+                            )
+                        root, digest, tree_digest, descriptor = self._snapshot_local(
+                            Path(current_source), identity
                         )
-                    root, digest = self._snapshot_local(Path(current_source), identity)
-                    raw["resolved_commit"], raw["content_digest"] = None, digest
-                else:
-                    _error(
-                        "SANKA_EXTENSION_STATE_INVALID",
-                        "Marketplace source kind is invalid",
-                        name=raw.get("name"),
-                    )
-                raw["snapshot_digest"] = digest
-                raw["snapshot_root"] = root.relative_to(self.user_root).as_posix()
-                upgraded.append(self._record(raw))
-            records.sort(key=_marketplace_sort_key)
-            _atomic_json(
-                self.user_root,
-                self._marketplace_path,
-                {
-                    "schema_version": MARKETPLACE_SCHEMA,
-                    "marketplaces": records,
-                },
-            )
-            return tuple(sorted(upgraded, key=lambda item: item.name))
+                        raw["resolved_commit"], raw["content_digest"] = None, digest
+                    else:
+                        _error(
+                            "SANKA_EXTENSION_STATE_INVALID",
+                            "Marketplace source kind is invalid",
+                            name=raw.get("name"),
+                        )
+                    descriptors.append(descriptor)
+                    self._load_verified_snapshot(root, descriptor, tree_digest)
+                    self._remember_snapshot(snapshots, identity, digest, tree_digest)
+                    raw["snapshot_digest"] = digest
+                    raw["snapshot_root"] = root.relative_to(self.user_root).as_posix()
+                    raw["tree_digest"] = tree_digest
+                history = {
+                    (item["identity"], item["snapshot_digest"]): item["tree_digest"]
+                    for item in snapshots
+                }
+                upgraded = [self._record(raw, history) for raw in selected]
+                self._write_marketplace_state(records, snapshots)
+                return tuple(sorted(upgraded, key=lambda item: item.name))
+            finally:
+                _close_descriptors(reversed(descriptors))
 
     @_store_operation
     def remove_marketplace(self, name: str) -> MarketplaceRecord:
@@ -1130,7 +1413,7 @@ class ExtensionStore:
             _locked(self.user_root, self._marketplace_path),
             _locked(self.project_root, self._project_lock_path),
         ):
-            records = self._raw_marketplaces()
+            records, snapshots = self._marketplace_state()
             raw = next((item for item in records if item.get("name") == name), None)
             if raw is None:
                 _error(
@@ -1148,12 +1431,12 @@ class ExtensionStore:
                     name=name,
                 )
             records.remove(raw)
-            _atomic_json(
-                self.user_root,
-                self._marketplace_path,
-                {"schema_version": MARKETPLACE_SCHEMA, "marketplaces": records},
-            )
-            return self._record(raw)
+            self._write_marketplace_state(records, snapshots)
+            history = {
+                (item["identity"], item["snapshot_digest"]): item["tree_digest"]
+                for item in snapshots
+            }
+            return self._record(raw, history)
 
     def _load_installations(self) -> list[dict[str, Any]]:
         path = self._state_path(self.user_root, self._installation_path)
@@ -1363,7 +1646,8 @@ class ExtensionStore:
                     "Configured marketplace is not trusted",
                     identity=record.identity,
                 )
-            values.extend((record, manifest) for manifest in load_marketplace(record.snapshot_root))
+            with self._verified_snapshot(record.snapshot_root, record.tree_digest) as manifests:
+                values.extend((record, manifest) for manifest in manifests)
         return values
 
     @_store_operation
@@ -1737,21 +2021,46 @@ class ExtensionStore:
             self.user_root,
             self.user_root / "environments" / artifact_digest,
         )
-        binary = root / ("Scripts" if os.name == "nt" else "bin") / executable
-        if root.exists():
-            if not binary.is_file():
-                _error(
-                    "SANKA_EXTENSION_NOT_CACHED",
-                    "Cached extension environment is incomplete",
-                    artifact_digest=artifact_digest,
-                )
-            return root
-        root.parent.mkdir(parents=True, exist_ok=True)
-        temporary = Path(tempfile.mkdtemp(prefix="environment-", dir=root.parent))
-        try:
-            venv.EnvBuilder(with_pip=False, system_site_packages=True).create(temporary)
-            python = temporary / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-            allowed = {"LANG", "LC_ALL", "LC_CTYPE", "PATH", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR"}
+        binary_name = "Scripts" if os.name == "nt" else "bin"
+        binary = root / binary_name / executable
+        temporary = ""
+        with _parent_descriptor(self.user_root, root, create=True) as (
+            environments,
+            environment_name,
+        ):
+            _require_directory_identity(root.parent, environments)
+            with _directory_at(
+                environments,
+                environment_name,
+                root,
+                missing_ok=True,
+            ) as existing:
+                if existing is not None:
+                    with (
+                        _directory_at(existing, binary_name, binary.parent) as bin_descriptor,
+                        _regular_at(cast(int, bin_descriptor), executable, binary) as installed,
+                    ):
+                        assert installed is not None
+                    return root
+            for _attempt in range(10):
+                temporary = f"environment-{secrets.token_hex(8)}"
+                try:
+                    os.mkdir(temporary, mode=0o700, dir_fd=environments)
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise FileExistsError("could not allocate extension environment temporary")
+            allowed = {
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "PATH",
+                "SYSTEMROOT",
+                "TEMP",
+                "TMP",
+                "TMPDIR",
+            }
             environment = {key: value for key, value in os.environ.items() if key in allowed}
             environment.update(
                 {
@@ -1759,61 +2068,94 @@ class ExtensionStore:
                     "PYTHONNOUSERSITE": "1",
                 }
             )
-            subprocess.run(
-                [str(python), "-I", "-m", "ensurepip"],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=temporary,
-                env=environment,
-            )
-            requirements = temporary / "requirements-hashed.txt"
-            requirements.write_text(
-                "".join(
-                    f"{wheel.as_uri()} --hash=sha256:{sha256}\n"
-                    for wheel, sha256 in sorted(wheels, key=lambda item: str(item[0]))
-                ),
-                encoding="utf-8",
-            )
-            subprocess.run(
-                [
-                    str(python),
-                    "-I",
-                    "-m",
-                    "pip",
-                    "--isolated",
-                    "install",
-                    "--no-index",
-                    "--no-deps",
-                    "--require-hashes",
-                    "-r",
-                    str(requirements),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=temporary,
-                env=environment,
-            )
-            requirements.unlink()
-            os.replace(temporary, root)
-        except (OSError, subprocess.CalledProcessError) as error:
-            output = getattr(error, "stderr", None) or getattr(error, "stdout", None) or str(error)
-            if isinstance(output, bytes):
-                output = output.decode("utf-8", errors="replace")
-            raise ExtensionError(
-                "SANKA_EXTENSION_INSTALL_FAILED",
-                "Verified extension wheels could not be installed",
-                details={"reason": output.strip()},
-            ) from error
-        finally:
-            shutil.rmtree(temporary, ignore_errors=True)
-        if not binary.is_file():
-            _error(
-                "SANKA_EXTENSION_INSTALL_FAILED",
-                "Installed extension executable is missing",
-                executable=executable,
-            )
+            try:
+                _create_venv(
+                    environments,
+                    temporary,
+                    environment=environment,
+                    cwd=self.user_root,
+                )
+                _require_directory_identity(root.parent, environments)
+                with _directory_at(
+                    environments,
+                    temporary,
+                    root.parent / temporary,
+                ) as temporary_descriptor:
+                    assert temporary_descriptor is not None
+                    _run_venv_python(
+                        temporary_descriptor,
+                        ["-I", "-m", "ensurepip"],
+                        environment=environment,
+                        cwd=self.user_root,
+                    )
+                    requirements_name = "requirements-hashed.txt"
+                    requirements_descriptor = os.open(
+                        requirements_name,
+                        os.O_WRONLY
+                        | os.O_CREAT
+                        | os.O_EXCL
+                        | getattr(os, "O_CLOEXEC", 0)
+                        | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                        dir_fd=temporary_descriptor,
+                    )
+                    with os.fdopen(requirements_descriptor, "w", encoding="utf-8") as output:
+                        output.write(
+                            "".join(
+                                f"{wheel.as_uri()} --hash=sha256:{sha256}\n"
+                                for wheel, sha256 in sorted(wheels, key=lambda item: str(item[0]))
+                            )
+                        )
+                    _run_venv_python(
+                        temporary_descriptor,
+                        [
+                            "-I",
+                            "-m",
+                            "pip",
+                            "--isolated",
+                            "install",
+                            "--no-index",
+                            "--no-deps",
+                            "--require-hashes",
+                            "-r",
+                            requirements_name,
+                        ],
+                        environment=environment,
+                        cwd=self.user_root,
+                    )
+                    os.unlink(requirements_name, dir_fd=temporary_descriptor)
+                    _rewrite_console_script(temporary_descriptor, executable, root / "bin/python")
+                    _require_directory_identity(root.parent, environments)
+                    os.replace(
+                        temporary,
+                        environment_name,
+                        src_dir_fd=environments,
+                        dst_dir_fd=environments,
+                    )
+                    temporary = ""
+                    with (
+                        _directory_at(
+                            temporary_descriptor,
+                            binary_name,
+                            binary.parent,
+                        ) as bin_descriptor,
+                        _regular_at(cast(int, bin_descriptor), executable, binary) as installed,
+                    ):
+                        assert installed is not None
+            except (OSError, subprocess.CalledProcessError) as error:
+                error_output = getattr(error, "stderr", None) or getattr(error, "stdout", None)
+                error_output = error_output or str(error)
+                if isinstance(error_output, bytes):
+                    error_output = error_output.decode("utf-8", errors="replace")
+                raise ExtensionError(
+                    "SANKA_EXTENSION_INSTALL_FAILED",
+                    "Verified extension wheels could not be installed",
+                    details={"reason": error_output.strip()},
+                ) from error
+            finally:
+                if temporary:
+                    with suppress(OSError):
+                        shutil.rmtree(temporary, dir_fd=environments)
         return root
 
     @staticmethod
@@ -2030,14 +2372,26 @@ class ExtensionStore:
         )
 
     def _manifest_for_lock(self, entry: LockEntry) -> Manifest:
-        manifest = next(
+        _records, snapshots = self._marketplace_state()
+        expected_tree_digest = next(
             (
-                item
-                for item in load_marketplace(self._snapshot_for_lock(entry))
-                if item.id == entry.id
+                item["tree_digest"]
+                for item in snapshots
+                if item["identity"] == entry.marketplace_identity
+                and item["snapshot_digest"] == entry.snapshot_digest
             ),
             None,
         )
+        if expected_tree_digest is None:
+            _error(
+                "SANKA_EXTENSION_IDENTITY",
+                "Locked marketplace snapshot has no persisted tree identity",
+                extension_id=entry.id,
+            )
+        with self._verified_snapshot(
+            self._snapshot_for_lock(entry), expected_tree_digest
+        ) as manifests:
+            manifest = next((item for item in manifests if item.id == entry.id), None)
         if manifest is None or any(
             actual != expected
             for actual, expected in (

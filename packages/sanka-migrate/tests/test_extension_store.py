@@ -8,23 +8,35 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
-import venv
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
 
 import pytest
 
 from sanka.runtime.extensions import ExtensionError, load_marketplace
+from sanka.runtime.extensions import store as extension_store
 from sanka.runtime.extensions.store import (
     OFFICIAL_IDENTITY,
     ExtensionStore,
     LockEntry,
+    _parent_descriptor,
     _tree_digest,
 )
+
+
+def _descriptor_path(descriptor: int) -> Path:
+    proc_path = Path(f"/proc/self/fd/{descriptor}")
+    try:
+        return Path(os.readlink(proc_path))
+    except OSError:
+        import fcntl
+
+        raw = fcntl.fcntl(descriptor, fcntl.F_GETPATH, b"\0" * 1024)
+        assert isinstance(raw, bytes)
+        return Path(raw.split(b"\0", 1)[0].decode())
 
 
 def _wheel(
@@ -217,11 +229,16 @@ def test_official_ssh_and_https_share_pretrusted_identity(
     fixture, _wheel_bytes = _marketplace(tmp_path / "market")
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
 
-    def snapshot(_source: str, _identity: str) -> tuple[Path, str]:
+    def snapshot(_source: str, _identity: str) -> tuple[Path, str, str, int]:
         target = store._snapshot_destination(OFFICIAL_IDENTITY, "a" * 40)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(fixture, target)
-        return target, "a" * 40
+        tree_digest = _tree_digest(target)
+        descriptor = os.open(
+            target,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        return target, "a" * 40, tree_digest, descriptor
 
     monkeypatch.setattr(store, "_snapshot_git", snapshot)
 
@@ -231,6 +248,7 @@ def test_official_ssh_and_https_share_pretrusted_identity(
     assert record.trusted is True
     assert record.resolved_commit == "a" * 40
     assert record.content_digest is None
+    assert record.tree_digest == _tree_digest(record.snapshot_root)
     assert record.snapshot_root.is_relative_to(store.user_root / "snapshots")
 
 
@@ -265,6 +283,8 @@ def test_git_marketplace_is_an_immutable_commit_snapshot(tmp_path: Path) -> None
     (source / "marketplace.json").write_text("{}", encoding="utf-8")
 
     assert record.resolved_commit == commit
+    assert record.tree_digest == _tree_digest(record.snapshot_root)
+    assert record.tree_digest != record.snapshot_digest
     assert (record.snapshot_root / "marketplace.json").read_text(encoding="utf-8") != "{}"
     assert not (record.snapshot_root / ".git").exists()
 
@@ -279,6 +299,7 @@ def test_local_marketplace_is_a_copied_content_digest_snapshot(tmp_path: Path) -
 
     assert record.resolved_commit is None
     assert record.content_digest == record.snapshot_digest
+    assert record.tree_digest == record.snapshot_digest
     assert (record.snapshot_root / "marketplace.json").read_bytes() == before
 
 
@@ -348,6 +369,46 @@ def test_reused_snapshot_rejects_matching_mutation_after_expected_digest(
 
     assert raised.value.code == "SANKA_MARKETPLACE_SNAPSHOT_INVALID"
     assert not store.marketplaces()
+
+
+def test_snapshot_mutation_after_placement_is_rejected_before_state_persistence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, _wheel_bytes = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    original_place = store._place_snapshot
+
+    def mutate_after_placement(*args: object, **kwargs: object) -> object:
+        placed = original_place(*args, **kwargs)  # type: ignore[arg-type]
+        root = placed[0] if isinstance(placed, tuple) else placed
+        assert isinstance(root, Path)
+        (root / "valid-but-unexpected.txt").write_text("changed", encoding="utf-8")
+        return placed
+
+    monkeypatch.setattr(store, "_place_snapshot", mutate_after_placement)
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_marketplace(source, name="fixtures", trust=True)
+
+    assert raised.value.code == "SANKA_MARKETPLACE_SNAPSHOT_INVALID"
+    assert not store._marketplace_path.exists()
+
+
+def test_snapshot_final_entry_swap_is_rejected_at_catalog_consumption(
+    tmp_path: Path,
+) -> None:
+    source, _wheel_bytes = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    record = store.add_marketplace(source, name="fixtures", trust=True)
+    displaced = record.snapshot_root.with_name(f"{record.snapshot_root.name}-original")
+    record.snapshot_root.rename(displaced)
+    shutil.copytree(displaced, record.snapshot_root)
+    (record.snapshot_root / "valid-but-unexpected.txt").write_text("changed", encoding="utf-8")
+
+    with pytest.raises(ExtensionError) as raised:
+        store.list_extensions()
+
+    assert raised.value.code == "SANKA_MARKETPLACE_SNAPSHOT_INVALID"
 
 
 def test_source_collision_requires_explicit_marketplace(
@@ -595,8 +656,7 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
-    original_create = venv.EnvBuilder.create
-    original_call = cast(Any, venv.EnvBuilder)._call_new_python
+    original_create = extension_store._create_venv
     project_sitecustomize = store.project_root / "sitecustomize.py"
     project_ensurepip = store.project_root / "ensurepip" / "__main__.py"
     sitecustomize_sentinel = tmp_path / "sitecustomize-ran"
@@ -632,25 +692,19 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
             encoding="utf-8",
         )
 
-    def call_with_host_interpreter(
-        builder: venv.EnvBuilder,
-        context: SimpleNamespace,
-        *arguments: str,
-        **keywords: object,
+    def create_with_host_interpreter(
+        environments: int,
+        temporary: str,
+        *,
+        environment: Mapping[str, str],
+        cwd: Path,
     ) -> None:
-        environment = Path(context.env_dir)
-        instrument_children(environment)
-        use_host_interpreter(Path(context.env_exec_cmd))
-        original_call(builder, context, *arguments, **keywords)
-
-    def create_with_host_interpreter(builder: venv.EnvBuilder, environment: str | Path) -> None:
-        original_create(builder, environment)
-        root = Path(environment)
+        original_create(environments, temporary, environment=environment, cwd=cwd)
+        root = _descriptor_path(environments) / temporary
         use_host_interpreter(root / "bin" / "python")
         instrument_children(root)
 
-    monkeypatch.setattr("venv.EnvBuilder._call_new_python", call_with_host_interpreter)
-    monkeypatch.setattr("venv.EnvBuilder.create", create_with_host_interpreter)
+    monkeypatch.setattr(extension_store, "_create_venv", create_with_host_interpreter)
     monkeypatch.chdir(store.project_root)
 
     lock = store.add_extension("example/demo")
@@ -677,6 +731,13 @@ def test_verified_wheel_installs_in_an_offline_system_site_environment(
     )
     assert not sitecustomize_sentinel.exists()
     assert not ensurepip_sentinel.exists()
+    installed = subprocess.run(
+        [str(environment / "bin" / "example-demo")],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert installed.returncode == 0
     assert store.resolve_locked("example/demo") == lock
 
 
@@ -687,22 +748,31 @@ def test_cache_swap_after_inspection_is_rejected_by_manifest_hash_boundary(
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, {"example_demo-0.1.0-py3-none-any.whl": wheel})
-    monkeypatch.setattr("venv.EnvBuilder._setup_pip", lambda _self, _context: None)
     declared_digest = hashlib.sha256(wheel).hexdigest()
 
+    def create_environment(
+        environments: int,
+        temporary: str,
+        *,
+        environment: Mapping[str, str],
+        cwd: Path,
+    ) -> None:
+        del environment, cwd
+        (_descriptor_path(environments) / temporary / "bin").mkdir()
+
     def reject_swapped_cache(
+        environment_descriptor: int,
         arguments: list[str],
         *,
-        check: bool,
-        capture_output: bool,
-        text: bool,
         cwd: Path,
-        env: dict[str, str],
-    ) -> SimpleNamespace:
-        del check, capture_output, text, cwd, env
+        environment: Mapping[str, str],
+    ) -> None:
+        del cwd, environment
         if arguments[-2:] == ["-m", "ensurepip"]:
-            return SimpleNamespace(returncode=0)
-        requirements = Path(arguments[-1]).read_text(encoding="utf-8")
+            return
+        requirements = (_descriptor_path(environment_descriptor) / arguments[-1]).read_text(
+            encoding="utf-8"
+        )
         wheel_url, declared = requirements.strip().split(" --hash=sha256:", 1)
         cached = Path(wheel_url.removeprefix("file://"))
         cached.write_bytes(b"replaced after semantic inspection")
@@ -710,7 +780,8 @@ def test_cache_swap_after_inspection_is_rejected_by_manifest_hash_boundary(
         assert hashlib.sha256(cached.read_bytes()).hexdigest() != declared
         raise subprocess.CalledProcessError(1, arguments, stderr="hash mismatch")
 
-    monkeypatch.setattr("sanka.runtime.extensions.store.subprocess.run", reject_swapped_cache)
+    monkeypatch.setattr(extension_store, "_create_venv", create_environment)
+    monkeypatch.setattr(extension_store, "_run_venv_python", reject_swapped_cache)
 
     with pytest.raises(ExtensionError) as raised:
         store.add_extension("example/demo")
@@ -1168,6 +1239,150 @@ def test_environment_delete_stays_on_opened_parent_during_component_swap(
     assert not (original_environments / locked.artifact_digest).exists()
 
 
+def test_environment_materialization_parent_swap_cannot_redirect_children_or_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "user")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    manifest = load_marketplace(store.marketplaces()[0].snapshot_root)[0]
+    _responses(monkeypatch, {manifest.wheels[0].name: wheel})
+    original_create = extension_store._create_venv
+    environments = store.user_root / "environments"
+    original_environments = store.user_root / "original-environments"
+    outside = tmp_path / "outside-environments"
+    outside.mkdir()
+    outside_child = tmp_path / "outside-child-ran"
+    original_child = tmp_path / "original-child-ran"
+    outside_temporary: Path | None = None
+
+    def write_child(path: Path, marker: Path) -> None:
+        path.unlink(missing_ok=True)
+        path.write_text(
+            f"#!{sys.executable}\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            f"Path({str(marker)!r}).touch()\n"
+            "if sys.argv[sys.argv.index('-m') + 1] == 'pip':\n"
+            "    script = Path.cwd() / 'bin' / 'example-demo'\n"
+            "    script.write_text('#!/bin/sh\\nexit 0\\n', encoding='utf-8')\n"
+            "    script.chmod(0o755)\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def swap_after_create(
+        environment_descriptor: int,
+        temporary_name: str,
+        *,
+        environment: Mapping[str, str],
+        cwd: Path,
+    ) -> None:
+        nonlocal outside_temporary
+        original_create(
+            environment_descriptor,
+            temporary_name,
+            environment=environment,
+            cwd=cwd,
+        )
+        temporary = _descriptor_path(environment_descriptor) / temporary_name
+        write_child(temporary / "bin" / "python", original_child)
+        environments.rename(original_environments)
+        environments.symlink_to(outside, target_is_directory=True)
+        outside_temporary = outside / temporary.name
+        (outside_temporary / "bin").mkdir(parents=True)
+        write_child(outside_temporary / "bin" / "python", outside_child)
+
+    monkeypatch.setattr(extension_store, "_create_venv", swap_after_create)
+
+    raised: ExtensionError | None = None
+    try:
+        store.add_extension("example/demo")
+    except ExtensionError as error:
+        raised = error
+
+    assert not outside_child.exists()
+    assert not original_child.exists()
+    assert outside_temporary is not None and outside_temporary.is_dir()
+    assert raised is not None and raised.code == "SANKA_EXTENSION_PATH"
+    assert not any(original_environments.glob("environment-*"))
+
+
+def test_descriptor_close_failure_preserves_primary_extension_error_and_closes_fd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "store"
+    root.mkdir()
+    original_open = os.open
+    original_close = os.close
+    opened: list[int] = []
+    injected = False
+
+    def tracking_open(path: str | bytes | Path, flags: int, *args: object, **kwargs: object) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+        opened.append(descriptor)
+        return descriptor
+
+    def failing_close(descriptor: int) -> None:
+        nonlocal injected
+        original_close(descriptor)
+        if not injected:
+            injected = True
+            raise OSError("injected close failure")
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "close", failing_close)
+
+    with (
+        pytest.raises(ExtensionError) as raised,
+        _parent_descriptor(root, root / "state.json"),
+    ):
+        raise ExtensionError("SANKA_PRIMARY", "primary failure")
+
+    assert raised.value.code == "SANKA_PRIMARY"
+    assert injected
+    for descriptor in opened:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
+def test_parent_handoff_close_failure_closes_new_child_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "store"
+    (root / "state").mkdir(parents=True)
+    original_open = os.open
+    original_close = os.close
+    opened: list[int] = []
+    injected = False
+
+    def tracking_open(path: str | bytes | Path, flags: int, *args: object, **kwargs: object) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+        opened.append(descriptor)
+        return descriptor
+
+    def failing_close(descriptor: int) -> None:
+        nonlocal injected
+        original_close(descriptor)
+        if not injected:
+            injected = True
+            raise OSError("injected handoff close failure")
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "close", failing_close)
+
+    with (
+        pytest.raises(OSError, match="injected handoff close failure"),
+        _parent_descriptor(root, root / "state" / "value.json"),
+    ):
+        pass
+
+    assert len(opened) == 2
+    for descriptor in opened:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
 def test_wheel_delete_stays_on_opened_parent_during_component_swap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1233,20 +1448,21 @@ def test_late_environment_filesystem_failure_is_one_clean_cli_json_error(
     store.add_marketplace(source, name="fixtures", trust=True)
     manifest = load_marketplace(store.marketplaces()[0].snapshot_root)[0]
     _responses(monkeypatch, {manifest.wheels[0].name: wheel})
-    original_mkdtemp = tempfile.mkdtemp
+    original_mkdir = os.mkdir
 
     def fail_late_environment(
-        suffix: str | None = None,
-        prefix: str | None = None,
-        dir: str | os.PathLike[str] | None = None,
-    ) -> str:
-        if prefix == "environment-":
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        if isinstance(path, str) and path.startswith("environment-") and dir_fd is not None:
             raise PermissionError("late environment allocation denied")
-        return original_mkdtemp(suffix=suffix, prefix=prefix, dir=dir)
+        original_mkdir(path, mode, dir_fd=dir_fd)
 
     monkeypatch.chdir(store.project_root)
     monkeypatch.setattr(cli, "ExtensionStore", lambda _root: store)
-    monkeypatch.setattr(tempfile, "mkdtemp", fail_late_environment)
+    monkeypatch.setattr(os, "mkdir", fail_late_environment)
 
     assert main(["extension", "add", "example/demo", "--json"]) == 1
 

@@ -10,6 +10,7 @@ import re
 import stat
 import tomllib
 from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 from urllib.parse import urlparse
@@ -411,9 +412,11 @@ def _parse_matcher(value: Any, code: str, path: Path) -> Matcher:
     return Matcher(kind, matcher_value)
 
 
-def _load_json(path: Path, code: str) -> dict[str, Any]:
+def _load_json(path: Path, code: str, *, data: bytes | None = None) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            path.read_text(encoding="utf-8") if data is None else data.decode("utf-8")
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         _invalid(code, path, str(error))
     if not isinstance(payload, dict):
@@ -421,10 +424,10 @@ def _load_json(path: Path, code: str) -> dict[str, Any]:
     return payload
 
 
-def _load_manifest(path: Path, marketplace: str) -> Manifest:
+def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -> Manifest:
     code = "SANKA_EXTENSION_MANIFEST_INVALID"
     payload = _object(
-        _load_json(path, code),
+        _load_json(path, code, data=data),
         {
             "commands",
             "distribution",
@@ -563,20 +566,81 @@ def _confined_marketplace_path(root: Path, candidate: Path, display: str) -> Pat
     return resolved
 
 
-def load_marketplace(snapshot_root: Path) -> tuple[Manifest, ...]:
-    """Load one immutable marketplace snapshot with strict path confinement."""
+def _descriptor_bytes(
+    root_descriptor: int, relative: PurePosixPath, path: Path, code: str
+) -> bytes:
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or any(part in {"", ".", ".."} or "\\" in part for part in relative.parts)
+    ):
+        _invalid(code, path, "marketplace path is not confined to its snapshot")
+    parent = root_descriptor
+    opened: list[int] = []
     try:
-        root = snapshot_root.resolve()
-    except (OSError, RuntimeError, ValueError) as error:
-        raise ExtensionError(
-            "SANKA_MARKETPLACE_PATH_INVALID",
-            "Marketplace snapshot root cannot be resolved",
-            details={"path": snapshot_root.as_posix()},
-        ) from error
+        for part in relative.parts[:-1]:
+            parent = os.open(
+                part,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent,
+            )
+            opened.append(parent)
+        descriptor = os.open(
+            relative.parts[-1],
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent,
+        )
+        try:
+            status = os.fstat(descriptor)
+            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+                _invalid(code, path, "marketplace document must be one regular file")
+            with os.fdopen(descriptor, "rb", closefd=False) as source:
+                return source.read()
+        finally:
+            with suppress(OSError):
+                os.close(descriptor)
+    except ExtensionError:
+        raise
+    except OSError as error:
+        _invalid(code, path, str(error))
+    finally:
+        for descriptor in reversed(opened):
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def load_marketplace(
+    snapshot_root: Path, *, root_descriptor: int | None = None
+) -> tuple[Manifest, ...]:
+    """Load one immutable marketplace snapshot with strict path confinement."""
     code = "SANKA_MARKETPLACE_INVALID"
-    catalog_path = _confined_marketplace_path(root, root / "marketplace.json", "marketplace.json")
+    if root_descriptor is None:
+        try:
+            root = snapshot_root.resolve()
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ExtensionError(
+                "SANKA_MARKETPLACE_PATH_INVALID",
+                "Marketplace snapshot root cannot be resolved",
+                details={"path": snapshot_root.as_posix()},
+            ) from error
+        catalog_path = _confined_marketplace_path(
+            root, root / "marketplace.json", "marketplace.json"
+        )
+        catalog_data = None
+    else:
+        root = snapshot_root
+        catalog_path = root / "marketplace.json"
+        catalog_data = _descriptor_bytes(
+            root_descriptor,
+            PurePosixPath("marketplace.json"),
+            catalog_path,
+            code,
+        )
     catalog = _object(
-        _load_json(catalog_path, code),
+        _load_json(catalog_path, code, data=catalog_data),
         {"extensions", "schema_version"},
         code,
         catalog_path,
@@ -598,8 +662,14 @@ def load_marketplace(snapshot_root: Path) -> tuple[Manifest, ...]:
         if extension_id in seen:
             _invalid(code, catalog_path, "catalog extension ids must be unique")
         seen.add(extension_id)
-        candidate = _confined_marketplace_path(root, root / manifest_name, manifest_name)
-        manifest = _load_manifest(candidate, snapshot_root.name)
+        if root_descriptor is None:
+            candidate = _confined_marketplace_path(root, root / manifest_name, manifest_name)
+            manifest_data = None
+        else:
+            relative = PurePosixPath(manifest_name)
+            candidate = root / relative
+            manifest_data = _descriptor_bytes(root_descriptor, relative, candidate, code)
+        manifest = _load_manifest(candidate, snapshot_root.name, data=manifest_data)
         if manifest.id != extension_id:
             _invalid(code, catalog_path, "catalog and manifest extension ids differ")
         manifests.append(manifest)
