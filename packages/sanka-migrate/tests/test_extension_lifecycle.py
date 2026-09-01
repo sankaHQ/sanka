@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -26,6 +27,7 @@ def _lock(*, digest: str = "3" * 64) -> LockEntry:
         artifact_digest=digest,
         protocol_version="sanka-extension/v1",
         executable="sanka-extension-drf-to-fastapi",
+        commands=("apply", "plan", "scan", "test", "verify"),
         enabled=True,
         configuration_digest="sha256:" + "4" * 64,
     )
@@ -50,6 +52,8 @@ class FakeStore:
                 id=self.lock.id,
                 version=self.lock.version,
                 marketplace="official",
+                marketplace_identity=self.lock.marketplace_identity,
+                commands=self.lock.commands,
                 targets=("fastapi",),
                 evidence=(),
                 status=status,
@@ -75,6 +79,7 @@ class FakeStore:
 class FakeRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[LockEntry, dict[str, Any]]] = []
+        self.explicit_env_names: list[tuple[str, ...]] = []
         self.required_inputs: list[str] = []
 
     def run(
@@ -86,6 +91,7 @@ class FakeRunner:
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
         self.calls.append((lock, request))
+        self.explicit_env_names.append(explicit_env_names)
         if request["command"] == "plan" and self.required_inputs:
             missing = [
                 name for name in self.required_inputs if name not in request["configuration"]
@@ -222,6 +228,156 @@ def test_plan_selects_target_and_binds_a_generic_core_plan(tmp_path: Path) -> No
     assert plan["plan_hash"].startswith("sha256:")
 
 
+def test_plan_auto_scan_receives_the_normalized_configuration_and_explicit_environment(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+
+    _lifecycle(project, FakeStore(installed=True), runner).plan(
+        target="fastapi",
+        configuration={"settings_module": "config.settings"},
+        explicit_env_names=("DJANGO_SECRET_KEY",),
+    )
+
+    assert [call[1]["command"] for call in runner.calls[:2]] == ["scan", "plan"]
+    assert runner.calls[0][1]["configuration"] == {"settings_module": "config.settings"}
+    assert runner.explicit_env_names[0] == ("DJANGO_SECRET_KEY",)
+
+
+def test_scan_dispatches_every_scan_capable_lock_under_its_exact_identity(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    locks = {
+        "a/one": replace(
+            _lock(),
+            id="a/one",
+            marketplace_identity="marketplace-a",
+            manifest_digest="sha256:" + "a" * 64,
+        ),
+        "b/two": replace(
+            _lock(),
+            id="b/two",
+            marketplace_identity="marketplace-b",
+            manifest_digest="sha256:" + "b" * 64,
+        ),
+        "c/plan-only": replace(
+            _lock(),
+            id="c/plan-only",
+            marketplace_identity="marketplace-c",
+            manifest_digest="sha256:" + "c" * 64,
+        ),
+    }
+    recommendations = tuple(
+        SimpleNamespace(
+            id=extension_id,
+            version=lock.version,
+            marketplace=lock.marketplace_identity,
+            marketplace_identity=lock.marketplace_identity,
+            commands=("plan",) if extension_id == "c/plan-only" else ("plan", "scan"),
+            targets=("fastapi",),
+            evidence=(),
+            status=("available", "installed", "locked"),
+            add_command=f"sanka-migrate extension add {extension_id}",
+        )
+        for extension_id, lock in locks.items()
+    )
+
+    class Store:
+        def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
+            return cast(tuple[Recommendation, ...], recommendations)
+
+        def resolve_locked(self, extension_id: str) -> LockEntry:
+            return locks[extension_id]
+
+    runner = FakeRunner()
+    result = _lifecycle(project, cast(FakeStore, Store()), runner).scan()
+
+    assert [lock.id for lock, _request in runner.calls] == ["a/one", "b/two"]
+    assert result.data["extensions"] == [
+        {"data": {"extension_command": "scan"}, "extension": locks["a/one"].to_dict()},
+        {"data": {"extension_command": "scan"}, "extension": locks["b/two"].to_dict()},
+    ]
+    assert "extension" not in result.data
+    assert "extension_command" not in result.data
+
+
+def test_interactive_install_selects_the_exact_colliding_marketplace_recommendation(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+
+    class Store:
+        installed_marketplace: str | None = None
+
+        def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
+            values = []
+            for name, identity in (
+                ("one", "marketplace-one"),
+                ("two", "marketplace-two"),
+            ):
+                status = (
+                    ("available", "installed", "locked")
+                    if identity == self.installed_marketplace
+                    else ("available",)
+                )
+                values.append(
+                    SimpleNamespace(
+                        id="vendor/demo",
+                        version="1.0.0",
+                        marketplace=name,
+                        marketplace_identity=identity,
+                        commands=("scan",),
+                        targets=("fastapi",),
+                        evidence=(),
+                        status=status,
+                        add_command="sanka-migrate extension add vendor/demo",
+                    )
+                )
+            return cast(tuple[Recommendation, ...], tuple(values))
+
+        def add_extension(self, extension_id: str, *, marketplace: str) -> LockEntry:
+            assert extension_id == "vendor/demo"
+            self.installed_marketplace = marketplace
+            return replace(
+                _lock(),
+                id=extension_id,
+                version="1.0.0",
+                marketplace_identity=marketplace,
+            )
+
+        def resolve_locked(self, extension_id: str) -> LockEntry:
+            assert self.installed_marketplace is not None
+            return replace(
+                _lock(),
+                id=extension_id,
+                version="1.0.0",
+                marketplace_identity=self.installed_marketplace,
+            )
+
+    store = Store()
+
+    def choose(_label: str, choices: tuple[str, ...] | None = None) -> str:
+        assert choices == (
+            "decline",
+            "vendor/demo (marketplace-one)",
+            "vendor/demo (marketplace-two)",
+        )
+        return choices[2]
+
+    result = _lifecycle(
+        project,
+        cast(FakeStore, store),
+        FakeRunner(),
+        interactive=True,
+        prompt=choose,
+    ).scan()
+
+    assert result.outcome == "success"
+    assert store.installed_marketplace == "marketplace-two"
+
+
 def test_plan_requires_a_target_outside_a_tty(tmp_path: Path) -> None:
     project = _project(tmp_path)
     lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
@@ -335,6 +491,11 @@ def test_store_recommendations_keep_verified_marketplace_identity(tmp_path: Path
 
     recommendations = store.recommendations(fingerprint_repository(project))
 
-    assert [(item.id, item.marketplace) for item in recommendations] == [
-        ("sanka/drf-to-fastapi", "fixtures")
+    assert [(item.id, item.marketplace, item.commands) for item in recommendations] == [
+        (
+            "sanka/drf-to-fastapi",
+            "fixtures",
+            ("apply", "plan", "scan", "test", "verify"),
+        )
     ]
+    assert recommendations[0].marketplace_identity.startswith("local:")

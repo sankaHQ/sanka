@@ -12,6 +12,7 @@ import pytest
 import sanka.cli as cli
 from sanka.cli import _build_parser, main
 from sanka.cli._output import TerminalOutput
+from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions.runner import ExtensionResult
 
 
@@ -93,6 +94,73 @@ def test_generic_extension_configuration_reaches_the_application_lifecycle(
         "target": "flask",
     }
     assert "\033[" not in output.out + output.err
+
+
+def test_clean_root_plan_selects_the_application_lifecycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    called = False
+
+    class Lifecycle:
+        def __init__(self, _root: Path, **_kwargs: object) -> None:
+            pass
+
+        def plan(self, **_kwargs: object) -> ExtensionResult:
+            nonlocal called
+            called = True
+            return ExtensionResult("success", {"plan_hash": "sha256:core"}, (), (), (), None)
+
+    monkeypatch.setattr(cli, "ApplicationLifecycle", Lifecycle)
+
+    assert main(["plan", str(tmp_path), "--json"]) == 0
+    assert called is True
+    assert json.loads(capsys.readouterr().out)["data"]["plan_hash"] == "sha256:core"
+
+
+def test_missing_non_interactive_target_is_a_structured_usage_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Lifecycle:
+        def __init__(self, _root: Path, **_kwargs: object) -> None:
+            pass
+
+        def plan(self, **_kwargs: object) -> ExtensionResult:
+            raise ExtensionError(
+                "SANKA_EXTENSION_TARGET_REQUIRED",
+                "target required",
+                details={"targets": ["fastapi", "flask"]},
+            )
+
+    monkeypatch.setattr(cli, "ApplicationLifecycle", Lifecycle)
+
+    assert main(["plan", str(tmp_path), "--to", "fastapi", "--json"]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "error"
+    assert payload["migration_state"] == "not_started"
+    assert payload["data"]["error"] == {
+        "code": "SANKA_EXTENSION_TARGET_REQUIRED",
+        "details": {"targets": ["fastapi", "flask"]},
+        "message": "target required",
+    }
+
+
+def test_real_install_prompt_declines_by_default_and_preserves_selected_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    choices = (
+        "decline",
+        "vendor/demo (marketplace-one)",
+        "vendor/demo (marketplace-two)",
+    )
+    answers = iter(["", "3"])
+    monkeypatch.setattr("builtins.input", lambda _label: next(answers))
+
+    assert cli._lifecycle_prompt("Choose an extension to install", choices) == "decline"
+    assert cli._lifecycle_prompt("Choose an extension to install", choices) == choices[2]
 
 
 def test_extension_config_requires_a_json_object(capsys: pytest.CaptureFixture[str]) -> None:

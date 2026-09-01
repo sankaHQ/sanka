@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from sanka.runtime.__about__ import __version__
 from sanka.runtime.extensions.model import (
+    LIFECYCLE_COMMANDS,
     ExtensionError,
     Fingerprint,
     Manifest,
@@ -44,7 +45,6 @@ LANGUAGES = {
 MATCHER_KINDS = frozenset(
     {"dependency", "file", "file_suffix", "framework", "language", "static_import"}
 )
-COMMANDS = frozenset({"apply", "plan", "scan", "test", "verify"})
 STATUS_ORDER = (
     "available",
     "installed",
@@ -471,7 +471,7 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
         _invalid(code, path, "distribution metadata is invalid or version is not exact")
 
     commands = _string_list(payload["commands"], code=code, path=path, label="commands")
-    if not set(commands).issubset(COMMANDS):
+    if not set(commands).issubset(LIFECYCLE_COMMANDS):
         _invalid(code, path, "manifest contains an unsupported command")
     targets = _string_list(payload["targets"], code=code, path=path, label="targets")
     if any(IDENTIFIER.fullmatch(target) is None for target in targets):
@@ -741,6 +741,8 @@ def recommend(
                 id=manifest.id,
                 version=manifest.version,
                 marketplace=manifest.marketplace,
+                marketplace_identity=manifest.marketplace,
+                commands=manifest.commands,
                 targets=manifest.targets,
                 evidence=tuple(
                     sorted(selected, key=lambda item: (item.kind, item.value, item.path))

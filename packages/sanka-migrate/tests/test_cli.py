@@ -320,6 +320,28 @@ def test_spec_lifecycle_uses_the_versioned_json_contract(
     assert verified["data"]["ok"] is True
 
 
+def test_explicit_data_spec_wins_over_application_artifacts_for_all_shared_commands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _spec_file_path, _db, base = _spec_file(tmp_path)
+    root = tmp_path / "application"
+    artifact_root = root / ".sanka"
+    artifact_root.mkdir(parents=True)
+
+    assert main(["plan", str(root), "--json", *base]) == 0
+    first_plan = json.loads(capsys.readouterr().out)
+    plan_hash = first_plan["data"]["plan_hash"]
+    (artifact_root / "scan.json").write_text("{}", encoding="utf-8")
+    (artifact_root / "plan.json").write_text("{}", encoding="utf-8")
+
+    assert main(["plan", str(root), "--json", *base]) == 0
+    assert json.loads(capsys.readouterr().out)["migration_state"] == "planned"
+    assert main(["apply", "--root", str(root), "--json", *base, "--plan-hash", plan_hash]) == 0
+    assert json.loads(capsys.readouterr().out)["migration_state"] == "applied_not_verified"
+    assert main(["verify", str(root), "--json", *base]) == 0
+    assert json.loads(capsys.readouterr().out)["migration_state"] == "verified_within_scope"
+
+
 def test_validate_help_lists_its_flags(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["validate", "--help"])

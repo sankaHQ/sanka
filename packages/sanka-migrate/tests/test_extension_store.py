@@ -910,13 +910,14 @@ def test_lock_json_is_atomic_sorted_and_has_exact_entry_fields(
         ("distribution", "other-distribution", "SANKA_EXTENSION_IDENTITY"),
         ("protocol_version", "sanka-extension/v0", "SANKA_EXTENSION_LOCK_INVALID"),
         ("executable", "other-executable", "SANKA_EXTENSION_IDENTITY"),
+        ("commands", ["apply"], "SANKA_EXTENSION_IDENTITY"),
     ],
 )
 def test_resolve_rejects_manifest_derived_lock_field_tampering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     field: str,
-    value: str,
+    value: object,
     code: str,
 ) -> None:
     store, _source, _wheel_bytes = _configured_store(tmp_path, monkeypatch)

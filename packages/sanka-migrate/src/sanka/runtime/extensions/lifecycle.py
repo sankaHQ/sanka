@@ -62,6 +62,8 @@ def _recommendation(value: Recommendation) -> dict[str, Any]:
         "evidence": [_evidence(item) for item in value.evidence],
         "id": value.id,
         "marketplace": value.marketplace,
+        "marketplace_identity": value.marketplace_identity,
+        "commands": list(value.commands),
         "status": list(value.status),
         "targets": list(value.targets),
         "version": value.version,
@@ -250,7 +252,7 @@ class ApplicationLifecycle:
         )
         if default is not None:
             try:
-                self.store.add_extension(default.id, marketplace=default.marketplace)
+                self.store.add_extension(default.id, marketplace=default.marketplace_identity)
             except ExtensionError as error:
                 if error.code != "SANKA_EXTENSION_NOT_CACHED":
                     raise
@@ -258,19 +260,21 @@ class ApplicationLifecycle:
                 recommendations = self._recommendations(fingerprint)
                 if self._enabled(recommendations):
                     return recommendations
-        selected = self._prompt(
-            "Choose an extension to install",
-            tuple(item.id for item in recommendations if "incompatible" not in item.status),
-        )
-        if selected:
-            chosen = next((item for item in recommendations if item.id == selected), None)
+        eligible = tuple(item for item in recommendations if "incompatible" not in item.status)
+        labels = tuple(f"{item.id} ({item.marketplace_identity})" for item in eligible)
+        selected = self._prompt("Choose an extension to install", ("decline", *labels))
+        if selected and selected != "decline":
+            chosen = next(
+                (item for item, label in zip(eligible, labels, strict=True) if label == selected),
+                None,
+            )
             if chosen is None:
                 _error(
                     "SANKA_EXTENSION_SELECTION_INVALID",
                     "Selected extension is not one of the recommendations",
-                    extension_id=selected,
+                    selection=selected,
                 )
-            self.store.add_extension(chosen.id, marketplace=chosen.marketplace)
+            self.store.add_extension(chosen.id, marketplace=chosen.marketplace_identity)
             recommendations = self._recommendations(fingerprint)
             if self._enabled(recommendations):
                 return recommendations
@@ -344,10 +348,18 @@ class ApplicationLifecycle:
             self._recommendations(fingerprint),
         )
         enabled = self._enabled(recommendations)
-        extension_result: ExtensionResult | None = None
-        if enabled:
-            lock = self.store.resolve_locked(enabled[0].id)
-            normalized = _normalized_json_object(configuration)
+        normalized = _normalized_json_object(configuration)
+        extension_results: list[tuple[LockEntry, ExtensionResult]] = []
+        for recommendation in enabled:
+            if "scan" not in recommendation.commands:
+                continue
+            lock = self.store.resolve_locked(recommendation.id)
+            if lock.marketplace_identity != recommendation.marketplace_identity:
+                _error(
+                    "SANKA_EXTENSION_IDENTITY",
+                    "Resolved extension does not match its recommendation",
+                    extension_id=lock.id,
+                )
             request = self._request(lock, "scan", fingerprint, normalized)
             extension_root = Path(request["artifact_root"])
             extension_result = self.runner.run(
@@ -358,8 +370,16 @@ class ApplicationLifecycle:
             )
             if extension_result.outcome != "success":
                 self._raise_failure(extension_result)
-        data: dict[str, Any] = dict(extension_result.data if extension_result else {})
-        if extension_result is not None:
+            extension_results.append((lock, extension_result))
+        data: dict[str, Any] = {
+            "extensions": [
+                {"data": result.data, "extension": lock.to_dict()}
+                for lock, result in extension_results
+            ]
+        }
+        if len(extension_results) == 1:
+            extension_result = extension_results[0][1]
+            data.update(extension_result.data)
             data["extension"] = extension_result.data
         data["fingerprint"] = _fingerprint(fingerprint)
         data["recommendations"] = [_recommendation(item) for item in recommendations]
@@ -368,22 +388,41 @@ class ApplicationLifecycle:
         return ExtensionResult(
             outcome="success",
             data=data,
-            artifacts=(str(scan_path),) + (extension_result.artifacts if extension_result else ()),
-            limitations=extension_result.limitations if extension_result else (),
-            next_actions=extension_result.next_actions if extension_result else (),
+            artifacts=(
+                str(scan_path),
+                *(artifact for _lock, result in extension_results for artifact in result.artifacts),
+            ),
+            limitations=tuple(
+                limitation
+                for _lock, result in extension_results
+                for limitation in result.limitations
+            ),
+            next_actions=tuple(
+                action for _lock, result in extension_results for action in result.next_actions
+            ),
             error=None,
         )
 
-    def _current_scan(self) -> tuple[Fingerprint, tuple[Recommendation, ...]]:
+    def _current_scan(
+        self,
+        configuration: Mapping[str, Any] | None,
+        explicit_env_names: tuple[str, ...],
+    ) -> tuple[Fingerprint, tuple[Recommendation, ...]]:
         fingerprint = fingerprint_repository(self.project_root)
         try:
             scan = _read_json(self.artifact_root / "scan.json", SCAN_SCHEMA)
         except ExtensionError:
-            self.scan()
+            self.scan(
+                configuration=configuration,
+                explicit_env_names=explicit_env_names,
+            )
         else:
             saved = scan.get("fingerprint")
             if not isinstance(saved, dict) or saved.get("hash") != fingerprint.hash:
-                self.scan()
+                self.scan(
+                    configuration=configuration,
+                    explicit_env_names=explicit_env_names,
+                )
         return fingerprint, self._recommendations(fingerprint)
 
     def plan(
@@ -393,7 +432,11 @@ class ApplicationLifecycle:
         configuration: Mapping[str, Any] | None = None,
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
-        fingerprint, recommendations = self._current_scan()
+        normalized = _normalized_json_object(configuration)
+        fingerprint, recommendations = self._current_scan(
+            normalized,
+            explicit_env_names,
+        )
         enabled = self._enabled(recommendations)
         targets = tuple(sorted({target for item in enabled for target in item.targets}))
         selected_target = target or self._prompt("Choose a migration target", targets)
@@ -419,7 +462,6 @@ class ApplicationLifecycle:
                 extensions=[item.id for item in selected],
             )
         lock = self.store.resolve_locked(selected[0].id)
-        normalized = _normalized_json_object(configuration)
         request = self._request(lock, "plan", fingerprint, normalized)
         extension_root = Path(request["artifact_root"])
         seen_inputs: set[str] = set()

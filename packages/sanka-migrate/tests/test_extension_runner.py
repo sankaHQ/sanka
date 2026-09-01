@@ -5,6 +5,8 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -24,6 +26,7 @@ def _lock(executable: Path) -> LockEntry:
         artifact_digest="3" * 64,
         protocol_version="sanka-extension/v1",
         executable=str(executable),
+        commands=("apply", "plan", "scan", "test", "verify"),
         enabled=True,
         configuration_digest="sha256:" + "4" * 64,
     )
@@ -180,3 +183,24 @@ def test_runner_preserves_a_valid_structured_extension_failure(
         "message": "need input",
         "details": {"inputs": ["name"]},
     }
+
+
+def test_runner_rejects_a_command_missing_from_the_verified_manifest_before_launch(
+    tmp_path: Path,
+    fake_extension: Path,
+) -> None:
+    request = _request(tmp_path, "valid")
+    request["command"] = "apply"
+    base = _lock(fake_extension)
+    lock = cast(LockEntry, SimpleNamespace(**{**vars(base), "commands": ("scan",)}))
+
+    with pytest.raises(ExtensionError) as raised:
+        ExtensionRunner().run(
+            lock,
+            request,
+            allowed_roots=(_artifact_root(request),),
+        )
+
+    assert raised.value.code == "SANKA_EXTENSION_CAPABILITY_UNSUPPORTED"
+    assert raised.value.details == {"command": "apply", "commands": ["scan"]}
+    assert not (_artifact_root(request) / "result.json").exists()

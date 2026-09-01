@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+LIFECYCLE_COMMANDS = frozenset({"apply", "plan", "scan", "test", "verify"})
+
 
 class ExtensionError(RuntimeError):
     """An extension boundary failed with a stable machine-readable code."""
@@ -74,6 +76,8 @@ class Recommendation:
     id: str
     version: str
     marketplace: str
+    marketplace_identity: str
+    commands: tuple[str, ...]
     targets: tuple[str, ...]
     evidence: tuple[MatchedEvidence, ...]
     status: tuple[str, ...]

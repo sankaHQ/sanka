@@ -39,6 +39,7 @@ from sanka.runtime.extensions.discovery import (
     recommend,
 )
 from sanka.runtime.extensions.model import (
+    LIFECYCLE_COMMANDS,
     ExtensionError,
     Fingerprint,
     Manifest,
@@ -354,11 +355,12 @@ class LockEntry:
     artifact_digest: str
     protocol_version: str
     executable: str
+    commands: tuple[str, ...]
     enabled: bool
     configuration_digest: str
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return asdict(self) | {"commands": list(self.commands)}
 
 
 def _exact_path(
@@ -1598,16 +1600,27 @@ class ExtensionStore:
                     "Project extension lock entry is invalid",
                     path=str(path),
                 )
-            if any(
-                not isinstance(value[field], str) or not value[field]
-                for field in expected - {"enabled"}
-            ) or not isinstance(value["enabled"], bool):
+            string_fields = expected - {"commands", "enabled"}
+            if (
+                any(
+                    not isinstance(value[field], str) or not value[field] for field in string_fields
+                )
+                or not isinstance(value["commands"], list)
+                or not value["commands"]
+                or len(value["commands"]) != len(set(value["commands"]))
+                or any(
+                    not isinstance(command, str) or command not in LIFECYCLE_COMMANDS
+                    for command in value["commands"]
+                )
+                or value["commands"] != sorted(value["commands"])
+                or not isinstance(value["enabled"], bool)
+            ):
                 _error(
                     "SANKA_EXTENSION_LOCK_INVALID",
                     "Project extension lock fields are invalid",
                     path=str(path),
                 )
-            entry = LockEntry(**value)
+            entry = LockEntry(**{**value, "commands": tuple(value["commands"])})
             if (
                 not re.fullmatch(r"sha256:[0-9a-f]{64}", entry.manifest_digest)
                 or not re.fullmatch(r"[0-9a-f]{64}", entry.artifact_digest)
@@ -1729,8 +1742,20 @@ class ExtensionStore:
             if not matched:
                 continue
             record = records[(manifest.id, manifest.version, marketplace.identity)]
-            recommendations.append(replace(matched[0], status=record.status))
-        return tuple(sorted(recommendations, key=lambda item: (item.id, item.version)))
+            recommendations.append(
+                replace(
+                    matched[0],
+                    commands=manifest.commands,
+                    marketplace_identity=marketplace.identity,
+                    status=record.status,
+                )
+            )
+        return tuple(
+            sorted(
+                recommendations,
+                key=lambda item: (item.id, item.version, item.marketplace_identity),
+            )
+        )
 
     def _select(
         self, extension_id: str, marketplace: str | None
@@ -2324,6 +2349,7 @@ class ExtensionStore:
                 artifact_digest=artifact_digest,
                 protocol_version=manifest.protocol_version,
                 executable=manifest.executable,
+                commands=manifest.commands,
                 enabled=True,
                 configuration_digest=content_hash(dict(configuration or {})),
             )
@@ -2427,6 +2453,7 @@ class ExtensionStore:
                 (entry.distribution, manifest.distribution),
                 (entry.protocol_version, manifest.protocol_version),
                 (entry.executable, manifest.executable),
+                (entry.commands, manifest.commands),
             )
         ):
             _error(

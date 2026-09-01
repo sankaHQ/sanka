@@ -105,11 +105,20 @@ def main(argv: list[str] | None = None) -> int:
         return int(asyncio.run(args.handler(args)))
     except CliUsageError as error:
         return _print_cli_error(args, error, exit_code=2)
+    except ExtensionError as error:
+        return _print_cli_error(
+            args,
+            error,
+            exit_code=(
+                2
+                if args.command == "plan" and error.code == "SANKA_EXTENSION_TARGET_REQUIRED"
+                else 1
+            ),
+        )
     except (
         SpecError,
         UnknownConnectorError,
         ExecutionError,
-        ExtensionError,
         FileNotFoundError,
     ) as error:
         return _print_cli_error(args, error, exit_code=1)
@@ -742,11 +751,8 @@ def _application_lifecycle(args: argparse.Namespace) -> ApplicationLifecycle:
     )
 
 
-def _application_artifact_exists(root: str, artifact_dir: str, name: str) -> bool:
-    artifact = Path(artifact_dir)
-    if not artifact.is_absolute():
-        artifact = Path(root) / artifact
-    return (artifact / name).is_file()
+def _application_lifecycle_requested(args: argparse.Namespace) -> bool:
+    return args.file == DEFAULT_SPEC_FILE and not Path(args.file).is_file()
 
 
 def _print_application_result(
@@ -776,10 +782,7 @@ def _print_application_result(
 
 
 async def _cmd_plan(args: argparse.Namespace) -> int:
-    application_requested = args.to is not None or _application_artifact_exists(
-        args.root, args.artifact_dir, "scan.json"
-    )
-    if application_requested:
+    if _application_lifecycle_requested(args):
         result = _application_lifecycle(args).plan(
             target=args.to,
             configuration=_extension_configuration(args),
@@ -840,9 +843,7 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 async def _cmd_apply(args: argparse.Namespace) -> int:
-    if args.to is not None or _application_artifact_exists(
-        args.root, args.artifact_dir, "plan.json"
-    ):
+    if _application_lifecycle_requested(args):
         result = _application_lifecycle(args).apply(
             reviewed_plan_hash=args.plan_hash,
             configuration=_extension_configuration(args),
@@ -904,9 +905,7 @@ async def _cmd_test(args: argparse.Namespace) -> int:
 
 
 async def _cmd_verify(args: argparse.Namespace) -> int:
-    if args.to is not None or _application_artifact_exists(
-        args.root, args.artifact_dir, "plan.json"
-    ):
+    if _application_lifecycle_requested(args):
         result = _application_lifecycle(args).verify(
             configuration=_extension_configuration(args),
             explicit_env_names=tuple(args.extension_env),

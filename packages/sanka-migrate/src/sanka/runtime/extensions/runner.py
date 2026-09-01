@@ -14,11 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
-from sanka.runtime.extensions.model import ExtensionError
+from sanka.runtime.extensions.model import LIFECYCLE_COMMANDS, ExtensionError
 from sanka.runtime.extensions.store import DEFAULT_EXTENSION_ID, LockEntry, user_extension_root
 
 SCHEMA_VERSION = "sanka-extension/v1"
-COMMANDS = frozenset({"apply", "plan", "scan", "test", "verify"})
 SAFE_ENV = ("LANG", "LC_ALL", "PATH", "PYTHONUTF8", "TMPDIR", "VIRTUAL_ENV")
 ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MAX_PROCESS_OUTPUT = 4 * 1024 * 1024
@@ -134,8 +133,22 @@ class ExtensionRunner:
         if payload["schema_version"] != SCHEMA_VERSION:
             _error("SANKA_EXTENSION_PROTOCOL", "Unsupported extension request schema")
         command = _string(payload["command"], "command")
-        if command not in COMMANDS:
+        if command not in LIFECYCLE_COMMANDS:
             _error("SANKA_EXTENSION_PROTOCOL", "Unsupported extension command")
+        if (
+            not isinstance(lock.commands, tuple)
+            or not lock.commands
+            or tuple(sorted(set(lock.commands))) != lock.commands
+            or not set(lock.commands).issubset(LIFECYCLE_COMMANDS)
+        ):
+            _error("SANKA_EXTENSION_IDENTITY", "Extension lock capabilities are invalid")
+        if command not in lock.commands:
+            _error(
+                "SANKA_EXTENSION_CAPABILITY_UNSUPPORTED",
+                "Locked extension does not advertise the requested command",
+                command=command,
+                commands=list(lock.commands),
+            )
         extension = _object(payload["extension"], "extension", {"id", "version", "manifest_digest"})
         identity = (
             extension["id"],
