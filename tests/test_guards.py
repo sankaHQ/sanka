@@ -9,6 +9,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from scripts import check_public_naming
 from scripts.check_license_headers import expected_license
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -164,6 +165,19 @@ def test_license_headers_pass_on_repo() -> None:
 def test_public_naming_passes_on_repo() -> None:
     result = _run("check_public_naming.py")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_public_naming_finds_mixed_case_retired_names(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    active_file = tmp_path / "active.md"
+    active_file.write_text("Retired name: " + "FER" + "RY" + "\n", encoding="utf-8")
+    monkeypatch.setattr(check_public_naming, "ROOT", tmp_path)
+
+    assert check_public_naming._tree_references(check_public_naming.RETIRED_TOKEN) == [
+        "content: active.md"
+    ]
 
 
 def test_dependency_licenses_pass_on_workspace() -> None:

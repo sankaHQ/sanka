@@ -37,8 +37,9 @@ def _load(path: Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
-def _tree_references(token: str) -> list[str]:
+def _tree_references(token: str, *, case_sensitive: bool = False) -> list[str]:
     references: list[str] = []
+    content_token = token if case_sensitive else token.lower()
     for path in ROOT.rglob("*"):
         relative = path.relative_to(ROOT)
         if any(part in IGNORED_PARTS for part in relative.parts):
@@ -51,7 +52,8 @@ def _tree_references(token: str) -> list[str]:
             content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if token in content:
+        content_to_scan = content if case_sensitive else content.lower()
+        if content_token in content_to_scan:
             references.append(f"content: {relative}")
     return references
 
@@ -69,7 +71,7 @@ def main() -> int:
             "retired project name remains in the public source tree: "
             + ", ".join(retired_references)
         )
-    legacy_display_references = _tree_references(LEGACY_DISPLAY_TOKEN)
+    legacy_display_references = _tree_references(LEGACY_DISPLAY_TOKEN, case_sensitive=True)
     if legacy_display_references:
         errors.append(
             "legacy display name remains in the public source tree: "

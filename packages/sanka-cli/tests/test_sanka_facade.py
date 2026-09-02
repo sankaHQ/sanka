@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import sqlite3
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 import pytest
 
 import sanka
 import sanka.runtime
+import sanka_cli
+import sanka_cli.mcp
 from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.registry import ConnectorRegistry
@@ -25,8 +28,18 @@ def _status(migration: sanka.Migration) -> RunStatus:
     return migration.status
 
 
+def test_public_facade_version_matches_unified_distribution() -> None:
+    assert (
+        sanka.__version__
+        == sanka.runtime.__version__
+        == sanka_cli.__version__
+        == sanka_cli.mcp.__version__
+        == distribution_version("sanka-cli")
+        == "0.2.0"
+    )
+
+
 def test_public_facade_exports_runtime_types() -> None:
-    assert sanka.__version__ == sanka.runtime.__version__
     assert sanka.MigrationPlan.__module__ == "sanka.runtime.planner"
     assert sanka.MigrationSpec.__module__ == "sanka.runtime.spec"
     assert sanka.ExecutionError.__module__ == "sanka.runtime.engine"
