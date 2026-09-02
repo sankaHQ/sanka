@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """``sanka code`` command behaviour, against a recording fake of the public API."""
 
 from __future__ import annotations

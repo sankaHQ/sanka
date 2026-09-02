@@ -40,6 +40,27 @@ def test_unified_package_license_zones() -> None:
     )
 
 
+def test_base_cli_import_registers_mcp_without_loading_extra() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "from sanka_cli.main import cli; "
+                "assert 'mcp' in cli.commands; "
+                "assert 'mcp' not in sys.modules; "
+                "assert 'sanka_cli.mcp.server' not in sys.modules"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_connector_sdk_sync_accepts_identical_python_trees(tmp_path: Path) -> None:
     canonical = tmp_path / "canonical"
     embedded = tmp_path / "packages" / "sanka-cli" / "src" / "sanka_connector"

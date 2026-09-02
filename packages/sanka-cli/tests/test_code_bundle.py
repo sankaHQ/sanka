@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
 """Bundling for ``sanka code``.
 
 Determinism carries the most weight here. The server stores versions content-addressed,

@@ -50,6 +50,19 @@ attach_resource_group(cli, "tickets", "/v2/public/tickets")
 register_migration_passthroughs(cli)
 
 
+@cli.command("mcp")
+def mcp_command() -> None:
+    try:
+        from sanka_cli.mcp.server import main
+    except ModuleNotFoundError as error:
+        if error.name == "mcp":
+            raise click.ClickException(
+                "Install MCP support with: uv tool install 'sanka-cli[mcp]'"
+            ) from error
+        raise
+    main()
+
+
 def main() -> None:
     try:
         cli(standalone_mode=False)
