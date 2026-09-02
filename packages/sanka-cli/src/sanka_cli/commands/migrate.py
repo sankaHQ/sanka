@@ -82,12 +82,8 @@ def _build_hybrid(name: str, help_text: str) -> click.Command:
             "help_option_names": [],
         },
     )
-    @click.option(
-        "--program", "program_id", default=None, help="Sanka Cloud Program ID."
-    )
-    @click.option(
-        "--migration", "migration_id", default=None, help="Cloud migration ID."
-    )
+    @click.option("--program", "program_id", default=None, help="Sanka Cloud Program ID.")
+    @click.option("--migration", "migration_id", default=None, help="Cloud migration ID.")
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
     def hybrid(
@@ -120,12 +116,8 @@ def _build_cloud_only(name: str, help_text: str) -> click.Command:
             "help_option_names": [],
         },
     )
-    @click.option(
-        "--program", "program_id", default=None, help="Sanka Cloud Program ID."
-    )
-    @click.option(
-        "--migration", "migration_id", default=None, help="Cloud migration ID."
-    )
+    @click.option("--program", "program_id", default=None, help="Sanka Cloud Program ID.")
+    @click.option("--migration", "migration_id", default=None, help="Cloud migration ID.")
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_obj
     def cloud_only(

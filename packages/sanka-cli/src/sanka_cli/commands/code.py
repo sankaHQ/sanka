@@ -23,6 +23,7 @@ import click
 import sanka_cli.runtime as runtime
 from sanka_cli.bundle import (
     MANIFEST_FILENAME,
+    BuiltBundle,
     BundleError,
     build_bundle,
     extract_bundle,
@@ -132,10 +133,7 @@ def code_init(slug: str, name: str | None, runtime_name: str, directory: Path) -
         ignore_path.write_text(_SANKAIGNORE_TEMPLATE, encoding="utf-8")
 
     click.echo(f"Created {manifest_path}, {entry_path}, and {ignore_path}")
-    click.echo(
-        f"Next: sanka code create --dir {directory} "
-        f"&& sanka code push --dir {directory}"
-    )
+    click.echo(f"Next: sanka code create --dir {directory} && sanka code push --dir {directory}")
 
 
 # ---- reading -------------------------------------------------------------
@@ -190,9 +188,7 @@ def code_versions(state: CLIState, slug: str, limit: int) -> None:
     type=click.Path(file_okay=False, path_type=Path),
     default=Path("."),
 )
-@click.option(
-    "--source-mode", type=click.Choice(["git", "ui"]), default="git", show_default=True
-)
+@click.option("--source-mode", type=click.Choice(["git", "ui"]), default="git", show_default=True)
 @click.pass_obj
 def code_create(state: CLIState, directory: Path, source_mode: str) -> None:
     """Register the function described by ./sanka.json.
@@ -222,13 +218,9 @@ def code_create(state: CLIState, directory: Path, source_mode: str) -> None:
     type=click.Path(file_okay=False, path_type=Path),
     default=Path("."),
 )
-@click.option(
-    "--activate", is_flag=True, help="Point the `live` alias at this version."
-)
+@click.option("--activate", is_flag=True, help="Point the `live` alias at this version.")
 @click.option("-m", "--message", default=None, help="Change summary.")
-@click.option(
-    "--dry-run", is_flag=True, help="Build and report locally; upload nothing."
-)
+@click.option("--dry-run", is_flag=True, help="Build and report locally; upload nothing.")
 @click.pass_obj
 def code_push(
     state: CLIState,
@@ -438,9 +430,7 @@ def code_secrets() -> None:
 @click.argument("slug")
 @click.pass_obj
 def code_secrets_list(state: CLIState, slug: str) -> None:
-    payload = runtime.request_json(
-        state, "GET", f"{CODE_ROOT}/functions/{slug}/secrets"
-    )
+    payload = runtime.request_json(state, "GET", f"{CODE_ROOT}/functions/{slug}/secrets")
     runtime.emit_payload(_data(payload).get("secrets", []), state)
 
 
@@ -471,9 +461,7 @@ def code_secrets_set(state: CLIState, slug: str, name: str, value: str | None) -
 @click.argument("name")
 @click.pass_obj
 def code_secrets_rm(state: CLIState, slug: str, name: str) -> None:
-    runtime.request_json(
-        state, "DELETE", f"{CODE_ROOT}/functions/{slug}/secrets/{name}"
-    )
+    runtime.request_json(state, "DELETE", f"{CODE_ROOT}/functions/{slug}/secrets/{name}")
     click.echo(f"Deleted {name}")
 
 
@@ -488,9 +476,7 @@ def _data(payload: dict[str, Any]) -> dict[str, Any]:
 def _load_manifest(directory: Path) -> dict[str, Any]:
     path = directory / MANIFEST_FILENAME
     if not path.is_file():
-        raise click.ClickException(
-            f"{path} not found. Run `sanka code init --slug <slug>` first."
-        )
+        raise click.ClickException(f"{path} not found. Run `sanka code init --slug <slug>` first.")
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -500,7 +486,7 @@ def _load_manifest(directory: Path) -> dict[str, Any]:
     return manifest
 
 
-def _build(directory: Path):
+def _build(directory: Path) -> BuiltBundle:
     try:
         return build_bundle(directory)
     except BundleError as exc:

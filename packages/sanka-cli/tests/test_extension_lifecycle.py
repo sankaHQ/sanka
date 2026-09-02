@@ -52,7 +52,7 @@ def _recommendation(
         targets=targets,
         evidence=(),
         status=status,
-        add_command=f"sanka-migrate extension add {lock.id}",
+        add_command=f"sanka extension add {lock.id}",
     )
 
 
@@ -82,7 +82,7 @@ class FakeStore:
                 targets=("fastapi",),
                 evidence=(),
                 status=status,
-                add_command="sanka-migrate extension add sanka/drf-to-fastapi",
+                add_command="sanka extension add sanka/drf-to-fastapi",
             ),
         )
 
@@ -193,7 +193,7 @@ def test_json_scan_fails_closed_with_structured_recommendations(tmp_path: Path) 
     assert raised.value.code == "SANKA_EXTENSION_REQUIRED"
     assert raised.value.details["fingerprint"]["frameworks"] == ["django-rest-framework"]
     assert raised.value.details["recommendations"][0]["add_command"] == (
-        "sanka-migrate extension add sanka/drf-to-fastapi"
+        "sanka extension add sanka/drf-to-fastapi"
     )
     assert not (project / ".sanka" / "scan.json").exists()
 
@@ -273,7 +273,7 @@ def test_plan_rejects_resolved_lock_identity_drift_before_dispatch(tmp_path: Pat
         targets=("fastapi",),
         evidence=(),
         status=("available", "installed", "locked"),
-        add_command=f"sanka-migrate extension add {expected.id}",
+        add_command=f"sanka extension add {expected.id}",
     )
 
     class Store:
@@ -560,7 +560,7 @@ def test_scan_dispatches_every_scan_capable_lock_under_its_exact_identity(
             targets=("fastapi",),
             evidence=(),
             status=("available", "installed", "locked"),
-            add_command=f"sanka-migrate extension add {extension_id}",
+            add_command=f"sanka extension add {extension_id}",
         )
         for extension_id, lock in locks.items()
     )
@@ -615,7 +615,7 @@ def test_interactive_install_selects_the_exact_colliding_marketplace_recommendat
                         targets=("fastapi",),
                         evidence=(),
                         status=status,
-                        add_command="sanka-migrate extension add vendor/demo",
+                        add_command="sanka extension add vendor/demo",
                     )
                 )
             return cast(tuple[Recommendation, ...], tuple(values))

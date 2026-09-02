@@ -100,10 +100,7 @@ def workflows_run(
         )
         last_payload = status_payload
         status_data = status_payload.get("data", status_payload)
-        if (
-            str(status_data.get("status") or "").lower()
-            in runtime.TERMINAL_WORKFLOW_RUN_STATUSES
-        ):
+        if str(status_data.get("status") or "").lower() in runtime.TERMINAL_WORKFLOW_RUN_STATUSES:
             runtime.emit_payload(status_payload, state)
             return
         time.sleep(max(poll_interval, 0.1))

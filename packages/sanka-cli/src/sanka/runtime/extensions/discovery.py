@@ -796,7 +796,7 @@ def recommend(
                     sorted(selected, key=lambda item: (item.kind, item.value, item.path))
                 ),
                 status=tuple(status for status in STATUS_ORDER if status in statuses),
-                add_command=f"sanka-migrate extension add {manifest.id}",
+                add_command=f"sanka extension add {manifest.id}",
             )
         )
     return tuple(sorted(recommendations, key=lambda item: (item.id, _version_key(item.version))))

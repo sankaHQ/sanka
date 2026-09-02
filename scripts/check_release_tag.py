@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Require a release tag to match the one version shared by all packages."""
+"""Require a release tag to match the unified package version."""
 
 from __future__ import annotations
 
@@ -8,10 +8,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGE_FILES = (
-    *sorted((ROOT / "packages").glob("*/pyproject.toml")),
-    *sorted((ROOT / "connectors").glob("*/pyproject.toml")),
-)
+PACKAGE_FILE = ROOT / "packages" / "sanka-cli" / "pyproject.toml"
 
 
 def main() -> int:
@@ -21,14 +18,8 @@ def main() -> int:
     if sys.argv[2] != "tag":
         print(f"release ref type must be 'tag', got {sys.argv[2]!r}")
         return 1
-    versions: set[str] = set()
-    for path in PACKAGE_FILES:
-        with path.open("rb") as handle:
-            versions.add(str(tomllib.load(handle)["project"]["version"]))
-    if len(versions) != 1:
-        print(f"package versions differ: {sorted(versions)}")
-        return 1
-    version = versions.pop()
+    with PACKAGE_FILE.open("rb") as handle:
+        version = str(tomllib.load(handle)["project"]["version"])
     expected_tag = f"v{version}"
     if sys.argv[1] != expected_tag:
         print(f"release ref must be {expected_tag!r}, got {sys.argv[1]!r}")

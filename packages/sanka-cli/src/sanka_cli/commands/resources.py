@@ -7,7 +7,7 @@ import sanka_cli.runtime as runtime
 from sanka_cli.state import CLIState
 
 
-def _resource_list_command(path: str):
+def _resource_list_command(path: str) -> click.Command:
     @click.command("list")
     @click.option("--page", default=1, show_default=True, type=int)
     @click.option("--limit", default=50, show_default=True, type=int)
@@ -24,7 +24,7 @@ def _resource_list_command(path: str):
     return command
 
 
-def _resource_get_command(path: str):
+def _resource_get_command(path: str) -> click.Command:
     @click.command("get")
     @click.argument("record_id")
     @click.option("--external-id", default=None)
@@ -42,7 +42,7 @@ def _resource_get_command(path: str):
     return command
 
 
-def _resource_create_command(path: str):
+def _resource_create_command(path: str) -> click.Command:
     @click.command("create")
     @click.option("--data", required=True, help="JSON string or @path/to/file.json")
     @click.pass_obj
@@ -58,7 +58,7 @@ def _resource_create_command(path: str):
     return command
 
 
-def _resource_update_command(path: str):
+def _resource_update_command(path: str) -> click.Command:
     @click.command("update")
     @click.argument("record_id")
     @click.option("--data", required=True, help="JSON string or @path/to/file.json")
@@ -83,7 +83,7 @@ def _resource_update_command(path: str):
     return command
 
 
-def _resource_delete_command(path: str):
+def _resource_delete_command(path: str) -> click.Command:
     @click.command("delete")
     @click.argument("record_id")
     @click.option("--external-id", default=None)

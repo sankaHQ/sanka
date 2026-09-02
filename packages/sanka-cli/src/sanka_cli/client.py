@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -68,10 +68,7 @@ class SankaApiClient:
             meta = payload.get("meta")
             meta = meta if isinstance(meta, dict) else {}
             message = str(
-                payload.get("message")
-                or payload.get("detail")
-                or error.get("message")
-                or ""
+                payload.get("message") or payload.get("detail") or error.get("message") or ""
             ).strip()
             ctx_id = payload.get("ctx_id") or meta.get("ctx_id")
         if not message:
@@ -132,7 +129,7 @@ class SankaApiClient:
         if not response.content:
             return {}
         try:
-            return response.json()
+            return cast(dict[str, Any], response.json())
         except json.JSONDecodeError as exc:
             raise APIError(
                 status_code=response.status_code,

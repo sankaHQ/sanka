@@ -14,7 +14,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from sanka.runtime.extensions.model import LIFECYCLE_COMMANDS, ExtensionError
 from sanka.runtime.extensions.store import (
@@ -101,7 +101,8 @@ class ExtensionRunner:
         self.timeout_seconds = timeout_seconds
 
     def _executable(self, lock: LockEntry) -> Path:
-        configured = Path(lock.executable)
+        executable_name = cast(str, lock.executable)
+        configured = Path(executable_name)
         if configured.is_absolute():
             executable = configured
         elif lock.id == DEFAULT_EXTENSION_ID:
@@ -112,7 +113,7 @@ class ExtensionRunner:
                 / "environments"
                 / lock.artifact_digest
                 / ("Scripts" if os.name == "nt" else "bin")
-                / lock.executable
+                / executable_name
             )
         try:
             status = executable.lstat()
@@ -420,7 +421,7 @@ class ExtensionRunner:
             {name: os.environ[name] for name in explicit_env_names if name in os.environ}
         )
         try:
-            if executable_fd is None and not Path(lock.executable).is_absolute():
+            if executable_fd is None and not Path(cast(str, lock.executable)).is_absolute():
                 _error(
                     "SANKA_EXTENSION_IDENTITY",
                     "Cached extension execution requires a verified execution lease",

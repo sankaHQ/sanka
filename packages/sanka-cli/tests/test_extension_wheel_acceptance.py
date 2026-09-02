@@ -46,7 +46,7 @@ def _command_environment(environment: Path) -> dict[str, str]:
 
 def _run_json_process(environment: Path, *arguments: str) -> tuple[int, dict[str, object]]:
     completed = subprocess.run(
-        [str(environment / "bin" / "sanka-migrate"), *arguments],
+        [str(environment / "bin" / "sanka"), *arguments],
         check=False,
         capture_output=True,
         text=True,
@@ -79,7 +79,7 @@ def _sha256(path: Path) -> str:
 
 
 def _tracked_manifest(extension_release: Path) -> tuple[Path, dict[str, Any]]:
-    repository = extension_release.parents[1]
+    repository = extension_release.parent
     manifest_path = repository / "packages" / "sanka-extension-drf-to-fastapi" / "extension.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["id"] == EXTENSION_ID
@@ -94,13 +94,8 @@ def _preseed_store(
 ) -> None:
     repository, manifest = _tracked_manifest(extension_release)
     marketplace = tmp_path / "marketplace"
-    manifest_destination = marketplace / "packages" / "sanka-extension-drf-to-fastapi"
-    manifest_destination.mkdir(parents=True)
+    shutil.copytree(repository / "packages", marketplace / "packages")
     shutil.copyfile(repository / "marketplace.json", marketplace / "marketplace.json")
-    shutil.copyfile(
-        repository / "packages" / "sanka-extension-drf-to-fastapi" / "extension.json",
-        manifest_destination / "extension.json",
-    )
 
     user_root = environment.parent / "user-home" / "extensions"
     store = ExtensionStore(project, user_root=user_root)
@@ -152,9 +147,9 @@ def create_test_environment(
         str(runtime_site_packages) + "\n",
         encoding="utf-8",
     )
-    runtime_entry_point = Path(sys.executable).parent / "sanka-migrate"
+    runtime_entry_point = Path(sys.executable).parent / "sanka"
     assert runtime_entry_point.is_file()
-    (environment / "bin" / "sanka-migrate").symlink_to(runtime_entry_point)
+    (environment / "bin" / "sanka").symlink_to(runtime_entry_point)
     _preseed_store(tmp_path, environment, extension_release, project)
     return environment
 
@@ -211,7 +206,8 @@ def test_default_extension_full_chain_from_wheels(
     )
 
     listed = run_json(environment, "extension", "list", "--json")
-    assert cast(dict[str, Any], listed["data"])["records"][0]["status"] == [
+    records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}
+    assert records[EXTENSION_ID]["status"] == [
         "available",
         "installed",
         "locked",
@@ -229,7 +225,7 @@ def test_default_extension_full_chain_from_wheels(
     assert returncode == 1
     assert error["code"] == "SANKA_EXTENSION_REQUIRED"
     assert error["details"]["recommendations"][0]["add_command"] == (
-        "sanka-migrate extension add sanka/drf-to-fastapi"
+        "sanka extension add sanka/drf-to-fastapi"
     )
 
     run_json(environment, "extension", "add", EXTENSION_ID, "--json")

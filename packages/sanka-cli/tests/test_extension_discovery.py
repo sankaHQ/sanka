@@ -384,7 +384,7 @@ def test_recommendations_are_sorted_and_include_state(tmp_path: Path) -> None:
 
     assert [item.id for item in recommendations] == ["alpha/first", "zeta/last"]
     assert recommendations[0].status == ("available", "installed")
-    assert recommendations[0].add_command == "sanka-migrate extension add alpha/first"
+    assert recommendations[0].add_command == "sanka extension add alpha/first"
 
 
 def test_marketplace_loader_rejects_malformed_json(tmp_path: Path) -> None:

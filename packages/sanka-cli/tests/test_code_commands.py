@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+# mypy: disable-error-code="no-untyped-def"
 """``sanka code`` command behaviour, against a recording fake of the public API."""
 
 from __future__ import annotations

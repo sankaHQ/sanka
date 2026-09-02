@@ -274,7 +274,7 @@ def test_connect_routes_system_providers_to_the_hosted_api(
     assert f"sanka-connector-{provider}" not in error
 
 
-# -- sanka-migrate validate ---------------------------------------------------
+# -- local validation ---------------------------------------------------------
 
 
 def _spec_file(tmp_path: Path) -> tuple[Path, Path, list[str]]:

@@ -8,13 +8,13 @@ from typing import Any
 
 from platformdirs import user_config_dir
 
-try:
+try:  # pragma: no cover - import failure depends on runtime
     import keyring
     from keyring.errors import KeyringError
 except Exception:  # pragma: no cover - import failure depends on runtime
-    keyring = None
+    keyring = None  # type: ignore[assignment]
 
-    class KeyringError(Exception):
+    class KeyringError(Exception):  # type: ignore[no-redef]
         pass
 
 
@@ -127,9 +127,7 @@ def load_config() -> dict[str, Any]:
     for profile_name, profile_config in profiles.items():
         name = _normalize_profile_name(profile_name)
         normalized_profiles[name] = {
-            "base_url": str(
-                (profile_config or {}).get("base_url") or DEFAULT_BASE_URL
-            ).rstrip("/"),
+            "base_url": str((profile_config or {}).get("base_url") or DEFAULT_BASE_URL).rstrip("/"),
         }
     if normalized_profiles:
         config["profiles"] = normalized_profiles
@@ -162,9 +160,7 @@ def upsert_profile(profile_name: str, *, base_url: str | None = None) -> dict[st
     normalized_profile_name = _normalize_profile_name(profile_name)
     existing = config["profiles"].get(normalized_profile_name) or {}
     config["profiles"][normalized_profile_name] = {
-        "base_url": str(
-            base_url or existing.get("base_url") or DEFAULT_BASE_URL
-        ).rstrip("/"),
+        "base_url": str(base_url or existing.get("base_url") or DEFAULT_BASE_URL).rstrip("/"),
     }
     save_config(config)
     return config
@@ -211,18 +207,14 @@ def list_profiles() -> list[dict[str, Any]]:
         profile = config["profiles"][profile_name] or {}
         try:
             has_access_token = bool(_get_keyring_password(profile_name, "access_token"))
-            has_refresh_token = bool(
-                _get_keyring_password(profile_name, "refresh_token")
-            )
+            has_refresh_token = bool(_get_keyring_password(profile_name, "refresh_token"))
         except CredentialStoreError:
             has_access_token = False
             has_refresh_token = False
         profiles.append(
             {
                 "name": profile_name,
-                "base_url": str(profile.get("base_url") or DEFAULT_BASE_URL).rstrip(
-                    "/"
-                ),
+                "base_url": str(profile.get("base_url") or DEFAULT_BASE_URL).rstrip("/"),
                 "is_active": profile_name == active_profile,
                 "has_access_token": has_access_token,
                 "has_refresh_token": has_refresh_token,
@@ -271,7 +263,7 @@ def resolve_runtime(
     profile = get_profile(resolved_profile_name)
     env_access_token = os.environ.get("SANKA_ACCESS_TOKEN")
     env_base_url = os.environ.get("SANKA_BASE_URL")
-    stored_tokens = {"access_token": None, "refresh_token": None}
+    stored_tokens: dict[str, str | None] = {"access_token": None, "refresh_token": None}
     if not env_access_token:
         stored_tokens = get_tokens(resolved_profile_name)
 

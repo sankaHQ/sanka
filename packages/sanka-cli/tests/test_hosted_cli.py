@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+# mypy: disable-error-code="no-untyped-def,type-arg"
 from __future__ import annotations
 
 import json
@@ -1022,6 +1023,7 @@ def test_verify_access_token_warns_on_server_error(fake_verify_client) -> None:
         access_token="access-1",
     )
     assert identity is None
+    assert warning is not None
     assert "HTTP 503" in warning
 
 
@@ -1036,5 +1038,6 @@ def test_verify_access_token_warns_when_unreachable(fake_verify_client) -> None:
         access_token="access-1",
     )
     assert identity is None
+    assert warning is not None
     assert "could not reach https://cli.example.com" in warning
     assert "ConnectError" in warning

@@ -119,16 +119,28 @@ def test_boundaries_pass_on_repo() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_boundaries_catch_mcp_importing_runtime_namespace() -> None:
+def test_boundaries_catch_mcp_integration_importing_runtime_namespace() -> None:
     fixture = ROOT / "tests" / "fixtures" / "mcp_boundary_violation"
     result = _run("check_import_boundaries.py", str(fixture))
     assert result.returncode == 1
     assert "sanka.runtime" in result.stdout
-    assert "standalone MCP package" in result.stdout
+    assert "MCP integration cannot import the AGPL runtime" in result.stdout
+
+
+def test_boundaries_catch_connector_sdk_importing_runtime_namespace(tmp_path: Path) -> None:
+    connector = tmp_path / "packages" / "sanka-cli" / "src" / "sanka_connector"
+    connector.mkdir(parents=True)
+    (connector / "bad.py").write_text("from sanka.runtime import engine\n", encoding="utf-8")
+
+    result = _run("check_import_boundaries.py", str(tmp_path))
+
+    assert result.returncode == 1
+    assert "sanka.runtime" in result.stdout
+    assert "Connector SDK cannot import the AGPL runtime" in result.stdout
 
 
 def test_boundaries_catch_target_logic_in_the_runtime(tmp_path: Path) -> None:
-    runtime = tmp_path / "packages" / "sanka-migrate" / "src" / "sanka" / "runtime"
+    runtime = tmp_path / "packages" / "sanka-cli" / "src" / "sanka" / "runtime"
     runtime.mkdir(parents=True)
     (runtime / "leak.py").write_text(
         "from sanka.runtime.frameworks import scan_django\nimport asyncpg\nimport fastapi\n",
@@ -146,4 +158,14 @@ def test_boundaries_catch_target_logic_in_the_runtime(tmp_path: Path) -> None:
 
 def test_license_headers_pass_on_repo() -> None:
     result = _run("check_license_headers.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_public_naming_passes_on_repo() -> None:
+    result = _run("check_public_naming.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_dependency_licenses_pass_on_workspace() -> None:
+    result = _run("check_dependency_licenses.py")
     assert result.returncode == 0, result.stdout + result.stderr

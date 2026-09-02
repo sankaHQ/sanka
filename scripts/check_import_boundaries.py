@@ -1,14 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Enforce Sanka's license/import boundaries.
+"""Enforce source-license and migration-extension import boundaries.
 
-Rules (see docs/ARCHITECTURE.md):
-
-- the Apache-2.0 Connector SDK and providers live in the separate
-  ``sankaHQ/extensions`` repository, whose CI owns their boundary checks.
-- ``packages/sanka-migrate-mcp`` (Apache-2.0) must not import ``sanka`` at all;
-  it is a standalone REST shim outside the runtime namespace.
-- ``packages/sanka-migrate`` must not import target framework implementations or
-  generated destination dependencies; those belong in extensions.
+The embedded Apache Connector SDK and MCP integration cannot import the AGPL
+runtime. Target-framework implementations and generated destination
+dependencies belong in GitHub marketplace extensions, not the local runtime.
 
 Usage: ``python scripts/check_import_boundaries.py [repo_root]``
 """
@@ -19,14 +14,16 @@ import ast
 import sys
 from pathlib import Path
 
-RESTRICTED_ZONES: tuple[tuple[str, str | None], ...] = (("packages/sanka-migrate-mcp", None),)
+RESTRICTED_ZONES = {
+    "packages/sanka-cli/src/sanka_cli/mcp": ("MCP integration cannot import the AGPL runtime"),
+    "packages/sanka-cli/src/sanka_connector": ("Connector SDK cannot import the AGPL runtime"),
+}
 TARGET_SPECIFIC_MODULES = frozenset(
     {
         "aiosqlite",
         "asyncpg",
         "django",
         "fastapi",
-        "httpx",
         "psycopg",
         "rest_framework",
         "sanka.runtime.frameworks",
@@ -47,9 +44,7 @@ def _imported_modules(tree: ast.AST) -> list[str]:
     return names
 
 
-def _violates(module: str, allowed_prefix: str | None) -> bool:
-    if allowed_prefix and (module == allowed_prefix or module.startswith(allowed_prefix + ".")):
-        return False
+def _imports_runtime(module: str) -> bool:
     return module == "sanka" or module.startswith("sanka.")
 
 
@@ -59,21 +54,19 @@ def _target_specific(module: str) -> bool:
 
 def check(root: Path) -> list[str]:
     violations: list[str] = []
-    for zone, allowed_prefix in RESTRICTED_ZONES:
+    for zone, explanation in RESTRICTED_ZONES.items():
         zone_path = root / zone
         if not zone_path.is_dir():
             continue
         for path in sorted(zone_path.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for module in _imported_modules(tree):
-                if _violates(module, allowed_prefix):
-                    allowed = (
-                        f"only {allowed_prefix!r} is allowed"
-                        if allowed_prefix
-                        else "the standalone MCP package cannot import the sanka namespace"
+                if _imports_runtime(module):
+                    violations.append(
+                        f"{path.relative_to(root)}: imports {module!r} ({explanation})"
                     )
-                    violations.append(f"{path.relative_to(root)}: imports {module!r} ({allowed})")
-    runtime = root / "packages" / "sanka-migrate" / "src" / "sanka"
+
+    runtime = root / "packages" / "sanka-cli" / "src" / "sanka" / "runtime"
     if runtime.is_dir():
         for path in sorted(runtime.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

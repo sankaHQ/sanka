@@ -1,8 +1,10 @@
 UV ?= uv
 
-.PHONY: check lint format typecheck test boundaries headers naming licenses build-release bench
+.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release bench
 
-check: lint typecheck test boundaries headers naming licenses
+SANKA_CONNECTOR_SDK_SOURCE ?= ../extensions/packages/sanka-connector-sdk/src/sanka_connector
+
+check: lint typecheck test boundaries headers naming licenses connector-sdk-sync
 
 lint:
 	$(UV) run ruff check .
@@ -13,13 +15,11 @@ format:
 	$(UV) run ruff check --fix .
 
 typecheck:
-	$(UV) run mypy packages/sanka-migrate/src packages/sanka-migrate-mcp/src \
-		packages/sanka-migrate/tests \
-		packages/sanka-migrate-mcp/tests scripts
+	$(UV) run mypy packages scripts
 
 test:
 	$(UV) run -- python -m pytest \
-		--ignore=packages/sanka-migrate/tests/test_extension_wheel_acceptance.py
+		--ignore=packages/sanka-cli/tests/test_extension_wheel_acceptance.py
 
 boundaries:
 	$(UV) run python scripts/check_import_boundaries.py
@@ -33,8 +33,12 @@ naming:
 licenses:
 	$(UV) run python scripts/check_dependency_licenses.py
 
+connector-sdk-sync:
+	SANKA_CONNECTOR_SDK_SOURCE=$(SANKA_CONNECTOR_SDK_SOURCE) \
+		$(UV) run python scripts/check_connector_sdk_sync.py
+
 build-release:
-	$(UV) build --all-packages --out-dir dist --clear --no-create-gitignore
+	$(UV) build --package sanka-cli --out-dir dist --clear --no-create-gitignore
 	$(UV) run python scripts/check_release_artifacts.py dist
 	$(UV) run python -m scripts.stage_release_artifacts dist release
 	$(UV) publish --dry-run --trusted-publishing never dist/*

@@ -19,7 +19,7 @@ def ai_score() -> None:
     """Score records."""
 
 
-def _score_command(object_type: str):
+def _score_command(object_type: str) -> click.Command:
     @click.command(name=object_type)
     @click.argument("record_id")
     @click.option("--score-model-id", default=None)
@@ -75,13 +75,9 @@ def ai_enrich_company(
     if not record_id and not has_seed:
         raise click.ClickException("record_id or a seed field is required")
     if has_seed and not dry_run:
-        raise click.ClickException(
-            "--dry-run is required when seed fields are provided"
-        )
+        raise click.ClickException("--dry-run is required when seed fields are provided")
     if has_seed and custom_field_map:
-        raise click.ClickException(
-            "--custom-field-map is only supported with record_id"
-        )
+        raise click.ClickException("--custom-field-map is only supported with record_id")
 
     body: dict[str, Any] = {
         "object_type": "company",

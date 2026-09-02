@@ -40,8 +40,7 @@ def auth_login(
         )
     except runtime.TokenVerificationError as exc:
         raise click.ClickException(
-            f"{exc} Nothing was saved. Create a token under "
-            "Developers → API in Sanka and retry."
+            f"{exc} Nothing was saved. Create a token under Developers → API in Sanka and retry."
         ) from exc
     runtime.upsert_profile(resolved_profile_name, base_url=resolved_base_url)
     try:
@@ -64,7 +63,7 @@ def auth_login(
     runtime.emit_payload(payload, state)
 
 
-def _identity_fields(identity: dict) -> dict[str, str]:
+def _identity_fields(identity: dict[str, object]) -> dict[str, str]:
     workspace_name = str(identity.get("workspace_name") or "").strip()
     workspace_code = str(identity.get("workspace_code") or "").strip()
     if workspace_name and workspace_code:

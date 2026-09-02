@@ -219,7 +219,7 @@ def test_cli_spec_flow_plan_apply_verify(
 ) -> None:
     content, db = tmp_path / "content", tmp_path / "out.db"
     _write_content(content)
-    spec_file = tmp_path / "sanka-migrate.yaml"
+    spec_file = tmp_path / "migration.yaml"
     spec_file.write_text(
         f"source:\n  type: markdown\n  connection: {content}\n"
         f"target:\n  type: sqlite\n  connection: {db}\n",

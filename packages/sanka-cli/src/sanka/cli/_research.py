@@ -116,7 +116,7 @@ class SankaMigrateApiClient:
         params = {key: value for key, value in (query or {}).items() if value not in (None, "")}
         suffix = f"?{urlencode(params)}" if params else ""
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
-        headers = {"Accept": "application/json", "User-Agent": "sanka-migrate"}
+        headers = {"Accept": "application/json", "User-Agent": "sanka-cli/0.2.0"}
         if body is not None:
             headers["Content-Type"] = "application/json"
         request = Request(

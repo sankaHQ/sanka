@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 import httpx
 
 from sanka_cli.client import APIError, SankaApiClient
+from sanka_cli.config import CredentialStoreError as CredentialStoreError
 from sanka_cli.config import (
-    CredentialStoreError,
     clear_tokens,
     list_profiles,
     resolve_runtime,
@@ -62,8 +62,7 @@ def verify_access_token(
             ) from exc
         return (
             None,
-            f"token saved without verification: {base_url} responded "
-            f"HTTP {exc.status_code}",
+            f"token saved without verification: {base_url} responded HTTP {exc.status_code}",
         )
     except httpx.HTTPError as exc:
         return (
@@ -103,9 +102,7 @@ def build_client(state: CLIState) -> SankaApiClient:
         raise click.ClickException(str(exc)) from exc
     access_token = runtime["access_token"]
     if not access_token:
-        raise click.ClickException(
-            "No access token configured. Run `sanka login` first."
-        )
+        raise click.ClickException("No access token configured. Run `sanka login` first.")
 
     return SankaApiClient(
         base_url=runtime["base_url"],
@@ -113,7 +110,7 @@ def build_client(state: CLIState) -> SankaApiClient:
     )
 
 
-def handle_api_error(exc: APIError) -> None:
+def handle_api_error(exc: APIError) -> NoReturn:
     raise click.ClickException(exc.display_message()) from exc
 
 

@@ -1,27 +1,10 @@
-name: Publish Python packages
+name: Publish sanka-cli
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: Package index target
-        required: true
-        type: choice
-        options:
-          - testpypi
-          - pypi
-          - bootstrap-testpypi
-          - bootstrap-pypi
-      package:
-        description: One package for a bootstrap target; ignored for normal targets
-        required: true
-        default: sanka-migrate
-        type: choice
-        options:
-          - sanka-migrate
-          - sanka-migrate-mcp
       confirmation:
-        description: Enter the exact target, or target-package for a bootstrap target
+        description: Enter publish- followed by the exact selected version tag
         required: true
         type: string
 
@@ -31,9 +14,24 @@ permissions:
 jobs:
   build:
     name: Build and verify exact tag
+    if: inputs.confirmation == format('publish-{0}', github.ref_name)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sanka
+    env:
+      SANKA_CONNECTOR_SDK_SOURCE: ../extensions/packages/sanka-connector-sdk/src/sanka_connector
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: sanka
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: sankaHQ/extensions
+          ref: 0852273fbddd614c03486b3d834f69b10331ecab
+          path: extensions
+          persist-credentials: false
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.11.21"
@@ -45,43 +43,18 @@ jobs:
         run: uv sync --frozen --all-packages
       - name: Run repository checks
         run: make check
-      - name: Build and dry-run publication
+      - name: Build and stage release
         run: make build-release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-release-${{ github.ref_name }}
-          path: release/
+          name: sanka-cli-${{ github.ref_name }}
+          path: sanka/release/
           if-no-files-found: error
           retention-days: 14
 
-  publish-testpypi:
-    name: Publish to TestPyPI
-    if: >-
-      vars.SANKA_MIGRATE_PUBLISH_ENABLED == 'true' &&
-      inputs.target == 'testpypi' &&
-      inputs.confirmation == 'publish-testpypi'
-    needs: build
-    runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: python-release-${{ github.ref_name }}
-          path: release/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: release/all/
-          repository-url: https://test.pypi.org/legacy/
-          print-hash: true
-
-  publish-pypi:
-    name: Publish to PyPI
-    if: >-
-      vars.SANKA_MIGRATE_PUBLISH_ENABLED == 'true' &&
-      inputs.target == 'pypi' &&
-      inputs.confirmation == 'publish-pypi'
+  publish:
+    name: Publish exact artifacts to PyPI
+    if: inputs.confirmation == format('publish-{0}', github.ref_name)
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
@@ -90,52 +63,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-release-${{ github.ref_name }}
+          name: sanka-cli-${{ github.ref_name }}
           path: release/
+      - name: Verify source and artifact hashes
+        working-directory: release
+        run: |
+          test "$(cat SOURCE_COMMIT)" = "$GITHUB_SHA"
+          sha256sum --check SHA256SUMS
+          rm SHA256SUMS SOURCE_COMMIT
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: release/all/
-          print-hash: true
-
-  bootstrap-testpypi:
-    name: Bootstrap ${{ inputs.package }} on TestPyPI
-    if: >-
-      vars.SANKA_MIGRATE_BOOTSTRAP_ENABLED == 'true' &&
-      inputs.target == 'bootstrap-testpypi' &&
-      inputs.confirmation == format('bootstrap-testpypi-{0}', inputs.package)
-    needs: build
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.package == 'sanka-migrate' && 'testpypi' || format('testpypi-{0}', inputs.package) }}
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: python-release-${{ github.ref_name }}
-          path: release/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: release/packages/${{ inputs.package }}/
-          repository-url: https://test.pypi.org/legacy/
-          print-hash: true
-
-  bootstrap-pypi:
-    name: Bootstrap ${{ inputs.package }} on PyPI
-    if: >-
-      vars.SANKA_MIGRATE_BOOTSTRAP_ENABLED == 'true' &&
-      inputs.target == 'bootstrap-pypi' &&
-      inputs.confirmation == format('bootstrap-pypi-{0}', inputs.package)
-    needs: build
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.package == 'sanka-migrate' && 'pypi' || format('pypi-{0}', inputs.package) }}
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: python-release-${{ github.ref_name }}
-          path: release/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: release/packages/${{ inputs.package }}/
+          packages-dir: release/
           print-hash: true

@@ -5,6 +5,7 @@ import sqlite3
 import sys
 from importlib import metadata
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -18,6 +19,8 @@ from sanka.runtime.connector_host import (
 from sanka.runtime.extensions import ExtensionError
 from sanka_connector import (
     Credentials,
+    DestinationConnector,
+    SourceConnector,
     SupportsHighWaterMark,
     SupportsRecordCounts,
     WriteOptions,
@@ -291,7 +294,7 @@ def test_remote_connector_rejects_non_string_capability_names(tmp_path: Path) ->
 
 @pytest.mark.asyncio
 async def test_sqlite_connector_round_trip_stays_out_of_process(tmp_path: Path) -> None:
-    site_packages = Path(metadata.distribution("sanka-connector-sqlite").locate_file(""))
+    site_packages = Path(str(metadata.distribution("sanka-connector-sqlite").locate_file("")))
     source_path = tmp_path / "source.db"
     with sqlite3.connect(source_path) as database:
         database.execute("CREATE TABLE contacts (id INTEGER PRIMARY KEY, name TEXT)")
@@ -304,9 +307,13 @@ async def test_sqlite_connector_round_trip_stays_out_of_process(tmp_path: Path) 
 
     with ConnectorHostClient(sys.executable, environment=site_packages) as client:
         description = client.request("sqlite", "describe", {})
-        source = build_remote_connector(client, "sqlite", "source", description=description)
-        destination = build_remote_connector(
-            client, "sqlite", "destination", description=description
+        source = cast(
+            SourceConnector,
+            build_remote_connector(client, "sqlite", "source", description=description),
+        )
+        destination = cast(
+            DestinationConnector,
+            build_remote_connector(client, "sqlite", "destination", description=description),
         )
 
         assert isinstance(source, SupportsRecordCounts)

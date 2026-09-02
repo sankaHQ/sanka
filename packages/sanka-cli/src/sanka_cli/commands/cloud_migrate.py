@@ -270,9 +270,7 @@ def _resolve_migration(
         return _get_migration(state, migration_id), program_id
 
     if program is None:
-        raise click.ClickException(
-            "Cloud migration commands require --program or --migration."
-        )
+        raise click.ClickException("Cloud migration commands require --program or --migration.")
 
     if always_create or (not migration_ids and create_when_missing):
         created = _data(
@@ -287,8 +285,7 @@ def _resolve_migration(
 
     if not migration_ids:
         raise click.ClickException(
-            f"Program {program_id} has no migration. Run "
-            f"`sanka plan --program {program_id}` first."
+            f"Program {program_id} has no migration. Run `sanka plan --program {program_id}` first."
         )
     if len(migration_ids) > 1:
         choices = ", ".join(migration_ids)
@@ -371,13 +368,10 @@ def _hash_bound_action(
     plan = _get_plan(state, migration_id)
     current_plan_hash = str(plan.get("plan_hash") or "")
     if not current_plan_hash:
-        raise click.ClickException(
-            "The cloud migration does not have a reviewable plan hash."
-        )
+        raise click.ClickException("The cloud migration does not have a reviewable plan hash.")
     if options.plan_hash and options.plan_hash != current_plan_hash:
         raise click.ClickException(
-            "--plan-hash does not match the current cloud plan. "
-            "Re-run plan/status and review it."
+            "--plan-hash does not match the current cloud plan. Re-run plan/status and review it."
         )
     plan_hash = options.plan_hash or current_plan_hash
 
@@ -431,12 +425,9 @@ def _simple_action(
     migration_id = str(migration["id"])
     if action == "cancel" and not options.yes:
         if state.output == "json":
-            raise click.ClickException(
-                "Retry with --yes to cancel when using JSON output."
-            )
+            raise click.ClickException("Retry with --yes to cancel when using JSON output.")
         click.confirm(
-            "Cancel this migration permanently? "
-            "Destination writes are not rolled back.",
+            "Cancel this migration permanently? Destination writes are not rolled back.",
             abort=True,
         )
     result = _data(
@@ -476,8 +467,7 @@ def _status(
         raise click.ClickException("Cloud status requires --program or --migration.")
     program = _get_program(state, program_id)
     migrations = [
-        _get_migration(state, str(linked_id))
-        for linked_id in program.get("migration_ids", [])
+        _get_migration(state, str(linked_id)) for linked_id in program.get("migration_ids", [])
     ]
     runtime.emit_payload({"program": program, "migrations": migrations}, state)
 
@@ -503,7 +493,8 @@ def _poll_migration(
 
 
 def _print_plan_preview(migration: dict[str, Any], plan: dict[str, Any]) -> None:
-    summary = plan.get("summary") if isinstance(plan.get("summary"), dict) else {}
+    summary_value = plan.get("summary")
+    summary = summary_value if isinstance(summary_value, dict) else {}
     click.echo(f"Cloud migration: {migration.get('id')}")
     click.echo(f"Status: {migration.get('status')}")
     click.echo(f"Plan hash: {plan.get('plan_hash')}")

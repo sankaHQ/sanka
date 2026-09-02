@@ -132,9 +132,7 @@ def build_bundle(root: Path) -> BuiltBundle:
     if not files:
         raise BundleError(f"No files to bundle in {root} (everything was ignored).")
     if not any(relative == MANIFEST_FILENAME for relative, _ in files):
-        raise BundleError(
-            f"{MANIFEST_FILENAME} not found in {root}. Run `sanka code init` first."
-        )
+        raise BundleError(f"{MANIFEST_FILENAME} not found in {root}. Run `sanka code init` first.")
     if len(files) > MAX_FILE_COUNT:
         raise BundleError(
             f"Bundle would contain {len(files)} files; the limit is {MAX_FILE_COUNT}."
@@ -143,8 +141,7 @@ def build_bundle(root: Path) -> BuiltBundle:
     total = sum(path.stat().st_size for _, path in files)
     if total > MAX_UNCOMPRESSED_BYTES:
         raise BundleError(
-            f"Bundle would be {total} bytes uncompressed; the limit is "
-            f"{MAX_UNCOMPRESSED_BYTES}."
+            f"Bundle would be {total} bytes uncompressed; the limit is {MAX_UNCOMPRESSED_BYTES}."
         )
 
     tar_buffer = io.BytesIO()
@@ -170,8 +167,7 @@ def build_bundle(root: Path) -> BuiltBundle:
 
     if len(raw) > MAX_COMPRESSED_BYTES:
         raise BundleError(
-            f"Bundle is {len(raw)} bytes compressed; the limit is "
-            f"{MAX_COMPRESSED_BYTES}."
+            f"Bundle is {len(raw)} bytes compressed; the limit is {MAX_COMPRESSED_BYTES}."
         )
 
     return BuiltBundle(
@@ -181,9 +177,7 @@ def build_bundle(root: Path) -> BuiltBundle:
     )
 
 
-def extract_bundle(
-    raw: bytes, destination: Path, *, overwrite: bool = False
-) -> list[str]:
+def extract_bundle(raw: bytes, destination: Path, *, overwrite: bool = False) -> list[str]:
     """Write a downloaded bundle to disk.
 
     Re-validates every member path even though the server validated on the way in. This
@@ -200,9 +194,7 @@ def extract_bundle(
             if member.isdir():
                 continue
             if not member.isfile():
-                raise BundleError(
-                    f"Refusing to extract non-regular member {member.name!r}."
-                )
+                raise BundleError(f"Refusing to extract non-regular member {member.name!r}.")
             relative = member.name
             if relative.startswith("/") or ".." in relative.split("/"):
                 raise BundleError(f"Refusing to extract unsafe path {relative!r}.")
@@ -210,14 +202,10 @@ def extract_bundle(
             target = (destination / relative).resolve()
             # Belt and braces: even a path that looks clean must land inside the root.
             if not target.is_relative_to(resolved_root):
-                raise BundleError(
-                    f"Refusing to extract outside {destination}: {relative!r}"
-                )
+                raise BundleError(f"Refusing to extract outside {destination}: {relative!r}")
 
             if target.exists() and not overwrite:
-                raise BundleError(
-                    f"{target} already exists. Re-run with --force to overwrite."
-                )
+                raise BundleError(f"{target} already exists. Re-run with --force to overwrite.")
 
             handle = tar.extractfile(member)
             if handle is None:
