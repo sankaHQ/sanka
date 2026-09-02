@@ -149,6 +149,7 @@ def main() -> int:
                 "click",
                 "httpx",
                 "keyring",
+                "packaging",
                 "platformdirs",
                 "pyyaml",
                 "rich",

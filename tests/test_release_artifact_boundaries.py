@@ -48,6 +48,7 @@ def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, m
             b"Requires-Dist: click>=8.1,<9\n"
             b"Requires-Dist: httpx>=0.27,<1\n"
             b"Requires-Dist: keyring>=25,<26\n"
+            b"Requires-Dist: packaging>=24,<27\n"
             b"Requires-Dist: platformdirs>=4,<5\n"
             b"Requires-Dist: pyyaml>=6\n"
             b"Requires-Dist: rich>=13,<15\n"
