@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import click
 
+from sanka_cli import __version__
 from sanka_cli.commands.ai import ai
 from sanka_cli.commands.auth import auth, auth_login, auth_logout, auth_status
 from sanka_cli.commands.code import code
@@ -15,6 +16,7 @@ from sanka_cli.state import CLIState
 
 
 @click.group()
+@click.version_option(__version__, prog_name="sanka")
 @click.option("--profile", default=None, help="Profile name to use.")
 @click.option("--base-url", default=None, help="Override API base URL.")
 @click.option(

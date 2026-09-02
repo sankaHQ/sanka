@@ -82,4 +82,4 @@ def _print_mapping(mapping: dict[str, Any]) -> None:
 
 
 def print_error(message: str) -> None:
-    error_console.print(message)
+    error_console.print(message, markup=False)
