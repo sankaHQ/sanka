@@ -784,3 +784,51 @@ def test_store_recommendations_keep_verified_marketplace_identity(tmp_path: Path
         )
     ]
     assert recommendations[0].marketplace_identity.startswith("local:")
+
+
+def test_verify_replay_runs_without_a_reviewed_plan_and_after_source_changes(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+
+    # No scan and no plan yet: replay only needs the enabled extension.
+    replayed = lifecycle.verify(configuration={"scenarios": "scenarios.json", "edge_probes": True})
+    assert replayed.outcome == "success"
+    request = runner.calls[-1][1]
+    assert request["command"] == "verify"
+    assert request["configuration"] == {"edge_probes": True, "scenarios": "scenarios.json"}
+    assert request["reviewed_plan_hash"] is None
+
+    # With a reviewed plan and a source tree the agent has since edited, apply still
+    # refuses while replay keeps working against the live source.
+    lifecycle.scan()
+    planned = lifecycle.plan(target="fastapi")
+    (project / "target_app.py").write_text("app = None\n", encoding="utf-8")
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+    assert raised.value.code == "SANKA_FINGERPRINT_STALE"
+    again = lifecycle.verify(configuration={"scenarios": "scenarios.json"})
+    assert again.outcome == "success"
+    assert again.data["extension_command"] == "verify"
+
+
+def test_verify_replay_requires_an_enabled_extension(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=False), FakeRunner())
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.verify(configuration={"scenarios": "scenarios.json"})
+
+    assert raised.value.code == "SANKA_EXTENSION_REQUIRED"
+
+
+def test_verify_without_scenarios_still_requires_the_reviewed_plan(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.verify()
+
+    assert raised.value.code == "SANKA_EXTENSION_IDENTITY"
