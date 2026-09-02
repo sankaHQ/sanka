@@ -802,11 +802,76 @@ class ApplicationLifecycle:
         configuration: Mapping[str, Any] | None = None,
         explicit_env_names: tuple[str, ...] = (),
     ) -> ExtensionResult:
+        normalized = _normalized_json_object(configuration)
+        if normalized.get("scenarios") is not None:
+            return self._replay(normalized, explicit_env_names)
         return self._dispatch(
             "verify",
             configuration=configuration,
             explicit_env_names=explicit_env_names,
         )
+
+    def _replay(
+        self, configuration: dict[str, Any], explicit_env_names: tuple[str, ...]
+    ) -> ExtensionResult:
+        """Differential scenario replay needs an enabled extension, not a reviewed plan.
+
+        Replay compares the live source application with a candidate that is still being
+        written, so the source fingerprint legitimately differs from any reviewed plan and
+        a plan may not exist yet. The extension lock still has to match its recommendation
+        exactly; only the plan, fingerprint, and artifact checks that guard apply and test
+        are skipped, because replay writes nothing into the project.
+        """
+        explicit_env_names = _canonical_environment_names(explicit_env_names)
+        fingerprint = fingerprint_repository(self.project_root)
+        with self.store.execution_guard():
+            lock = self._replay_lock(fingerprint)
+            request = self._request(lock, "verify", fingerprint, configuration)
+            extension_root = Path(request["artifact_root"])
+            with self.store.execution_lease(lock) as executable_fd:
+                result = self.runner.run(
+                    lock,
+                    request,
+                    allowed_roots=self._roots(configuration, extension_root, self.project_root),
+                    explicit_env_names=explicit_env_names,
+                    executable_fd=executable_fd,
+                )
+        if result.outcome != "success":
+            self._raise_failure(result)
+        data = dict(result.data)
+        data["extension"] = result.data
+        return ExtensionResult(
+            outcome="success",
+            data=data,
+            artifacts=result.artifacts,
+            limitations=result.limitations,
+            next_actions=result.next_actions,
+            error=None,
+        )
+
+    def _replay_lock(self, fingerprint: Fingerprint) -> LockEntry:
+        """The plan's locked extension when a plan exists, else the one enabled recommendation."""
+        try:
+            locked = self._load_plan().get("extension")
+        except ExtensionError:
+            locked = None
+        if isinstance(locked, dict) and isinstance(locked.get("id"), str):
+            return self.store.resolve_locked(locked["id"])
+        recommendations = self._recommendations(fingerprint)
+        enabled = tuple(
+            item for item in self._enabled(recommendations) if "verify" in item.commands
+        )
+        if not enabled:
+            self._required(fingerprint, recommendations)
+        if len(enabled) > 1:
+            _error(
+                "SANKA_EXTENSION_AMBIGUOUS",
+                "Several enabled extensions can replay scenarios; plan first to select one",
+                candidates=[item.id for item in enabled],
+            )
+        lock = self.store.resolve_locked(enabled[0].id)
+        self._verify_selection(lock, enabled[0])
+        return lock
 
 
 __all__ = ["ApplicationLifecycle"]
