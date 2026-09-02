@@ -14,34 +14,6 @@ jobs:
     defaults:
       run:
         working-directory: sanka
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: sanka
-          POSTGRES_PASSWORD: sanka
-          POSTGRES_DB: sanka_migrate_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sanka"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      clickhouse:
-        image: clickhouse/clickhouse-server:24.8
-        env:
-          CLICKHOUSE_SKIP_USER_SETUP: "1"
-        ports:
-          - 8123:8123
-        options: >-
-          --health-cmd "wget -qO- http://localhost:8123/ping || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_migrate_test
-      SANKA_MIGRATE_TEST_CLICKHOUSE_URL: http://localhost:8123/default
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

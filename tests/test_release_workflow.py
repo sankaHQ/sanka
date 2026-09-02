@@ -86,6 +86,14 @@ def test_ci_and_publish_install_optional_mcp_dependencies() -> None:
         assert "uv sync --frozen --all-packages --all-extras" in runs
 
 
+def test_ci_defers_connector_e2e_until_marketplace_artifacts_exist() -> None:
+    job = _workflow("ci.yml")["jobs"]["check"]
+
+    assert "services" not in job
+    assert "SANKA_MIGRATE_TEST_POSTGRES_DSN" not in job.get("env", {})
+    assert "SANKA_MIGRATE_TEST_CLICKHOUSE_URL" not in job.get("env", {})
+
+
 def test_private_bench_credentials_only_run_on_trusted_main() -> None:
     workflow = _workflow("bench.yml")
     triggers = workflow["on"]
