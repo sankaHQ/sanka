@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The release workflow must keep bootstrap and steady-state authority separate."""
+"""Release workflows publish one verified ``sanka-cli`` artifact set."""
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 from typing import Any
 
@@ -13,78 +12,90 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLISH_ACTION = "pypa/gh-action-pypi-publish@"
 
 
-def _expected_projects() -> set[str]:
-    module = ast.parse((ROOT / "scripts" / "check_release_artifacts.py").read_text())
-    for statement in module.body:
-        if isinstance(statement, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "EXPECTED_LICENSES"
-            for target in statement.targets
-        ):
-            licenses = ast.literal_eval(statement.value)
-            return set(licenses)
-    raise AssertionError("EXPECTED_LICENSES is missing")
-
-
-def _workflow() -> dict[str, Any]:
+def _workflow(name: str) -> dict[str, Any]:
     loaded = yaml.load(
-        (ROOT / ".github" / "workflows" / "publish.yml").read_text(),
+        (ROOT / ".github" / "workflows" / name).read_text(),
         Loader=yaml.BaseLoader,
     )
     assert isinstance(loaded, dict)
     return loaded
 
 
-def _bench_workflow() -> dict[str, Any]:
-    loaded = yaml.load(
-        (ROOT / ".github" / "workflows" / "bench.yml").read_text(),
-        Loader=yaml.BaseLoader,
-    )
-    assert isinstance(loaded, dict)
-    return loaded
+def _uses_steps(job: dict[str, Any], prefix: str) -> list[dict[str, Any]]:
+    return [step for step in job["steps"] if str(step.get("uses", "")).startswith(prefix)]
 
 
-def _publish_step(job: dict[str, Any]) -> dict[str, Any]:
-    steps = job["steps"]
-    matches = [step for step in steps if str(step.get("uses", "")).startswith(PUBLISH_ACTION)]
-    assert len(matches) == 1
-    return matches[0]
+def test_publish_workflow_has_one_package_and_job_scoped_oidc() -> None:
+    workflow = _workflow("publish.yml")
+    inputs = workflow["on"]["workflow_dispatch"].get("inputs", {})
+    jobs = workflow["jobs"]
 
-
-def test_publish_workflow_exposes_each_bootstrap_package() -> None:
-    workflow = _workflow()
-    inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-
-    assert set(inputs["package"]["options"]) == _expected_projects()
-    assert {"bootstrap-testpypi", "bootstrap-pypi"}.issubset(inputs["target"]["options"])
-
-
-def test_publish_workflow_scopes_normal_and_bootstrap_artifacts() -> None:
-    jobs = _workflow()["jobs"]
-
-    for job_name in ("publish-testpypi", "publish-pypi"):
-        assert _publish_step(jobs[job_name])["with"]["packages-dir"] == "release/all/"
-
-    for job_name in ("bootstrap-testpypi", "bootstrap-pypi"):
-        job = jobs[job_name]
-        assert "SANKA_MIGRATE_BOOTSTRAP_ENABLED" in job["if"]
-        assert "inputs.package" in job["environment"]
-        assert _publish_step(job)["with"]["packages-dir"] == (
-            "release/packages/${{ inputs.package }}/"
-        )
-
-
-def test_only_publish_jobs_receive_oidc_permission() -> None:
-    jobs = _workflow()["jobs"]
-
+    assert set(inputs) == {"confirmation"}
+    assert set(jobs) == {"build", "publish"}
     assert "id-token" not in jobs["build"].get("permissions", {})
-    for job_name, job in jobs.items():
-        if job_name == "build":
-            continue
-        assert job["permissions"] == {"id-token": "write"}
+    assert jobs["publish"]["permissions"] == {"id-token": "write"}
+    assert jobs["publish"]["environment"] == "pypi"
+
+    source = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
+    assert "sanka-migrate" not in source
+    assert source.count(PUBLISH_ACTION) == 1
+
+
+def test_publish_job_downloads_and_hash_checks_the_build_artifact() -> None:
+    jobs = _workflow("publish.yml")["jobs"]
+    build = jobs["build"]
+    publish = jobs["publish"]
+    uploads = _uses_steps(build, "actions/upload-artifact@")
+    downloads = _uses_steps(publish, "actions/download-artifact@")
+    publishers = _uses_steps(publish, PUBLISH_ACTION)
+
+    assert len(uploads) == len(downloads) == len(publishers) == 1
+    assert uploads[0]["with"]["name"] == downloads[0]["with"]["name"]
+    assert uploads[0]["with"]["path"] == "sanka/release/"
+    assert downloads[0]["with"]["path"] == "release/"
+    assert publishers[0]["with"]["packages-dir"] == "release/"
+    verification_steps = [
+        step for step in publish["steps"] if "sha256sum --check SHA256SUMS" in step.get("run", "")
+    ]
+    assert len(verification_steps) == 1
+    assert "rm SHA256SUMS SOURCE_COMMIT" in verification_steps[0]["run"]
+
+
+def test_ci_and_publish_do_not_require_private_cross_repo_checkout() -> None:
+    for workflow_name in ("ci.yml", "publish.yml"):
+        workflow = _workflow(workflow_name)
+        job_name = "check" if workflow_name == "ci.yml" else "build"
+        job = workflow["jobs"][job_name]
+        extension_checkouts = [
+            step
+            for step in _uses_steps(job, "actions/checkout@")
+            if step.get("with", {}).get("repository") == "sankaHQ/extensions"
+        ]
+
+        assert extension_checkouts == []
+        assert "SANKA_CONNECTOR_SDK_SOURCE" not in job.get("env", {})
+        assert job["defaults"]["run"]["working-directory"] == "sanka"
+
+
+def test_ci_and_publish_install_optional_mcp_dependencies() -> None:
+    for workflow_name in ("ci.yml", "publish.yml"):
+        workflow = _workflow(workflow_name)
+        job_name = "check" if workflow_name == "ci.yml" else "build"
+        runs = [step.get("run") for step in workflow["jobs"][job_name]["steps"]]
+
+        assert "uv sync --frozen --all-packages --all-extras" in runs
+
+
+def test_ci_defers_connector_e2e_until_marketplace_artifacts_exist() -> None:
+    job = _workflow("ci.yml")["jobs"]["check"]
+
+    assert "services" not in job
+    assert "SANKA_MIGRATE_TEST_POSTGRES_DSN" not in job.get("env", {})
+    assert "SANKA_MIGRATE_TEST_CLICKHOUSE_URL" not in job.get("env", {})
 
 
 def test_private_bench_credentials_only_run_on_trusted_main() -> None:
-    workflow = _bench_workflow()
+    workflow = _workflow("bench.yml")
     triggers = workflow["on"]
     assert "pull_request" not in triggers
     assert triggers == {"push": {"branches": ["main"]}}

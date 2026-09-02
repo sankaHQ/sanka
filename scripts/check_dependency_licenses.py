@@ -9,6 +9,7 @@ from importlib.metadata import Distribution, distributions
 ALLOWED_EXPRESSIONS = {
     "AGPL-3.0-only AND Apache-2.0",
     "AGPL-3.0-only",
+    "Apache-2.0 AND AGPL-3.0-only",
     "Apache-2.0",
     "Apache-2.0 OR BSD-2-Clause",
     "Apache-2.0 OR BSD-3-Clause",
@@ -42,8 +43,7 @@ LEGACY_METADATA_LICENSES = {
 }
 
 LOCAL_DISTRIBUTIONS = {
-    "sanka-migrate",
-    "sanka-migrate-mcp",
+    "sanka-cli",
 }
 
 

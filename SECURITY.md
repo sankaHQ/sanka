@@ -20,9 +20,10 @@ policy.
 
 ## Security boundaries
 
-This repository contains the local migration runtime, CLI engine, generated
-application tooling, and standalone MCP package. Source records, application
-code, schemas, and generated HTTP traffic are treated as untrusted inputs.
+This repository contains the unified CLI, local migration runtime, generated
+application tooling, connector host, and optional MCP integration. Source
+records, application code, marketplace artifacts, schemas, and generated HTTP
+traffic are treated as untrusted inputs.
 
 Reviewed plan hashes, exact candidate sets, configured source scope, credential
 references, and local state permissions are security boundaries. Mutating

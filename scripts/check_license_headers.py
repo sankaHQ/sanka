@@ -15,9 +15,10 @@ import sys
 from pathlib import Path
 
 LICENSE_ZONES: list[tuple[str, str]] = [
-    # This must precede packages/sanka-migrate because matching is prefix based.
-    ("packages/sanka-migrate-mcp", "Apache-2.0"),
-    ("packages/sanka-migrate", "AGPL-3.0-only"),
+    ("packages/sanka-cli/src/sanka_cli", "Apache-2.0"),
+    ("packages/sanka-cli/src/sanka_connector", "Apache-2.0"),
+    ("packages/sanka-cli/src/sanka", "AGPL-3.0-only"),
+    ("packages/sanka-cli/tests", "AGPL-3.0-only"),
     ("scripts", "Apache-2.0"),
     ("tests", "Apache-2.0"),
     ("docs", "Apache-2.0"),

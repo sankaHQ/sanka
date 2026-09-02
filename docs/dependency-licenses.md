@@ -1,35 +1,34 @@
 # Dependency license review
 
-CI reruns `scripts/check_dependency_licenses.py` against the locked workspace
-and fails on unknown license metadata, an unapproved expression, or an
-unexpected GPL / AGPL dependency outside this repository's own AGPL runtime.
+CI runs `scripts/check_dependency_licenses.py` against the locked workspace and
+fails on missing license metadata, an unapproved expression, or an unexpected
+strong-copyleft dependency outside the local `sanka-cli` distribution.
 
-## Published runtime and MCP dependencies
+## Published dependencies
 
-| Dependency family | License | Used by | Review note |
-|---|---|---|---|
-| `sanka-connector-sdk` | Apache-2.0 | runtime connector contract and discovery | Sanka-owned, zero-dependency interface package published from `sankaHQ/extensions` |
-| PyYAML | MIT | runtime configuration | permissive |
-| FastAPI, Starlette, Uvicorn, Click, python-dotenv | MIT / BSD-3-Clause | optional runtime compatibility extra and MCP transport | separate optional dependencies; not installed by the default runtime |
-| httpx, httpcore, idna | BSD-3-Clause | optional runtime compatibility extra and standalone MCP server | permissive |
-| mcp, pydantic, pydantic-core, pydantic-settings | MIT | standalone MCP server | permissive; Pydantic Settings is temporarily constrained below 2.15 to avoid its unresolved FastMCP lifespan warning |
-| cryptography | Apache-2.0 OR BSD-3-Clause | MCP authentication framework transitive dependency | permissive; the stdio server does not configure authentication |
-| cffi, pycparser | MIT-0, BSD-3-Clause | cryptography transitive dependencies | permissive |
-| attrs, jsonschema, jsonschema-specifications, referencing, rpds-py | MIT | MCP schema validation transitive dependencies | permissive |
-| python-multipart, httpx-sse, sse-starlette | Apache-2.0 / BSD-3-Clause | MCP transport transitive dependencies | permissive; the packaged entry point uses stdio |
-| anyio, h11, urllib3 | MIT | HTTP transitive dependencies | permissive |
-| certifi | MPL-2.0 | HTTP transitive dependency | file-level copyleft; consumed unmodified as a separate package |
+| Dependency family | License | Use |
+|---|---|---|
+| Click | BSD-3-Clause | CLI parsing |
+| httpx, httpcore, idna | BSD-3-Clause | hosted and public HTTP clients |
+| keyring | MIT | hosted credential storage |
+| platformdirs | MIT | user configuration paths |
+| PyYAML | MIT | migration specifications |
+| Rich | MIT | terminal output |
 
-First-party provider dependencies are reviewed and published from
-`sankaHQ/extensions`; they are not dependencies of `sanka-migrate`.
-Dependencies such as Tortoise ORM, SQLAlchemy, psycopg, and aiosqlite belong to
-the generated destination project and are recorded in its `pyproject.toml` and
-`uv.lock`, not in Sanka's own environment.
+The optional `mcp` extra adds `mcp`, Pydantic, and Pydantic Settings plus their
+transitive transport and schema dependencies. Their resolved MIT, BSD,
+Apache-2.0, MPL-2.0, and PSF expressions remain checked by the same guard.
 
-Development-only dependencies are not included in published runtime metadata.
+The embedded `sanka_connector` package is Sanka-owned Apache-2.0 source, not a
+separate runtime dependency. Connector and migration-extension wheels come
+from the verified GitHub marketplace. Their licenses and third-party driver
+dependencies are checked in `sankaHQ/extensions`; none are dependencies of the
+base CLI.
 
-## Review boundary
+FastAPI, Django, DRF, database drivers, and ORMs used by generated output belong
+to that generated project's environment. Test-only dependencies are not
+included in published metadata.
 
-This is an engineering compatibility review, not legal advice. Any future
-vendoring, copying, static linking, or modification of third-party code
-requires a fresh review even if the dependency name already appears above.
+This is an engineering compatibility review, not legal advice. Vendoring,
+copying, static linking, or modifying a third-party component requires a fresh
+review even when its package name already appears here.

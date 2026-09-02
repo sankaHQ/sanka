@@ -21,7 +21,7 @@ Run these commands from the Django repository root and from the project's
 existing Python 3.12+ environment:
 
 ```bash
-python -m pip install sanka-cli sanka-migrate
+uv tool install sanka-cli
 
 sanka scan
 sanka plan .
@@ -30,16 +30,14 @@ sanka test
 sanka verify
 ```
 
-The lightweight `sanka-cli` distribution owns the `sanka` console command. The
-`sanka-migrate` distribution owns the local engine and its explicit
-`sanka-migrate` command; after both packages are installed, `sanka` delegates
-these local lifecycle verbs to the engine.
+The single `sanka-cli` distribution owns both the `sanka` command and local
+engine. These commands are tokenless. Hosted authentication is checked only
+when routing selects a hosted command or an explicit cloud migration.
 
 ## CLI and SDK execution model
 
-There is one local migration implementation. Human terminal commands reach it
-through `sanka`, while both `sanka-sdk` packages expose thin adapters over the
-explicit `sanka-migrate` executable:
+There is one local migration implementation. Human terminal commands and both
+`sanka-sdk` adapters reach it through the `sanka` executable:
 
 | Step | Human CLI | Python SDK | Node.js SDK |
 |---|---|---|---|
@@ -49,11 +47,11 @@ explicit `sanka-migrate` executable:
 | Test | `sanka test` | `migrate.test()` | `await migrate.test()` |
 | Verify | `sanka verify` | `migrate.verify()` | `await migrate.verify()` |
 
-The SDK adapters execute `sanka-migrate <command> ... --json` as a local
-subprocess and parse its `sanka-cli/v1` envelope. They are non-interactive,
-require a separately installed `sanka-migrate` executable, and do not call the
-hosted Sanka API or require an API token. Only arguments supplied by the caller
-are forwarded, so framework detection, defaults, validation, and future recipe
+The SDK adapters execute `sanka <command> ... --json` as a local subprocess and
+parse its `sanka-cli/v1` envelope. They are non-interactive, require a
+separately installed `sanka-cli`, and do not call the hosted Sanka API or
+require an API token for local commands. Only caller-supplied arguments are
+forwarded, so framework detection, defaults, validation, and future recipe
 selection remain owned by the runtime.
 
 The plan hash has the same safety meaning on every surface: `apply` must receive

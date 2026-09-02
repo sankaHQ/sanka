@@ -1,34 +1,34 @@
 # Sanka Extensions and the Connector SDK
 
-The Apache-2.0 extension SDKs and independently installable extensions live in the
-separate [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions) repository. The
-Connector SDK is its first stable interface and is intentionally limited to
-local/offline migrations.
+The canonical Apache-2.0 extension SDKs and implementations live in
+[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions). This repository
+embeds a byte-for-byte synchronized `sanka_connector` import package in
+`sanka-cli`, so the base CLI does not depend on a separate SDK distribution.
 
-The `sanka-connector-sdk` distribution provides the zero-dependency
-`sanka_connector` interface: connector protocols, capability declarations,
-record and schema types, credential-provider contracts, provisioning types,
-registration helpers, and the structured error taxonomy. Provider packages
-such as `sanka-connector-postgres` depend on that SDK and declare only the
-third-party libraries needed by that provider.
+The Connector SDK defines connector roles, typed source and destination
+protocols, optional capabilities, records, schemas, credentials, provisioning,
+registration, and stable errors. It has no runtime dependencies and never
+imports the AGPL `sanka` runtime.
 
-Sanka discovers installed providers through the `sanka.connectors` Python
-entry-point group. The AGPL-3.0-only `sanka-migrate` runtime depends on the SDK,
-but it does not bundle provider implementations or their dependencies. The
-legacy `sanka.connector` import remains a compatibility alias; new connector
-code should import `sanka_connector` directly.
+Provider implementations remain separate wheels because a migration should
+install only the drivers it needs. Those wheels are immutable GitHub release
+assets referenced by exact URL and SHA-256 digest in marketplace manifests;
+they are not installed from PyPI. Users select a reviewed component ID:
 
-The broader repository can host typed framework, database, language, library,
-and file extensions. Sanka currently discovers connector extensions that are already
-installed. It does not silently execute or download arbitrary community code
-during `scan` or `plan`. A future resolver will match reviewed extension metadata to
-a shallow project fingerprint, materialize exact artifacts in an isolated
-environment, and lock their names, versions, capabilities, and hashes into the
-plan.
+```bash
+sanka extension add sanka/markdown
+sanka extension add sanka/sqlite
+```
 
-SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid
-are not connector distributions. They execute through Sanka's hosted System
-Migration API, where provider credentials, managed jobs, and audit evidence
-remain private to the hosted runtime.
+The extension manager creates an isolated environment from the complete
+manifest wheel set. A connector host loads the existing `sanka.connectors`
+entry points there and proxies their typed operations over
+`sanka-connector/v1`. Marketplace code never imports into the main CLI process.
 
-**Status: pre-release, SPI v1 in place.** Shapes may still move before 0.1.0.
+Git marketplaces are pinned to immutable commits and content digests.
+Third-party marketplaces require explicit trust. Unavailable, mismatched, or
+incompatible artifacts fail closed; PyPI is not a fallback.
+
+SaaS providers such as HubSpot, Salesforce, and SendGrid execute through
+Sanka's hosted migration service, where credentials, managed jobs, and audit
+evidence remain separately governed.

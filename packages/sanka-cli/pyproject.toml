@@ -1,0 +1,45 @@
+[project]
+name = "sanka-cli"
+version = "0.2.0"
+description = "Sanka command-line interface and migration runtime"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0 AND AGPL-3.0-only"
+license-files = ["LICENSES/*", "NOTICE"]
+authors = [{ name = "Sanka, Inc." }]
+keywords = ["migration", "etl", "sanka", "data", "cli"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = [
+  "click>=8.1,<9",
+  "httpx>=0.27,<1",
+  "keyring>=25,<26",
+  "platformdirs>=4,<5",
+  "pyyaml>=6",
+  "rich>=13,<15",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.12,<2", "pydantic>=2.11,<3", "pydantic-settings>=2.10,<3"]
+
+[project.scripts]
+sanka = "sanka_cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/sankaHQ/sanka"
+Issues = "https://github.com/sankaHQ/sanka/issues"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "src/sanka",
+  "src/sanka_cli",
+  "src/sanka_connector",
+]
