@@ -96,6 +96,7 @@ class ConnectorHostClient:
                 [
                     str(self.python),
                     "-I",
+                    "-B",
                     "-m",
                     "sanka.runtime.connector_host",
                     "--site-packages",

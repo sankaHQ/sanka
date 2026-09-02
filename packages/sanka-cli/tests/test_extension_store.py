@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from packaging.tags import sys_tags
 
 from sanka.runtime.extensions import ExtensionError, fingerprint_repository, load_marketplace
 from sanka.runtime.extensions import store as extension_store
@@ -255,9 +256,11 @@ def _wheel(
     requires: tuple[str, ...] = (),
     purelib: bool = True,
     tag: str = "py3-none-any",
+    wheel_tags: tuple[str, ...] | None = None,
     cli_source: str = "def main():\n    return 0\n",
     data_scheme: str | None = None,
     extra_members: tuple[tuple[str, str], ...] = (),
+    entry_point: bool = True,
 ) -> tuple[str, bytes, str]:
     normalized = distribution.replace("-", "_").replace(".", "_")
     name = f"{normalized}-{version}-{tag}.whl"
@@ -275,17 +278,19 @@ def _wheel(
         archive.writestr(f"{normalized}/__init__.py", "__version__ = 'fixture'\n")
         archive.writestr(f"{normalized}/cli.py", cli_source)
         archive.writestr(f"{dist_info}/METADATA", "\n".join(metadata))
+        tags = "".join(f"Tag: {item}\n" for item in (wheel_tags or (tag,)))
         archive.writestr(
             f"{dist_info}/WHEEL",
             "Wheel-Version: 1.0\n"
             "Generator: sanka-test\n"
             f"Root-Is-Purelib: {'true' if purelib else 'false'}\n"
-            f"Tag: {tag}\n",
+            f"{tags}",
         )
-        archive.writestr(
-            f"{dist_info}/entry_points.txt",
-            f"[console_scripts]\n{executable} = {normalized}.cli:main\n",
-        )
+        if entry_point:
+            archive.writestr(
+                f"{dist_info}/entry_points.txt",
+                f"[console_scripts]\n{executable} = {normalized}.cli:main\n",
+            )
         archive.writestr(f"{dist_info}/RECORD", "")
         if data_scheme is not None:
             archive.writestr(
@@ -959,7 +964,7 @@ def test_undeclared_wheel_requirement_is_rejected(
     assert raised.value.details["requirement"] == "not-declared>=1"
 
 
-def test_native_tag_is_rejected_even_when_wheel_claims_purelib(
+def test_incompatible_native_wheel_fails_before_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, _ = _marketplace(tmp_path / "source")
@@ -967,7 +972,7 @@ def test_native_tag_is_rejected_even_when_wheel_claims_purelib(
         "example-demo",
         "0.1.0",
         "example-demo",
-        tag="cp312-cp312-macosx_14_0_arm64",
+        tag="cp99-cp99-nowhere",
     )
     _replace_wheel(source, name, wheel)
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
@@ -977,7 +982,117 @@ def test_native_tag_is_rejected_even_when_wheel_claims_purelib(
     with pytest.raises(ExtensionError) as raised:
         store.add_extension("example/demo")
 
-    assert raised.value.code == "SANKA_EXTENSION_ARTIFACT_INVALID"
+    assert raised.value.code == "SANKA_EXTENSION_PLATFORM_UNSUPPORTED"
+
+
+def test_compatible_native_dependency_closure_selects_one_variant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, _ = _marketplace(tmp_path / "source")
+    primary_name, primary, primary_digest = _wheel(
+        "example-demo",
+        "0.1.0",
+        "example-demo",
+        requires=('example-sdk[binary]>=1.0; python_version >= "3.12"',),
+    )
+    sdk_name, sdk, sdk_digest = _wheel(
+        "example-sdk",
+        "1.0.0",
+        "example-sdk",
+        requires=(
+            'example-native==1.0; extra == "binary"',
+            'not-needed; extra == "dev"',
+        ),
+        entry_point=False,
+    )
+    compatible_tag = str(next(sys_tags()))
+    native_name, native, native_digest = _wheel(
+        "example-native",
+        "1.0.0",
+        "example-native",
+        purelib=False,
+        tag=compatible_tag,
+        entry_point=False,
+    )
+    incompatible_name, _incompatible, incompatible_digest = _wheel(
+        "example-native",
+        "1.0.0",
+        "example-native",
+        purelib=False,
+        tag="cp99-cp99-nowhere",
+        entry_point=False,
+    )
+    manifest_path = next(path for path in source.glob("*.json") if path.name != "marketplace.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wheels"] = [
+        {
+            "name": name,
+            "url": f"https://fixtures.invalid/{name}",
+            "sha256": digest,
+        }
+        for name, digest in (
+            (primary_name, primary_digest),
+            (sdk_name, sdk_digest),
+            (native_name, native_digest),
+            (incompatible_name, incompatible_digest),
+        )
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(
+        monkeypatch,
+        {primary_name: primary, sdk_name: sdk, native_name: native},
+    )
+    _fast_environments(monkeypatch)
+
+    store.add_extension("example/demo")
+
+    installation = json.loads((store.user_root / "installations.json").read_text())[
+        "installations"
+    ][0]
+    assert {Path(wheel["path"]).name for wheel in installation["wheels"]} == {
+        primary_name,
+        sdk_name,
+        native_name,
+    }
+
+
+def test_compressed_filename_tags_match_expanded_wheel_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, _ = _marketplace(tmp_path / "source")
+    name, wheel, _digest = _wheel(
+        "example-demo",
+        "0.1.0",
+        "example-demo",
+        tag="py2.py3-none-any",
+        wheel_tags=("py2-none-any", "py3-none-any"),
+    )
+    _replace_wheel(source, name, wheel)
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {name: wheel})
+    _fast_environments(monkeypatch)
+
+    store.add_extension("example/demo")
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    (
+        (
+            "posix",
+            Path(f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"),
+        ),
+        ("nt", Path("Lib/site-packages")),
+    ),
+)
+def test_environment_verification_uses_platform_site_packages(
+    platform: str,
+    expected: Path,
+) -> None:
+    assert ExtensionStore._site_packages_relative(platform) == expected
 
 
 @pytest.mark.parametrize("scheme", ["scripts", "data", "platlib", "headers", "unknown"])
