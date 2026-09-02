@@ -15,7 +15,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 from urllib.parse import urlparse
 
-from sanka.runtime.__about__ import __version__
 from sanka.runtime.extensions.model import (
     LIFECYCLE_COMMANDS,
     ExtensionError,
@@ -23,10 +22,12 @@ from sanka.runtime.extensions.model import (
     Manifest,
     MatchedEvidence,
     Matcher,
+    Provider,
     Recommendation,
     Wheel,
 )
 from sanka.runtime.hashing import content_hash
+from sanka_cli import __version__
 
 MAX_FILES = 20_000
 MAX_SOURCE_BYTES = 1024 * 1024
@@ -426,37 +427,46 @@ def _load_json(path: Path, code: str, *, data: bytes | None = None) -> dict[str,
 
 def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -> Manifest:
     code = "SANKA_EXTENSION_MANIFEST_INVALID"
+    raw = _load_json(path, code, data=data)
+    kind = raw.get("kind")
+    common = {
+        "distribution",
+        "id",
+        "kind",
+        "protocol_version",
+        "runtime",
+        "schema_version",
+        "version",
+        "wheels",
+    }
+    if raw.get("schema_version") != "sanka-extension-manifest/v2":
+        _invalid(code, path, "unsupported manifest schema version")
+    if kind == "migration":
+        keys = common | {"commands", "match", "targets"}
+    elif kind == "connector":
+        keys = common | {"providers"}
+    else:
+        _invalid(code, path, "manifest kind is unsupported")
     payload = _object(
-        _load_json(path, code, data=data),
-        {
-            "commands",
-            "distribution",
-            "id",
-            "match",
-            "protocol_version",
-            "runtime",
-            "schema_version",
-            "targets",
-            "version",
-            "wheels",
-        },
+        raw,
+        keys,
         code,
         path,
         "manifest",
     )
-    if payload["schema_version"] != "sanka-extension-manifest/v1":
-        _invalid(code, path, "unsupported manifest schema version")
     if not _valid_id(payload["id"]):
         _invalid(code, path, "extension id must be <owner>/<name>")
     version = payload["version"]
     if not isinstance(version, str) or VERSION.fullmatch(version) is None:
         _invalid(code, path, "extension version must be exact")
-    if payload["protocol_version"] != "sanka-extension/v1":
-        _invalid(code, path, "unsupported extension protocol version")
+    protocol = "sanka-extension/v1" if kind == "migration" else "sanka-connector/v1"
+    if payload["protocol_version"] != protocol:
+        _invalid(code, path, "manifest kind and protocol version differ")
 
+    distribution_key = "executable" if kind == "migration" else "entry_point"
     distribution = _object(
         payload["distribution"],
-        {"executable", "name", "version"},
+        {distribution_key, "name", "version"},
         code,
         path,
         "distribution",
@@ -464,33 +474,64 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
     if (
         not isinstance(distribution["name"], str)
         or DISTRIBUTION.fullmatch(distribution["name"]) is None
-        or not isinstance(distribution["executable"], str)
-        or DISTRIBUTION.fullmatch(distribution["executable"]) is None
+        or not isinstance(distribution[distribution_key], str)
+        or DISTRIBUTION.fullmatch(distribution[distribution_key]) is None
         or distribution["version"] != version
     ):
         _invalid(code, path, "distribution metadata is invalid or version is not exact")
 
-    commands = _string_list(payload["commands"], code=code, path=path, label="commands")
-    if not set(commands).issubset(LIFECYCLE_COMMANDS):
-        _invalid(code, path, "manifest contains an unsupported command")
-    targets = _string_list(payload["targets"], code=code, path=path, label="targets")
-    if any(IDENTIFIER.fullmatch(target) is None for target in targets):
-        _invalid(code, path, "manifest target is invalid")
+    commands: tuple[str, ...] = ()
+    targets: tuple[str, ...] = ()
+    match_all: tuple[Matcher, ...] = ()
+    match_any: tuple[Matcher, ...] = ()
+    providers: tuple[Provider, ...] = ()
+    if kind == "migration":
+        commands = _string_list(payload["commands"], code=code, path=path, label="commands")
+        if not set(commands).issubset(LIFECYCLE_COMMANDS):
+            _invalid(code, path, "manifest contains an unsupported command")
+        targets = _string_list(payload["targets"], code=code, path=path, label="targets")
+        if any(IDENTIFIER.fullmatch(target) is None for target in targets):
+            _invalid(code, path, "manifest target is invalid")
+        match = _object(payload["match"], {"all", "any"}, code, path, "match")
+        all_values = match["all"]
+        any_values = match["any"]
+        if not isinstance(all_values, list) or not isinstance(any_values, list):
+            _invalid(code, path, "match all and any must be arrays")
+        match_all = tuple(_parse_matcher(item, code, path) for item in all_values)
+        match_any = tuple(_parse_matcher(item, code, path) for item in any_values)
+        if not match_all and not match_any:
+            _invalid(code, path, "manifest must declare at least one matcher")
+        if len(set(match_all)) != len(match_all) or len(set(match_any)) != len(match_any):
+            _invalid(code, path, "manifest matchers must be unique")
+    else:
+        raw_providers = payload["providers"]
+        if not isinstance(raw_providers, list) or not raw_providers:
+            _invalid(code, path, "providers must be a non-empty array")
+        parsed_providers: list[Provider] = []
+        for raw_provider in raw_providers:
+            provider = _object(raw_provider, {"name", "roles"}, code, path, "provider")
+            name = provider["name"]
+            roles = _string_list(provider["roles"], code=code, path=path, label="roles")
+            if (
+                not isinstance(name, str)
+                or IDENTIFIER.fullmatch(name) is None
+                or not set(roles).issubset({"source", "destination"})
+            ):
+                _invalid(code, path, "provider name or role is unsupported")
+            parsed_providers.append(
+                Provider(
+                    name,
+                    tuple(role for role in ("source", "destination") if role in roles),
+                )
+            )
+        if len({provider.name for provider in parsed_providers}) != len(parsed_providers):
+            _invalid(code, path, "provider names must be unique")
+        if distribution["entry_point"] not in {provider.name for provider in parsed_providers}:
+            _invalid(code, path, "connector entry point must name a declared provider")
+        providers = tuple(sorted(parsed_providers, key=lambda provider: provider.name))
 
-    match = _object(payload["match"], {"all", "any"}, code, path, "match")
-    all_values = match["all"]
-    any_values = match["any"]
-    if not isinstance(all_values, list) or not isinstance(any_values, list):
-        _invalid(code, path, "match all and any must be arrays")
-    match_all = tuple(_parse_matcher(item, code, path) for item in all_values)
-    match_any = tuple(_parse_matcher(item, code, path) for item in any_values)
-    if not match_all and not match_any:
-        _invalid(code, path, "manifest must declare at least one matcher")
-    if len(set(match_all)) != len(match_all) or len(set(match_any)) != len(match_any):
-        _invalid(code, path, "manifest matchers must be unique")
-
-    runtime = _object(payload["runtime"], {"sanka_migrate"}, code, path, "runtime")
-    runtime_specifier = runtime["sanka_migrate"]
+    runtime = _object(payload["runtime"], {"sanka_cli"}, code, path, "runtime")
+    runtime_specifier = runtime["sanka_cli"]
     if not _valid_specifier(runtime_specifier):
         _invalid(code, path, "runtime compatibility range is invalid")
 
@@ -534,15 +575,18 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
         id=payload["id"],
         version=version,
         marketplace=marketplace,
+        kind=kind,
         protocol_version=payload["protocol_version"],
         distribution=distribution["name"],
         distribution_version=distribution["version"],
-        executable=distribution["executable"],
+        executable=distribution.get("executable"),
+        entry_point=distribution.get("entry_point"),
+        providers=providers,
         commands=tuple(sorted(commands)),
         match_all=match_all,
         match_any=match_any,
         targets=tuple(sorted(targets)),
-        runtime_sanka_migrate=runtime_specifier,
+        runtime_sanka_cli=runtime_specifier,
         wheels=tuple(sorted(wheels, key=lambda item: item.name)),
         digest=content_hash(payload),
     )
@@ -716,6 +760,8 @@ def recommend(
         evidence_by_matcher.setdefault((evidence.kind, evidence.value), []).append(evidence)
     recommendations: list[Recommendation] = []
     for manifest in manifests:
+        if manifest.kind != "migration":
+            continue
         all_matches = [
             evidence_by_matcher.get((matcher.kind, matcher.value), [])
             for matcher in manifest.match_all
@@ -734,7 +780,7 @@ def recommend(
         current_state = state.get(manifest.id)
         if current_state in STATE_VALUES:
             statuses.add(current_state)
-        if not _compatible(manifest.runtime_sanka_migrate, __version__):
+        if not _compatible(manifest.runtime_sanka_cli, __version__):
             statuses.add("incompatible")
         recommendations.append(
             Recommendation(

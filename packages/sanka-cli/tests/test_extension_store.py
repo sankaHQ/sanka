@@ -120,8 +120,11 @@ def _installed_default(
         manifest_digest="sha256:" + "2" * 64,
         distribution=_DEFAULT_EXECUTABLE,
         artifact_digest=store._distribution_digest(distribution),
+        kind="migration",
         protocol_version="sanka-extension/v1",
         executable=_DEFAULT_EXECUTABLE,
+        entry_point=None,
+        providers=(),
         commands=("apply", "plan", "scan", "test", "verify"),
         enabled=True,
         configuration_digest="sha256:" + "3" * 64,
@@ -315,7 +318,7 @@ def _marketplace(
     version: str = "0.1.0",
     distribution: str = "example-demo",
     executable: str = "example-demo",
-    runtime: str = ">=0.1.0a10,<0.2",
+    runtime: str = ">=0.2.0,<0.3",
     requires: tuple[str, ...] = (),
     purelib: bool = True,
     cli_source: str = "def main():\n    return 0\n",
@@ -346,7 +349,8 @@ def _marketplace(
     (root / manifest_name).write_text(
         json.dumps(
             {
-                "schema_version": "sanka-extension-manifest/v1",
+                "schema_version": "sanka-extension-manifest/v2",
+                "kind": "migration",
                 "id": extension_id,
                 "version": version,
                 "protocol_version": "sanka-extension/v1",
@@ -358,7 +362,7 @@ def _marketplace(
                 "commands": ["scan"],
                 "match": {"all": [{"kind": "language", "value": "python"}], "any": []},
                 "targets": ["fastapi"],
-                "runtime": {"sanka_migrate": runtime},
+                "runtime": {"sanka_cli": runtime},
                 "wheels": [
                     {
                         "name": wheel_name,
@@ -371,6 +375,187 @@ def _marketplace(
         encoding="utf-8",
     )
     return root, wheel
+
+
+def _connector_marketplace(root: Path) -> tuple[Path, dict[str, bytes]]:
+    root.mkdir(parents=True)
+
+    def wheel(
+        distribution: str,
+        source: str,
+        *,
+        entry_points: str = "",
+        requires: tuple[str, ...] = (),
+    ) -> tuple[str, bytes, str]:
+        version = "0.1.0"
+        normalized = distribution.replace("-", "_")
+        name = f"{normalized}-{version}-py3-none-any.whl"
+        dist_info = f"{normalized}-{version}.dist-info"
+        metadata_text = "\n".join(
+            [
+                "Metadata-Version: 2.1",
+                f"Name: {distribution}",
+                f"Version: {version}",
+                *(f"Requires-Dist: {requirement}" for requirement in requires),
+                "",
+                "",
+            ]
+        )
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr(f"{normalized}/__init__.py", source)
+            archive.writestr(f"{dist_info}/METADATA", metadata_text)
+            archive.writestr(
+                f"{dist_info}/WHEEL",
+                "Wheel-Version: 1.0\nGenerator: sanka-test\n"
+                "Root-Is-Purelib: true\nTag: py3-none-any\n",
+            )
+            if entry_points:
+                archive.writestr(f"{dist_info}/entry_points.txt", entry_points)
+            archive.writestr(f"{dist_info}/RECORD", "")
+        data = output.getvalue()
+        return name, data, hashlib.sha256(data).hexdigest()
+
+    sdk_name, sdk, sdk_digest = wheel("sanka-connector-sdk", "")
+    connector_name, connector, connector_digest = wheel(
+        "example-connector",
+        "from sanka_connector import (\n"
+        "    ConnectorRegistration, Inventory, RecordPage, SourceObject\n"
+        ")\n"
+        "class Source:\n"
+        "    provider = 'example'\n"
+        "    binding_kind = 'fixture'\n"
+        "    async def discover_objects(self, credentials):\n"
+        "        return [SourceObject(key='items', label='Items', canonical_type='items')]\n"
+        "    async def inventory(self, credentials, *, object_types=None):\n"
+        "        return Inventory(provider='example')\n"
+        "    async def read_records(self, credentials, *, object_type, field_keys, "
+        "limit, cursor=None, source_filter=None):\n"
+        "        return RecordPage(object_key=object_type)\n"
+        "CONNECTOR = ConnectorRegistration(name='example', source=Source())\n",
+        entry_points="[sanka.connectors]\nexample = example_connector:CONNECTOR\n",
+        requires=("sanka-connector-sdk==0.1.0",),
+    )
+    manifest_name = "example-connector.json"
+    (root / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sanka-marketplace/v1",
+                "extensions": [{"id": "example/connector", "manifest": manifest_name}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / manifest_name).write_text(
+        json.dumps(
+            {
+                "schema_version": "sanka-extension-manifest/v2",
+                "kind": "connector",
+                "id": "example/connector",
+                "version": "0.1.0",
+                "protocol_version": "sanka-connector/v1",
+                "distribution": {
+                    "name": "example-connector",
+                    "version": "0.1.0",
+                    "entry_point": "example",
+                },
+                "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+                "providers": [{"name": "example", "roles": ["source"]}],
+                "wheels": [
+                    {
+                        "name": sdk_name,
+                        "url": f"https://fixtures.invalid/{sdk_name}",
+                        "sha256": sdk_digest,
+                    },
+                    {
+                        "name": connector_name,
+                        "url": f"https://fixtures.invalid/{connector_name}",
+                        "sha256": connector_digest,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root, {sdk_name: sdk, connector_name: connector}
+
+
+def test_connector_add_resolve_remove_and_readd_uses_isolated_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheels = _connector_marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, wheels)
+
+    first = store.add_extension("example/connector")
+    environment = store.user_root / "environments" / first.artifact_digest
+    registration = store.resolve_connector("example")
+
+    assert first.kind == "connector"
+    assert first.executable is None
+    assert first.entry_point == "example"
+    assert [(provider.name, provider.roles) for provider in first.providers] == [
+        ("example", ("source",))
+    ]
+    assert "include-system-site-packages = false" in (environment / "pyvenv.cfg").read_text(
+        encoding="utf-8"
+    )
+    assert registration.name == "example"
+    assert registration.source is not None
+    assert registration.destination is None
+
+    store.close()
+    store.remove_extension("example/connector")
+    assert not environment.exists()
+    with pytest.raises(ExtensionError) as removed:
+        store.resolve_connector("example")
+    assert removed.value.code == "SANKA_EXTENSION_REQUIRED"
+
+    second = store.add_extension("example/connector")
+    assert second == first
+    assert store.resolve_locked("example/connector") == second
+    store.close()
+
+
+def test_connector_runtime_incompatibility_fails_before_artifact_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, _wheels = _connector_marketplace(tmp_path / "source")
+    manifest_path = source / "example-connector.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtime"] = {"sanka_cli": ">=999.0,<1000.0"}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    monkeypatch.setattr(
+        "sanka.runtime.extensions.store.urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not fetch")),
+    )
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/connector")
+
+    assert raised.value.code == "SANKA_EXTENSION_INCOMPATIBLE"
+
+
+def test_connector_lock_rejects_non_string_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheels = _connector_marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, wheels)
+    store.add_extension("example/connector")
+    lock_path = store.project_root / ".sanka" / "extensions.lock"
+    payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    payload["extensions"][0]["providers"][0]["roles"] = [{}]
+    lock_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ExtensionError) as raised:
+        store.resolve_locked("example/connector")
+
+    assert raised.value.code == "SANKA_EXTENSION_LOCK_INVALID"
 
 
 def _responses(monkeypatch: pytest.MonkeyPatch, wheels: dict[str, bytes]) -> None:
@@ -435,7 +620,7 @@ def _configured_store(
     *,
     extension_id: str = "example/demo",
     version: str = "0.1.0",
-    runtime: str = ">=0.1.0a10,<0.2",
+    runtime: str = ">=0.2.0,<0.3",
     requires: tuple[str, ...] = (),
 ) -> tuple[ExtensionStore, Path, bytes]:
     source, wheel = _marketplace(
@@ -1632,7 +1817,8 @@ def test_lock_json_is_atomic_sorted_and_has_exact_entry_fields(
         (source / manifest_name).write_text(
             json.dumps(
                 {
-                    "schema_version": "sanka-extension-manifest/v1",
+                    "schema_version": "sanka-extension-manifest/v2",
+                    "kind": "migration",
                     "id": extension_id,
                     "version": version,
                     "protocol_version": "sanka-extension/v1",
@@ -1644,7 +1830,7 @@ def test_lock_json_is_atomic_sorted_and_has_exact_entry_fields(
                     "commands": ["scan"],
                     "match": {"all": [{"kind": "language", "value": "python"}], "any": []},
                     "targets": ["fastapi"],
-                    "runtime": {"sanka_migrate": ">=0.1.0a10,<0.2"},
+                    "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
                     "wheels": [
                         {
                             "name": wheel_name,

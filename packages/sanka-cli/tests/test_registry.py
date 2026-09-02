@@ -5,44 +5,66 @@ from typing import cast
 
 import pytest
 
-import sanka.runtime.registry as registry_module
+from sanka.runtime.extensions import ExtensionError
+from sanka.runtime.extensions import store as extension_store
 from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
-from sanka_connector import ENTRY_POINT_GROUP, ConnectorRegistration
+from sanka_connector import ConnectorRegistration
 from sanka_connector.protocols import SourceConnector
 
 SOURCE = cast(SourceConnector, object())
 
 
-class _EntryPoint:
-    def __init__(self, name: str, registration: ConnectorRegistration | None = None) -> None:
-        self.name = name
-        self.registration = registration
-        self.loaded = False
+def test_discovery_resolves_marketplace_connector_lazily_through_store() -> None:
+    calls: list[str] = []
 
-    def load(self) -> ConnectorRegistration:
-        self.loaded = True
-        if self.registration is None:
-            raise AssertionError(f"hosted provider {self.name!r} must not be imported")
-        return self.registration
+    def resolve(provider: str) -> ConnectorRegistration:
+        calls.append(provider)
+        return ConnectorRegistration(name=provider, source=SOURCE)
 
-
-def test_discovery_does_not_import_hosted_system_providers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    hosted = _EntryPoint("hubspot")
-    local = _EntryPoint("markdown", ConnectorRegistration(name="markdown", source=SOURCE))
-
-    def fake_entry_points(*, group: str) -> list[_EntryPoint]:
-        assert group == ENTRY_POINT_GROUP
-        return [hosted, local]
-
-    monkeypatch.setattr(registry_module, "entry_points", fake_entry_points)
-
-    registry = ConnectorRegistry.discover()
+    registry = ConnectorRegistry.discover(resolve, providers=("markdown",))
 
     assert registry.names() == ["markdown"]
-    assert not hosted.loaded
-    assert local.loaded
+    assert calls == []
+    assert registry.roles("markdown") == ("source",)
+    assert calls == ["markdown"]
+    assert registry.source("markdown") is SOURCE
+    assert calls == ["markdown"]
+
+
+def test_default_discovery_uses_extension_store_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registration = ConnectorRegistration(name="markdown", source=SOURCE)
+
+    class Store:
+        def __init__(self, _root: object) -> None:
+            self.closed = False
+
+        def connector_providers(self) -> tuple[str, ...]:
+            return ("markdown",)
+
+        def resolve_connector(self, provider: str) -> ConnectorRegistration:
+            assert provider == "markdown"
+            return registration
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(extension_store, "ExtensionStore", Store)
+    registry = ConnectorRegistry.discover()
+
+    assert registry.source("markdown") is SOURCE
+    registry.close()
+
+
+def test_missing_store_connector_is_an_unknown_connector() -> None:
+    def missing(_provider: str) -> ConnectorRegistration:
+        raise ExtensionError("SANKA_EXTENSION_REQUIRED", "not locked")
+
+    registry = ConnectorRegistry.discover(missing, providers=("sqlite",))
+
+    with pytest.raises(UnknownConnectorError, match="no installed connector"):
+        registry.source("sqlite")
 
 
 def test_explicit_registration_cannot_enable_a_hosted_system_provider() -> None:
@@ -53,3 +75,14 @@ def test_explicit_registration_cannot_enable_a_hosted_system_provider() -> None:
     assert registry.names() == []
     with pytest.raises(UnknownConnectorError, match="hosted System Migration API"):
         registry.roles("salesforce")
+
+
+def test_hosted_system_provider_never_reaches_store_resolver() -> None:
+    def poisoned(_provider: str) -> ConnectorRegistration:
+        raise AssertionError("hosted provider must not reach local connector store")
+
+    registry = ConnectorRegistry.discover(poisoned, providers=("hubspot",))
+
+    assert registry.names() == []
+    with pytest.raises(UnknownConnectorError, match="hosted System Migration API"):
+        registry.roles("hubspot")

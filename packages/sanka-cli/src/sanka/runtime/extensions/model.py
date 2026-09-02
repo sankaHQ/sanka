@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 LIFECYCLE_COMMANDS = frozenset({"apply", "plan", "scan", "test", "verify"})
 
@@ -45,6 +45,12 @@ class Wheel:
 
 
 @dataclass(frozen=True)
+class Provider:
+    name: str
+    roles: tuple[Literal["source", "destination"], ...]
+
+
+@dataclass(frozen=True)
 class Fingerprint:
     languages: tuple[str, ...]
     frameworks: tuple[str, ...]
@@ -58,15 +64,18 @@ class Manifest:
     id: str
     version: str
     marketplace: str
+    kind: Literal["migration", "connector"]
     protocol_version: str
     distribution: str
     distribution_version: str
-    executable: str
+    executable: str | None
+    entry_point: str | None
+    providers: tuple[Provider, ...]
     commands: tuple[str, ...]
     match_all: tuple[Matcher, ...]
     match_any: tuple[Matcher, ...]
     targets: tuple[str, ...]
-    runtime_sanka_migrate: str
+    runtime_sanka_cli: str
     wheels: tuple[Wheel, ...]
     digest: str
 

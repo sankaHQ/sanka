@@ -9,7 +9,6 @@ from typing import Any, cast
 
 import pytest
 
-from sanka.runtime import __version__
 from sanka.runtime.extensions import (
     ExtensionError,
     Manifest,
@@ -19,13 +18,14 @@ from sanka.runtime.extensions import (
     load_marketplace,
     recommend,
 )
+from sanka_cli import __version__
 
 FIXTURE = Path(__file__).parent / "fixtures" / "extension_marketplace"
 
 
 def drf_manifest() -> Manifest:
     manifest = load_marketplace(FIXTURE)[0]
-    return replace(manifest, runtime_sanka_migrate=f"=={__version__}")
+    return replace(manifest, runtime_sanka_cli=f"=={__version__}")
 
 
 def write_snapshot(root: Path, manifest: dict[str, object]) -> None:
@@ -47,6 +47,88 @@ def fixture_manifest() -> dict[str, Any]:
         dict[str, Any],
         json.loads((FIXTURE / "drf-to-fastapi.json").read_text(encoding="utf-8")),
     )
+
+
+def connector_manifest() -> dict[str, Any]:
+    return {
+        "schema_version": "sanka-extension-manifest/v2",
+        "kind": "connector",
+        "id": "sanka/sqlite",
+        "version": "0.1.0a11",
+        "protocol_version": "sanka-connector/v1",
+        "distribution": {
+            "name": "sanka-connector-sqlite",
+            "version": "0.1.0a11",
+            "entry_point": "sqlite",
+        },
+        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
+        "wheels": [
+            {
+                "name": "sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
+                "url": "https://example.test/sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
+                "sha256": "1" * 64,
+            }
+        ],
+    }
+
+
+def test_v2_connector_manifest_uses_the_shared_manifest_model(tmp_path: Path) -> None:
+    root = tmp_path / "market"
+    root.mkdir()
+    manifest = connector_manifest()
+    (root / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sanka-marketplace/v1",
+                "extensions": [{"id": manifest["id"], "manifest": "connector.json"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "connector.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    loaded = load_marketplace(root)[0]
+
+    assert loaded.kind == "connector"
+    assert loaded.executable is None
+    assert loaded.entry_point == "sqlite"
+    assert [(provider.name, provider.roles) for provider in loaded.providers] == [
+        ("sqlite", ("source", "destination"))
+    ]
+    assert loaded.runtime_sanka_cli == ">=0.2.0,<0.3"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda item: item.update(extra=True),
+        lambda item: item.update(protocol_version="sanka-extension/v1"),
+        lambda item: item["distribution"].update(executable="sqlite"),
+        lambda item: item["providers"].append({"name": "sqlite", "roles": ["source"]}),
+        lambda item: item["providers"][0].update(roles=["reader"]),
+    ],
+)
+def test_v2_connector_manifest_rejects_invalid_shape(tmp_path: Path, mutate: object) -> None:
+    root = tmp_path / "market"
+    manifest = connector_manifest()
+    mutate(manifest)  # type: ignore[operator]
+    root.mkdir()
+    (root / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "sanka-marketplace/v1",
+                "extensions": [{"id": "sanka/sqlite", "manifest": "connector.json"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "connector.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ExtensionError) as raised:
+        load_marketplace(root)
+
+    assert raised.value.code == "SANKA_EXTENSION_MANIFEST_INVALID"
 
 
 def test_drf_fingerprint_matches_with_exact_evidence(tmp_path: Path) -> None:
@@ -276,7 +358,7 @@ def test_runtime_incompatibility_is_reported_deterministically(tmp_path: Path) -
         drf_manifest(),
         match_all=(Matcher("language", "python"),),
         match_any=(),
-        runtime_sanka_migrate=">=999.0,<1000",
+        runtime_sanka_cli=">=999.0,<1000",
     )
 
     recommendation = recommend(fingerprint_repository(tmp_path), (manifest,), {})[0]
@@ -445,7 +527,7 @@ def test_descriptor_marketplace_close_failure_propagates_and_closes_all(
     ("mutate", "code"),
     [
         (
-            lambda item: item.update(schema_version="sanka-extension-manifest/v2"),
+            lambda item: item.update(schema_version="sanka-extension-manifest/v1"),
             "SANKA_EXTENSION_MANIFEST_INVALID",
         ),
         (lambda item: item.update(id="missing-slash"), "SANKA_EXTENSION_MANIFEST_INVALID"),

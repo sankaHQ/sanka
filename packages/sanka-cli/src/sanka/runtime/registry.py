@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Connector discovery via the ``sanka_connectors`` entry-point group."""
+"""Connector lookup through verified extension-store subprocess hosts."""
 
 from __future__ import annotations
 
-from importlib.metadata import entry_points
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
-from sanka_connector import ENTRY_POINT_GROUP, ConnectorRegistration
+from sanka.runtime.extensions.model import ExtensionError
+from sanka_connector import ConnectorRegistration
 from sanka_connector.protocols import DestinationConnector, SourceConnector
 
 HOSTED_SYSTEM_PROVIDERS = {
@@ -20,35 +23,54 @@ class UnknownConnectorError(ValueError):
 
 
 class ConnectorRegistry:
-    def __init__(self, registrations: dict[str, ConnectorRegistration]) -> None:
+    def __init__(
+        self,
+        registrations: dict[str, ConnectorRegistration],
+        *,
+        resolver: Callable[[str], ConnectorRegistration] | None = None,
+        providers: tuple[str, ...] = (),
+        owner: Any | None = None,
+    ) -> None:
         self._registrations = {
-            name: registration
+            name.strip().lower(): registration
             for name, registration in registrations.items()
             if name.strip().lower() not in HOSTED_SYSTEM_PROVIDERS
             and registration.name.strip().lower() not in HOSTED_SYSTEM_PROVIDERS
         }
+        self._resolver = resolver
+        self._providers = {
+            provider.strip().lower()
+            for provider in providers
+            if provider.strip().lower() not in HOSTED_SYSTEM_PROVIDERS
+        }
+        self._owner = owner
 
     @classmethod
-    def discover(cls) -> ConnectorRegistry:
-        registrations: dict[str, ConnectorRegistration] = {}
-        for entry in entry_points(group=ENTRY_POINT_GROUP):
-            # SaaS/system providers execute only in Sanka's hosted service. Do
-            # not import stale local distributions for those retired entry
-            # points, where credentials and provider clients do not belong.
-            if entry.name.strip().lower() in HOSTED_SYSTEM_PROVIDERS:
-                continue
-            loaded = entry.load()
-            if not isinstance(loaded, ConnectorRegistration):
-                raise TypeError(
-                    f"entry point {entry.name!r} in group {ENTRY_POINT_GROUP!r} must resolve"
-                    f" to a ConnectorRegistration, got {type(loaded).__name__}"
-                )
-            if loaded.name.strip().lower() not in HOSTED_SYSTEM_PROVIDERS:
-                registrations[loaded.name] = loaded
-        return cls(registrations)
+    def discover(
+        cls,
+        resolver: Callable[[str], ConnectorRegistration] | None = None,
+        *,
+        providers: tuple[str, ...] = (),
+    ) -> ConnectorRegistry:
+        if resolver is not None:
+            return cls({}, resolver=resolver, providers=providers)
+        from sanka.runtime.extensions.store import ExtensionStore
+
+        store = ExtensionStore(Path.cwd())
+        return cls(
+            {},
+            resolver=store.resolve_connector,
+            providers=store.connector_providers(),
+            owner=store,
+        )
 
     def names(self) -> list[str]:
-        return sorted(self._registrations)
+        return sorted(set(self._registrations) | self._providers)
+
+    def close(self) -> None:
+        close = getattr(self._owner, "close", None)
+        if close is not None:
+            close()
 
     def roles(self, type_name: str) -> tuple[str, ...]:
         """Return the roles exposed by one installed local provider."""
@@ -80,11 +102,25 @@ class ConnectorRegistry:
                 f"{provider} system migrations run through Sanka's hosted System "
                 "Migration API, not a local connector; use the Sanka web app or hosted API"
             )
-        try:
-            return self._registrations[type_name]
-        except KeyError:
-            available = ", ".join(self.names()) or "none"
-            raise UnknownConnectorError(
-                f"no installed connector for type {type_name!r} (available: {available}); "
-                f"install the provider package `sanka-connector-{type_name}`"
-            ) from None
+        registration = self._registrations.get(normalized)
+        if registration is not None:
+            return registration
+        if self._resolver is not None and normalized in self._providers:
+            try:
+                registration = self._resolver(normalized)
+            except ExtensionError as error:
+                if error.code != "SANKA_EXTENSION_REQUIRED":
+                    raise
+            else:
+                if registration.name.strip().lower() != normalized:
+                    raise ExtensionError(
+                        "SANKA_EXTENSION_IDENTITY",
+                        "Connector registration differs from the locked provider",
+                    )
+                self._registrations[normalized] = registration
+                return registration
+        available = ", ".join(self.names()) or "none"
+        raise UnknownConnectorError(
+            f"no installed connector for type {type_name!r} (available: {available}); "
+            f"run `sanka extension add sanka/{normalized}`"
+        )

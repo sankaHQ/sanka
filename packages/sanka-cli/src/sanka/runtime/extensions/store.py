@@ -29,8 +29,9 @@ from typing import Any, NoReturn, cast
 from urllib.parse import unquote, urlparse
 from urllib.request import urlopen
 
-from sanka.runtime.__about__ import __version__
+from sanka.runtime.connector_client import ConnectorHostClient, build_remote_connector
 from sanka.runtime.extensions.discovery import (
+    IDENTIFIER,
     STATUS_ORDER,
     _compatible,
     _normalized_distribution,
@@ -44,10 +45,13 @@ from sanka.runtime.extensions.model import (
     ExtensionError,
     Fingerprint,
     Manifest,
+    Provider,
     Recommendation,
     Wheel,
 )
 from sanka.runtime.hashing import content_hash
+from sanka_cli import __version__
+from sanka_connector import ENTRY_POINT_GROUP, ConnectorRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
@@ -364,6 +368,8 @@ class ExtensionRecord:
     marketplace: str
     marketplace_identity: str
     manifest_digest: str
+    kind: str
+    providers: tuple[Provider, ...]
     targets: tuple[str, ...]
     status: tuple[str, ...]
     wheels: tuple[Wheel, ...]
@@ -371,6 +377,9 @@ class ExtensionRecord:
     def to_dict(self) -> dict[str, Any]:
         return {
             **asdict(self),
+            "providers": [
+                asdict(provider) | {"roles": list(provider.roles)} for provider in self.providers
+            ],
             "targets": list(self.targets),
             "status": list(self.status),
             "wheels": [asdict(wheel) for wheel in self.wheels],
@@ -387,13 +396,21 @@ class LockEntry:
     distribution: str
     artifact_digest: str
     protocol_version: str
-    executable: str
+    executable: str | None
     commands: tuple[str, ...]
     enabled: bool
     configuration_digest: str
+    kind: str = "migration"
+    entry_point: str | None = None
+    providers: tuple[Provider, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self) | {"commands": list(self.commands)}
+        return asdict(self) | {
+            "commands": list(self.commands),
+            "providers": [
+                asdict(provider) | {"roles": list(provider.roles)} for provider in self.providers
+            ],
+        }
 
 
 def _exact_path(
@@ -499,13 +516,14 @@ def _create_venv(
     *,
     environment: Mapping[str, str],
     cwd: Path,
+    system_site_packages: bool = True,
 ) -> None:
     _run_fd_helper(
         environments,
         (
             "import os, sys, venv; "
             "os.fchdir(int(sys.argv[1])); "
-            "venv.EnvBuilder(with_pip=False, system_site_packages=True, "
+            f"venv.EnvBuilder(with_pip=False, system_site_packages={system_site_packages!r}, "
             "symlinks=os.name != 'nt').create(sys.argv[2])"
         ),
         [temporary],
@@ -905,6 +923,12 @@ class ExtensionStore:
         self._installation_path = self.user_root / "installations.json"
         self._disabled_path = self.user_root / "disabled.json"
         self._project_lock_path = self.project_root / ".sanka" / "extensions.lock"
+        self._connector_clients: dict[str, ConnectorHostClient] = {}
+
+    def close(self) -> None:
+        for client in self._connector_clients.values():
+            client.close()
+        self._connector_clients.clear()
 
     @contextmanager
     def execution_guard(self) -> Iterator[None]:
@@ -915,6 +939,12 @@ class ExtensionStore:
     @contextmanager
     def execution_lease(self, entry: LockEntry) -> Iterator[int]:
         """Bind the verified console script inode until its subprocess completes."""
+        if entry.kind != "migration" or entry.executable is None:
+            _error(
+                "SANKA_EXTENSION_PROTOCOL",
+                "Only migration extensions expose lifecycle executables",
+                extension_id=entry.id,
+            )
         if self.resolve_locked(entry.id) != entry:
             _error(
                 "SANKA_EXTENSION_IDENTITY",
@@ -1760,27 +1790,59 @@ class ExtensionStore:
                     "Project extension lock entry is invalid",
                     path=str(path),
                 )
-            string_fields = expected - {"commands", "enabled"}
+            string_fields = expected - {
+                "commands",
+                "enabled",
+                "entry_point",
+                "executable",
+                "providers",
+            }
+            raw_providers = value["providers"]
             if (
                 any(
                     not isinstance(value[field], str) or not value[field] for field in string_fields
                 )
                 or not isinstance(value["commands"], list)
-                or not value["commands"]
-                or len(value["commands"]) != len(set(value["commands"]))
                 or any(
                     not isinstance(command, str) or command not in LIFECYCLE_COMMANDS
                     for command in value["commands"]
                 )
+                or len(value["commands"]) != len(set(value["commands"]))
                 or value["commands"] != sorted(value["commands"])
                 or not isinstance(value["enabled"], bool)
+                or not isinstance(raw_providers, list)
+                or any(
+                    not isinstance(provider, dict)
+                    or set(provider) != {"name", "roles"}
+                    or not isinstance(provider["name"], str)
+                    or IDENTIFIER.fullmatch(provider["name"]) is None
+                    or not isinstance(provider["roles"], list)
+                    or not provider["roles"]
+                    or any(not isinstance(role, str) for role in provider["roles"])
+                    or len(provider["roles"]) != len(set(provider["roles"]))
+                    or any(role not in {"source", "destination"} for role in provider["roles"])
+                    for provider in raw_providers
+                )
             ):
                 _error(
                     "SANKA_EXTENSION_LOCK_INVALID",
                     "Project extension lock fields are invalid",
                     path=str(path),
                 )
-            entry = LockEntry(**{**value, "commands": tuple(value["commands"])})
+            providers = tuple(
+                Provider(
+                    provider["name"],
+                    tuple(role for role in ("source", "destination") if role in provider["roles"]),
+                )
+                for provider in raw_providers
+            )
+            entry = LockEntry(
+                **{
+                    **value,
+                    "commands": tuple(value["commands"]),
+                    "providers": providers,
+                }
+            )
             if (
                 not re.fullmatch(r"sha256:[0-9a-f]{64}", entry.manifest_digest)
                 or not re.fullmatch(r"[0-9a-f]{64}", entry.artifact_digest)
@@ -1789,8 +1851,33 @@ class ExtensionStore:
                     re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", entry.snapshot_digest)
                     or re.fullmatch(r"sha256:[0-9a-f]{64}", entry.snapshot_digest)
                 )
-                or entry.protocol_version != "sanka-extension/v1"
-                or "/" in entry.executable
+                or entry.kind not in {"migration", "connector"}
+                or (
+                    entry.kind == "migration"
+                    and (
+                        entry.protocol_version != "sanka-extension/v1"
+                        or not isinstance(entry.executable, str)
+                        or not entry.executable
+                        or "/" in entry.executable
+                        or entry.entry_point is not None
+                        or entry.providers
+                        or not entry.commands
+                    )
+                )
+                or (
+                    entry.kind == "connector"
+                    and (
+                        entry.protocol_version != "sanka-connector/v1"
+                        or entry.executable is not None
+                        or not isinstance(entry.entry_point, str)
+                        or not entry.entry_point
+                        or "/" in entry.entry_point
+                        or not entry.providers
+                        or entry.commands
+                        or len({provider.name for provider in entry.providers})
+                        != len(entry.providers)
+                    )
+                )
             ):
                 _error(
                     "SANKA_EXTENSION_LOCK_INVALID",
@@ -1870,7 +1957,7 @@ class ExtensionStore:
                 statuses.add("locked")
             if scoped_lock and scoped_lock.enabled and exact_lock is None:
                 statuses.add("update_available")
-            if not _compatible(manifest.runtime_sanka_migrate, __version__):
+            if not _compatible(manifest.runtime_sanka_cli, __version__):
                 statuses.add("incompatible")
             if manifest.id in disabled:
                 statuses.add("disabled")
@@ -1881,6 +1968,8 @@ class ExtensionStore:
                     marketplace=marketplace.name,
                     marketplace_identity=marketplace.identity,
                     manifest_digest=manifest.digest,
+                    kind=manifest.kind,
+                    providers=manifest.providers,
                     targets=manifest.targets,
                     status=tuple(item for item in STATUS_ORDER if item in statuses),
                     wheels=manifest.wheels,
@@ -1952,7 +2041,7 @@ class ExtensionStore:
                     or marketplace.snapshot_digest != lock.snapshot_digest
                 ):
                     statuses.add("update_available")
-                if not _compatible(manifest.runtime_sanka_migrate, __version__):
+                if not _compatible(manifest.runtime_sanka_cli, __version__):
                     statuses.add("incompatible")
                 if lock.id in disabled or not lock.enabled:
                     statuses.add("disabled")
@@ -2298,21 +2387,28 @@ class ExtensionStore:
                 )
         if identity[0] == _normalized_distribution(manifest.distribution):
             parser = configparser.ConfigParser(interpolation=None)
+            identity_name = manifest.executable or manifest.entry_point
+            assert identity_name is not None
             try:
                 parser.read_string(entry_points)
-                target = parser["console_scripts"][manifest.executable]
+                if manifest.kind == "migration":
+                    assert manifest.executable is not None
+                    target = parser["console_scripts"][manifest.executable]
+                else:
+                    assert manifest.entry_point is not None
+                    target = parser[ENTRY_POINT_GROUP][manifest.entry_point]
             except (configparser.Error, KeyError) as error:
                 raise ExtensionError(
                     "SANKA_EXTENSION_ARTIFACT_INVALID",
-                    "Extension wheel does not declare its executable entry point",
-                    details={"artifact": wheel.name, "executable": manifest.executable},
+                    "Extension wheel does not declare its exact entry point",
+                    details={"artifact": wheel.name, "entry_point": identity_name},
                 ) from error
             if _ENTRY_POINT.fullmatch(target.strip()) is None:
                 _error(
                     "SANKA_EXTENSION_ARTIFACT_INVALID",
-                    "Extension executable entry point is invalid",
+                    "Extension entry point is invalid",
                     artifact=wheel.name,
-                    executable=manifest.executable,
+                    entry_point=identity_name,
                 )
 
     def _wheel_entry_point(
@@ -2366,6 +2462,66 @@ class ExtensionStore:
                 generated_scripts=[f"{group}:{name}" for group, name, _target in generated],
             )
         return selected[0]
+
+    def _wheel_connector_entry_points(
+        self,
+        wheels: tuple[tuple[Path, str], ...],
+        providers: tuple[Provider, ...],
+    ) -> dict[str, str]:
+        connector_entries: dict[str, str] = {}
+        scripts: list[str] = []
+        for path, expected_sha256 in wheels:
+            if _store_file_sha256(self.user_root, path) != expected_sha256:
+                _error(
+                    "SANKA_EXTENSION_HASH_MISMATCH",
+                    "Cached locked extension wheel has changed",
+                    artifact=path.name,
+                )
+            with (
+                _store_file(self.user_root, path) as source,
+                zipfile.ZipFile(cast(Any, source)) as archive,
+            ):
+                members = [
+                    info
+                    for info in archive.infolist()
+                    if info.filename.endswith(".dist-info/entry_points.txt")
+                ]
+                if not members:
+                    continue
+                parser = configparser.ConfigParser(interpolation=None)
+                try:
+                    parser.read_string(archive.read(members[0]).decode("utf-8"))
+                except (configparser.Error, UnicodeDecodeError) as error:
+                    raise ExtensionError(
+                        "SANKA_EXTENSION_ARTIFACT_INVALID",
+                        "Extension wheel entry-point metadata is invalid",
+                        details={"artifact": path.name},
+                    ) from error
+                for group in ("console_scripts", "gui_scripts"):
+                    if parser.has_section(group):
+                        scripts.extend(f"{group}:{name}" for name in parser[group])
+                if parser.has_section(ENTRY_POINT_GROUP):
+                    for name, target in parser.items(ENTRY_POINT_GROUP):
+                        if name in connector_entries:
+                            _error(
+                                "SANKA_EXTENSION_ARTIFACT_INVALID",
+                                "Connector provider entry point is declared more than once",
+                                provider=name,
+                            )
+                        connector_entries[name] = target.strip()
+        expected = {provider.name for provider in providers}
+        if (
+            scripts
+            or set(connector_entries) != expected
+            or any(_ENTRY_POINT.fullmatch(target) is None for target in connector_entries.values())
+        ):
+            _error(
+                "SANKA_EXTENSION_ARTIFACT_INVALID",
+                "Connector wheel set must define only its declared providers",
+                providers=sorted(connector_entries),
+                generated_scripts=sorted(scripts),
+            )
+        return connector_entries
 
     def _wheel_import_records(
         self,
@@ -2438,10 +2594,14 @@ class ExtensionStore:
     def _verify_environment_artifacts(
         self,
         root: Path,
-        executable: str,
+        executable: str | None,
         wheels: tuple[tuple[Path, str], ...],
+        *,
+        providers: tuple[Provider, ...] = (),
     ) -> None:
-        entry_point = self._wheel_entry_point(wheels, executable)
+        entry_point = self._wheel_entry_point(wheels, executable) if executable else None
+        if executable is None:
+            self._wheel_connector_entry_points(wheels, providers)
         expected_imports = self._wheel_import_records(wheels)
         with (
             _parent_descriptor(self.user_root, root) as (parent, name),
@@ -2472,20 +2632,23 @@ class ExtensionStore:
                 in {"INSTALLER", "RECORD", "REQUESTED", "direct_url.json"}
             )
         }
-        binary_name = "Scripts" if os.name == "nt" else "bin"
-        binary_path = f"{binary_name}/{executable}"
-        binary = next(
-            (record for record in tree if record.get("path") == binary_path),
-            None,
-        )
-        expected_script = _console_script(root / binary_name / "python", entry_point)
-        if (
-            actual_imports != expected_imports
-            or not isinstance(binary, dict)
-            or binary.get("type") != "file"
-            or binary.get("size") != len(expected_script)
-            or binary.get("sha256") != hashlib.sha256(expected_script).hexdigest()
-        ):
+        script_matches = True
+        if executable is not None:
+            assert entry_point is not None
+            binary_name = "Scripts" if os.name == "nt" else "bin"
+            binary_path = f"{binary_name}/{executable}"
+            binary = next(
+                (record for record in tree if record.get("path") == binary_path),
+                None,
+            )
+            expected_script = _console_script(root / binary_name / "python", entry_point)
+            script_matches = (
+                isinstance(binary, dict)
+                and binary.get("type") == "file"
+                and binary.get("size") == len(expected_script)
+                and binary.get("sha256") == hashlib.sha256(expected_script).hexdigest()
+            )
+        if actual_imports != expected_imports or not script_matches:
             _error(
                 "SANKA_EXTENSION_HASH_MISMATCH",
                 "Installed extension executable or importable bytes differ from verified wheels",
@@ -2506,18 +2669,21 @@ class ExtensionStore:
     def _materialize_environment(
         self,
         artifact_digest: str,
-        executable: str,
+        executable: str | None,
         wheels: tuple[tuple[Path, str], ...],
         *,
         expected_digest: str | None = None,
+        providers: tuple[Provider, ...] = (),
     ) -> Path:
         root = self._confined(
             self.user_root,
             self.user_root / "environments" / artifact_digest,
         )
-        entry_point = self._wheel_entry_point(wheels, executable)
+        entry_point = self._wheel_entry_point(wheels, executable) if executable else None
+        if executable is None:
+            self._wheel_connector_entry_points(wheels, providers)
         binary_name = "Scripts" if os.name == "nt" else "bin"
-        binary = root / binary_name / executable
+        binary = root / binary_name / executable if executable else None
         temporary = ""
         with _parent_descriptor(self.user_root, root, create=True) as (
             environments,
@@ -2542,7 +2708,9 @@ class ExtensionStore:
                     )
                     if digest == expected_digest:
                         try:
-                            self._verify_environment_artifacts(root, executable, wheels)
+                            self._verify_environment_artifacts(
+                                root, executable, wheels, providers=providers
+                            )
                         except ExtensionError as error:
                             if error.code != "SANKA_EXTENSION_HASH_MISMATCH":
                                 raise
@@ -2578,12 +2746,21 @@ class ExtensionStore:
                 }
             )
             try:
-                _create_venv(
-                    environments,
-                    temporary,
-                    environment=environment,
-                    cwd=self.user_root,
-                )
+                if executable is None:
+                    _create_venv(
+                        environments,
+                        temporary,
+                        environment=environment,
+                        cwd=self.user_root,
+                        system_site_packages=False,
+                    )
+                else:
+                    _create_venv(
+                        environments,
+                        temporary,
+                        environment=environment,
+                        cwd=self.user_root,
+                    )
                 _require_directory_identity(root.parent, environments)
                 with _directory_at(
                     environments,
@@ -2648,12 +2825,14 @@ class ExtensionStore:
                             environment=environment,
                             cwd=self.user_root,
                         )
-                    _rewrite_console_script(
-                        temporary_descriptor,
-                        executable,
-                        root / "bin/python",
-                        entry_point,
-                    )
+                    if executable is not None:
+                        assert entry_point is not None
+                        _rewrite_console_script(
+                            temporary_descriptor,
+                            executable,
+                            root / "bin/python",
+                            entry_point,
+                        )
                     _require_directory_identity(root.parent, environments)
                     os.replace(
                         temporary,
@@ -2662,15 +2841,17 @@ class ExtensionStore:
                         dst_dir_fd=environments,
                     )
                     temporary = ""
-                    with (
-                        _directory_at(
-                            temporary_descriptor,
-                            binary_name,
-                            binary.parent,
-                        ) as bin_descriptor,
-                        _regular_at(cast(int, bin_descriptor), executable, binary) as installed,
-                    ):
-                        assert installed is not None
+                    if binary is not None:
+                        assert executable is not None
+                        with (
+                            _directory_at(
+                                temporary_descriptor,
+                                binary_name,
+                                binary.parent,
+                            ) as bin_descriptor,
+                            _regular_at(cast(int, bin_descriptor), executable, binary) as installed,
+                        ):
+                            assert installed is not None
             except (OSError, subprocess.CalledProcessError) as error:
                 error_output = getattr(error, "stderr", None) or getattr(error, "stdout", None)
                 error_output = error_output or str(error)
@@ -2685,7 +2866,7 @@ class ExtensionStore:
                 if temporary:
                     with suppress(OSError):
                         shutil.rmtree(temporary, dir_fd=environments)
-        self._verify_environment_artifacts(root, executable, wheels)
+        self._verify_environment_artifacts(root, executable, wheels, providers=providers)
         return root
 
     @staticmethod
@@ -2783,17 +2964,23 @@ class ExtensionStore:
             _locked(self.project_root, self._project_lock_path),
         ):
             source, manifest = self._select(extension_id, marketplace)
-            if not _compatible(manifest.runtime_sanka_migrate, __version__):
+            if not _compatible(manifest.runtime_sanka_cli, __version__):
                 _error(
                     "SANKA_EXTENSION_INCOMPATIBLE",
-                    "Extension is incompatible with this sanka-migrate runtime",
+                    "Extension is incompatible with this sanka-cli runtime",
                     extension_id=extension_id,
                     runtime=__version__,
-                    required=manifest.runtime_sanka_migrate,
+                    required=manifest.runtime_sanka_cli,
                 )
             installations = self._load_installations()
             disabled = self._load_disabled()
             if extension_id == DEFAULT_EXTENSION_ID:
+                if manifest.kind != "migration":
+                    _error(
+                        "SANKA_EXTENSION_IDENTITY",
+                        "Default extension id must resolve to a migration extension",
+                        extension_id=extension_id,
+                    )
                 distribution = self._default_distribution(manifest, required=True)
                 artifact_digest = self._distribution_digest(distribution)
             else:
@@ -2819,7 +3006,11 @@ class ExtensionStore:
                     for path, wheel in zip(cached, manifest.wheels, strict=True)
                 )
                 self._wheel_import_records(verified_wheels)
-                self._wheel_entry_point(verified_wheels, manifest.executable)
+                if manifest.kind == "migration":
+                    assert manifest.executable is not None
+                    self._wheel_entry_point(verified_wheels, manifest.executable)
+                else:
+                    self._wheel_connector_entry_points(verified_wheels, manifest.providers)
                 artifact_digest = self._manifest_artifact_digest(manifest)
                 prior = next(
                     (
@@ -2834,14 +3025,24 @@ class ExtensionStore:
                     ),
                     None,
                 )
-                environment = self._materialize_environment(
-                    artifact_digest,
-                    manifest.executable,
-                    verified_wheels,
-                    expected_digest=(
-                        prior.get("environment_digest") if isinstance(prior, dict) else None
-                    ),
+                expected_digest = (
+                    prior.get("environment_digest") if isinstance(prior, dict) else None
                 )
+                if manifest.kind == "migration":
+                    environment = self._materialize_environment(
+                        artifact_digest,
+                        manifest.executable,
+                        verified_wheels,
+                        expected_digest=expected_digest,
+                    )
+                else:
+                    environment = self._materialize_environment(
+                        artifact_digest,
+                        None,
+                        verified_wheels,
+                        expected_digest=expected_digest,
+                        providers=manifest.providers,
+                    )
                 installation = {
                     "artifact_digest": artifact_digest,
                     "environment": environment.relative_to(self.user_root).as_posix(),
@@ -2873,8 +3074,11 @@ class ExtensionStore:
                 manifest_digest=manifest.digest,
                 distribution=manifest.distribution,
                 artifact_digest=artifact_digest,
+                kind=manifest.kind,
                 protocol_version=manifest.protocol_version,
                 executable=manifest.executable,
+                entry_point=manifest.entry_point,
+                providers=manifest.providers,
                 commands=manifest.commands,
                 enabled=True,
                 configuration_digest=content_hash(dict(configuration or {})),
@@ -2897,6 +3101,9 @@ class ExtensionStore:
             if extension_id == DEFAULT_EXTENSION_ID:
                 disabled.add(extension_id)
             elif entry is not None:
+                client = self._connector_clients.pop(entry.artifact_digest, None)
+                if client is not None:
+                    client.close()
                 manifest = self._manifest_for_lock(entry)
                 if self._manifest_artifact_digest(manifest) != entry.artifact_digest:
                     _error(
@@ -3011,8 +3218,11 @@ class ExtensionStore:
                 (entry.version, manifest.version),
                 (entry.manifest_digest, manifest.digest),
                 (entry.distribution, manifest.distribution),
+                (entry.kind, manifest.kind),
                 (entry.protocol_version, manifest.protocol_version),
                 (entry.executable, manifest.executable),
+                (entry.entry_point, manifest.entry_point),
+                (entry.providers, manifest.providers),
                 (entry.commands, manifest.commands),
             )
         ):
@@ -3080,13 +3290,13 @@ class ExtensionStore:
                 identity=entry.marketplace_identity,
             )
         manifest = self._manifest_for_lock(entry)
-        if not _compatible(manifest.runtime_sanka_migrate, __version__):
+        if not _compatible(manifest.runtime_sanka_cli, __version__):
             _error(
                 "SANKA_EXTENSION_INCOMPATIBLE",
-                "Locked extension is incompatible with this sanka-migrate runtime",
+                "Locked extension is incompatible with this sanka-cli runtime",
                 extension_id=extension_id,
                 runtime=__version__,
-                required=manifest.runtime_sanka_migrate,
+                required=manifest.runtime_sanka_cli,
             )
         if extension_id == DEFAULT_EXTENSION_ID:
             distribution = self._default_distribution(manifest, required=True)
@@ -3133,14 +3343,30 @@ class ExtensionStore:
             must_exist=True,
             expected=expected_root,
         )
-        binary = root / ("Scripts" if os.name == "nt" else "bin") / manifest.executable
-        self._confined(self.user_root, binary, must_exist=True, expected=binary)
-        if not binary.is_file():
-            _error(
-                "SANKA_EXTENSION_NOT_CACHED",
-                "Exact locked extension executable is not cached",
-                extension_id=extension_id,
+        if manifest.kind == "migration":
+            assert manifest.executable is not None
+            binary = root / ("Scripts" if os.name == "nt" else "bin") / manifest.executable
+            self._confined(self.user_root, binary, must_exist=True, expected=binary)
+            if not binary.is_file():
+                _error(
+                    "SANKA_EXTENSION_NOT_CACHED",
+                    "Exact locked extension executable is not cached",
+                    extension_id=extension_id,
+                )
+        else:
+            site_packages = self._connector_site_packages(root)
+            self._confined(
+                self.user_root,
+                site_packages,
+                must_exist=True,
+                expected=site_packages,
             )
+            if not site_packages.is_dir():
+                _error(
+                    "SANKA_EXTENSION_NOT_CACHED",
+                    "Exact locked connector environment is not cached",
+                    extension_id=extension_id,
+                )
         verified_wheels: list[tuple[Path, str]] = []
         for wheel in installation.get("wheels", []):
             if not isinstance(wheel, dict) or not isinstance(wheel.get("path"), str):
@@ -3166,6 +3392,7 @@ class ExtensionStore:
             root,
             manifest.executable,
             tuple(verified_wheels),
+            providers=manifest.providers,
         )
         if self._environment_digest(root) != installation.get("environment_digest"):
             _error(
@@ -3175,8 +3402,102 @@ class ExtensionStore:
             )
         return entry
 
+    @staticmethod
+    def _connector_site_packages(environment: Path) -> Path:
+        if os.name == "nt":
+            return environment / "Lib" / "site-packages"
+        return (
+            environment
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+
+    def connector_providers(self) -> tuple[str, ...]:
+        disabled = self._load_disabled()
+        return tuple(
+            sorted(
+                {
+                    provider.name
+                    for entry in self._load_lock().values()
+                    if entry.kind == "connector" and entry.enabled and entry.id not in disabled
+                    for provider in entry.providers
+                }
+            )
+        )
+
+    @_store_operation
+    def resolve_connector(self, provider: str) -> ConnectorRegistration:
+        selected = [
+            entry
+            for entry in self._load_lock().values()
+            if entry.kind == "connector"
+            and entry.enabled
+            and any(item.name == provider for item in entry.providers)
+        ]
+        if len(selected) != 1:
+            code = "SANKA_EXTENSION_REQUIRED" if not selected else "SANKA_EXTENSION_IDENTITY"
+            _error(
+                code,
+                "Connector provider must resolve to one enabled project lock",
+                provider=provider,
+            )
+        entry = self.resolve_locked(selected[0].id)
+        manifest = self._manifest_for_lock(entry)
+        declared = next(item for item in manifest.providers if item.name == provider)
+        environment = self._confined(
+            self.user_root,
+            self.user_root / "environments" / entry.artifact_digest,
+            must_exist=True,
+        )
+        site_packages = self._connector_site_packages(environment)
+        self._confined(
+            self.user_root,
+            site_packages,
+            must_exist=True,
+            expected=site_packages,
+        )
+        client = self._connector_clients.get(entry.artifact_digest)
+        if client is None:
+            client = ConnectorHostClient(sys.executable, environment=site_packages)
+            self._connector_clients[entry.artifact_digest] = client
+        description = client.request(provider, "describe", {})
+        if (
+            type(description) is not dict
+            or type(description.get("roles")) is not list
+            or tuple(description["roles"]) != declared.roles
+        ):
+            client.close()
+            self._connector_clients.pop(entry.artifact_digest, None)
+            _error(
+                "SANKA_EXTENSION_IDENTITY",
+                "Connector host roles differ from the immutable manifest",
+                provider=provider,
+            )
+        source = (
+            build_remote_connector(client, provider, "source", description=description)
+            if "source" in declared.roles
+            else None
+        )
+        destination = (
+            build_remote_connector(client, provider, "destination", description=description)
+            if "destination" in declared.roles
+            else None
+        )
+        return ConnectorRegistration(
+            name=provider,
+            source=cast(Any, source),
+            destination=cast(Any, destination),
+        )
+
 
 def _default_executable(entry: LockEntry) -> Path:
+    if entry.kind != "migration" or entry.executable is None:
+        _error(
+            "SANKA_EXTENSION_IDENTITY",
+            "Default extension lock must identify a migration executable",
+            extension_id=entry.id,
+        )
     try:
         distribution = metadata.distribution(entry.distribution)
     except metadata.PackageNotFoundError as error:

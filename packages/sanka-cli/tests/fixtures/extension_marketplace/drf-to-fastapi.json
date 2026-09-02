@@ -12,6 +12,7 @@
     "version": "0.1.0a1"
   },
   "id": "sanka/drf-to-fastapi",
+  "kind": "migration",
   "match": {
     "all": [
       {
@@ -36,9 +37,9 @@
   },
   "protocol_version": "sanka-extension/v1",
   "runtime": {
-    "sanka_migrate": ">=0.1.0a11,<0.2"
+    "sanka_cli": ">=0.2.0,<0.3"
   },
-  "schema_version": "sanka-extension-manifest/v1",
+  "schema_version": "sanka-extension-manifest/v2",
   "targets": [
     "fastapi"
   ],
