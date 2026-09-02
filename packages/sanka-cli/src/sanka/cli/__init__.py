@@ -3,10 +3,10 @@
 
 Spec-driven flow (migration-as-code)::
 
-    sanka plan     -f sanka-migrate.yaml
-    sanka validate -f sanka-migrate.yaml
-    sanka apply --plan-hash sha256:... -f sanka-migrate.yaml
-    sanka verify   -f sanka-migrate.yaml
+    sanka plan     -f sanka.yaml
+    sanka validate -f sanka.yaml
+    sanka apply --plan-hash sha256:... -f sanka.yaml
+    sanka verify   -f sanka.yaml
 
 ``validate`` is write-free by construction: it samples live source records
 through the reviewed plan and reports rejects without ever resolving the
@@ -59,7 +59,7 @@ from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import SqliteStateStore
 
-DEFAULT_SPEC_FILE = "sanka-migrate.yaml"
+DEFAULT_SPEC_FILE = "sanka.yaml"
 DEFAULT_STATE_FILE = ".sanka/migrate/state.db"
 DEFAULT_ARTIFACT_DIR = ".sanka"
 # Stable subprocess protocol consumed by sanka-sdk. Success is exit 0; migration

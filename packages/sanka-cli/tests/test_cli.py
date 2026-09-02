@@ -35,7 +35,7 @@ def test_version_flag_exits_zero() -> None:
 
 
 def test_default_paths_use_public_project_names() -> None:
-    assert DEFAULT_SPEC_FILE == "sanka-migrate.yaml"
+    assert DEFAULT_SPEC_FILE == "sanka.yaml"
     assert DEFAULT_STATE_FILE == ".sanka/migrate/state.db"
 
 
@@ -282,7 +282,7 @@ def _spec_file(tmp_path: Path) -> tuple[Path, Path, list[str]]:
     (content / "a.md").write_text("---\ntitle: A\n---\nAlpha body\n", encoding="utf-8")
     (content / "b.md").write_text("---\ntitle: B\n---\nBeta body\n", encoding="utf-8")
     db = tmp_path / "out.db"
-    spec_file = tmp_path / "sanka-migrate.yaml"
+    spec_file = tmp_path / "sanka.yaml"
     spec_file.write_text(
         f"source:\n  type: markdown\n  connection: {content}\n"
         f"target:\n  type: sqlite\n  connection: {db}\n",

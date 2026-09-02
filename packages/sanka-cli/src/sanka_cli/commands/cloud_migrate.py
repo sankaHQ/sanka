@@ -26,24 +26,24 @@ _CLOUD_HELP: dict[str, str] = {
     "plan": """Cloud usage: sanka plan --program ID [--migration ID] [--new]
        [--sample-size N] [--force] [--no-wait] [--timeout SECONDS]
 
-Without --program or --migration, this command delegates to sanka-migrate.
+Without --program or --migration, this command runs locally.
 When a Program has no migration, plan creates one. --new always creates one.
 """,
     "apply": """Cloud usage: sanka apply --program ID [--migration ID] [--yes]
        [--plan-hash HASH] [--route KEY ...] [--wait] [--timeout SECONDS]
 
-Without --program or --migration, this command delegates to sanka-migrate.
+Without --program or --migration, this command runs locally.
 Cloud apply fetches the reviewable plan and binds execution to its exact hash.
 """,
     "status": """Cloud usage: sanka status --program ID [--migration ID]
        sanka status --migration ID
 
-Without --program or --migration, this command delegates to sanka-migrate.
+Without --program or --migration, this command runs locally.
 """,
     "verify": """Cloud usage: sanka verify --program ID [--migration ID]
        sanka verify --migration ID
 
-Without --program or --migration, this command delegates to sanka-migrate.
+Without --program or --migration, this command runs locally.
 """,
     "repair": """Usage: sanka repair --program ID [--migration ID] [--yes]
        [--plan-hash HASH] [--wait] [--timeout SECONDS]
