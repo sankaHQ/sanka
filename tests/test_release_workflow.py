@@ -10,7 +10,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 PUBLISH_ACTION = "pypa/gh-action-pypi-publish@"
-EXTENSIONS_REVISION = "0852273fbddd614c03486b3d834f69b10331ecab"
 
 
 def _workflow(name: str) -> dict[str, Any]:
@@ -62,7 +61,7 @@ def test_publish_job_downloads_and_hash_checks_the_build_artifact() -> None:
     assert "rm SHA256SUMS SOURCE_COMMIT" in verification_steps[0]["run"]
 
 
-def test_ci_and_publish_pin_the_connector_sdk_source() -> None:
+def test_ci_and_publish_do_not_require_private_cross_repo_checkout() -> None:
     for workflow_name in ("ci.yml", "publish.yml"):
         workflow = _workflow(workflow_name)
         job_name = "check" if workflow_name == "ci.yml" else "build"
@@ -73,12 +72,8 @@ def test_ci_and_publish_pin_the_connector_sdk_source() -> None:
             if step.get("with", {}).get("repository") == "sankaHQ/extensions"
         ]
 
-        assert len(extension_checkouts) == 1
-        assert extension_checkouts[0]["with"]["ref"] == EXTENSIONS_REVISION
-        assert extension_checkouts[0]["with"]["path"] == "extensions"
-        assert job["env"]["SANKA_CONNECTOR_SDK_SOURCE"] == (
-            "../extensions/packages/sanka-connector-sdk/src/sanka_connector"
-        )
+        assert extension_checkouts == []
+        assert "SANKA_CONNECTOR_SDK_SOURCE" not in job.get("env", {})
         assert job["defaults"]["run"]["working-directory"] == "sanka"
 
 

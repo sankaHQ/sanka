@@ -84,6 +84,22 @@ def test_connector_sdk_sync_accepts_identical_python_trees(tmp_path: Path) -> No
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_connector_sdk_sync_make_target_uses_recorded_snapshot() -> None:
+    env = os.environ.copy()
+    env.pop("SANKA_CONNECTOR_SDK_SOURCE", None)
+
+    result = subprocess.run(
+        ["make", "connector-sdk-sync"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_connector_sdk_sync_reports_byte_drift(tmp_path: Path) -> None:
     canonical = tmp_path / "canonical"
     embedded = tmp_path / "packages" / "sanka-cli" / "src" / "sanka_connector"

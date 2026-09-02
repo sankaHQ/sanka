@@ -19,18 +19,10 @@ jobs:
     defaults:
       run:
         working-directory: sanka
-    env:
-      SANKA_CONNECTOR_SDK_SOURCE: ../extensions/packages/sanka-connector-sdk/src/sanka_connector
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: sanka
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: sankaHQ/extensions
-          ref: 0852273fbddd614c03486b3d834f69b10331ecab
-          path: extensions
           persist-credentials: false
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:

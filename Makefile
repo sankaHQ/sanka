@@ -2,8 +2,6 @@ UV ?= uv
 
 .PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release bench
 
-SANKA_CONNECTOR_SDK_SOURCE ?= ../extensions/packages/sanka-connector-sdk/src/sanka_connector
-
 check: lint typecheck test boundaries headers naming licenses connector-sdk-sync
 
 lint:
@@ -34,8 +32,7 @@ licenses:
 	$(UV) run python scripts/check_dependency_licenses.py
 
 connector-sdk-sync:
-	SANKA_CONNECTOR_SDK_SOURCE=$(SANKA_CONNECTOR_SDK_SOURCE) \
-		$(UV) run python scripts/check_connector_sdk_sync.py
+	$(UV) run python scripts/check_connector_sdk_sync.py
 
 build-release:
 	$(UV) build --package sanka-cli --out-dir dist --clear --no-create-gitignore
