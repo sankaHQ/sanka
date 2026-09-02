@@ -20,6 +20,8 @@ from sanka.cli import DEFAULT_SPEC_FILE, DEFAULT_STATE_FILE, main
 from sanka.cli._research import SankaMigrateApiClient, SankaMigrateApiError, signup_url
 from sanka.runtime.engine import MigrationEngine
 
+pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
+
 
 def test_compatibility_namespace_exposes_sdk_and_runtime() -> None:
     # Existing integrations keep the sanka.connector import while the Apache
@@ -254,7 +256,7 @@ def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str])
     assert main(["connect", "not-a-provider"]) == 1
     error = capsys.readouterr().err
     assert "no installed connector" in error
-    assert "sanka-connector-not-a-provider" in error
+    assert "sanka extension add sanka/not-a-provider" in error
 
 
 @pytest.mark.parametrize(

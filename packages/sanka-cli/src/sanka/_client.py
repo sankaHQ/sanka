@@ -170,8 +170,11 @@ class Sanka:
 
     def close(self) -> None:
         if not self._closed:
-            self._store.close()
             self._closed = True
+            try:
+                self._registry.close()
+            finally:
+                self._store.close()
 
     def __enter__(self) -> Sanka:
         self._ensure_open()

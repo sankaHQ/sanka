@@ -38,6 +38,8 @@ from sanka.runtime.state import SqliteStateStore
 from sanka_connector import Credentials, RecordPage, SourceFilter, SourceObject
 from sanka_connector.protocols import DestinationConnector, SourceConnector
 
+pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
+
 _CREDENTIALS = Credentials(provider="fake")
 
 

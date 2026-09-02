@@ -230,7 +230,7 @@ class ConnectorHostClient:
                 )
             try:
                 response = json.loads(line)
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
                 self.close()
                 raise _error(
                     "SANKA_CONNECTOR_JSON", "connector response JSON is malformed"
@@ -241,7 +241,7 @@ class ConnectorHostClient:
             if response.get("protocol_version") != PROTOCOL:
                 self.close()
                 raise _error("SANKA_CONNECTOR_PROTOCOL", "connector host protocol mismatch")
-            if response.get("id") != request_id:
+            if type(response.get("id")) is not int or response["id"] != request_id:
                 self.close()
                 raise _error("SANKA_CONNECTOR_PROTOCOL", "connector response id mismatch")
             if response.get("ok") is True and set(response) == {

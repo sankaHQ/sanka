@@ -125,6 +125,7 @@ _WIRE_TYPES = {
         WriteResult,
     )
 }
+_WIRE_MARKER = "__sanka_wire__"
 
 
 def encode_value(value: Any) -> Any:
@@ -146,17 +147,24 @@ def encode_value(value: Any) -> Any:
                 "SANKA_CONNECTOR_PAYLOAD", "set payload values must share one ordered type"
             ) from error
         return {
-            "__sanka_type__": "set",
+            _WIRE_MARKER: "set",
             "items": [encode_value(item) for item in items],
         }
     if value_type is dict:
         if any(type(key) is not str for key in value):
             raise HostError("SANKA_CONNECTOR_PAYLOAD", "object keys must be strings")
-        return {key: encode_value(item) for key, item in value.items()}
+        encoded = {key: encode_value(item) for key, item in value.items()}
+        if _WIRE_MARKER in value:
+            return {
+                _WIRE_MARKER: "mapping",
+                "items": [[key, item] for key, item in encoded.items()],
+            }
+        return encoded
     name = value_type.__name__
     if is_dataclass(value) and _WIRE_TYPES.get(name) is value_type:
         return {
-            "__sanka_type__": name,
+            _WIRE_MARKER: "dataclass",
+            "name": name,
             "fields": {
                 field.name: encode_value(getattr(value, field.name)) for field in fields(value)
             },
@@ -174,10 +182,22 @@ def decode_value(value: Any) -> Any:
         return [decode_value(item) for item in value]
     if type(value) is not dict or any(type(key) is not str for key in value):
         raise HostError("SANKA_CONNECTOR_PAYLOAD", "connector payload is not JSON-safe")
-    marker = value.get("__sanka_type__")
+    marker = value.get(_WIRE_MARKER)
     if marker is None:
         return {key: decode_value(item) for key, item in value.items()}
-    if marker == "set" and set(value) == {"__sanka_type__", "items"}:
+    if marker == "mapping" and set(value) == {_WIRE_MARKER, "items"}:
+        items = value["items"]
+        if (
+            type(items) is not list
+            or any(
+                type(item) is not list or len(item) != 2 or type(item[0]) is not str
+                for item in items
+            )
+            or len({item[0] for item in items}) != len(items)
+        ):
+            raise HostError("SANKA_CONNECTOR_PAYLOAD", "mapping payload is invalid")
+        return {item[0]: decode_value(item[1]) for item in items}
+    if marker == "set" and set(value) == {_WIRE_MARKER, "items"}:
         items = value["items"]
         if type(items) is not list:
             raise HostError("SANKA_CONNECTOR_PAYLOAD", "set payload is invalid")
@@ -185,11 +205,13 @@ def decode_value(value: Any) -> Any:
             return {decode_value(item) for item in items}
         except TypeError as error:
             raise HostError("SANKA_CONNECTOR_PAYLOAD", "set payload is invalid") from error
-    value_type = _WIRE_TYPES.get(marker) if type(marker) is str else None
+    name = value.get("name")
+    value_type = _WIRE_TYPES.get(name) if type(name) is str else None
     raw_fields = value.get("fields")
     if (
-        value_type is None
-        or set(value) != {"__sanka_type__", "fields"}
+        marker != "dataclass"
+        or value_type is None
+        or set(value) != {_WIRE_MARKER, "name", "fields"}
         or type(raw_fields) is not dict
     ):
         raise HostError("SANKA_CONNECTOR_PAYLOAD", "typed connector payload is invalid")
@@ -438,7 +460,7 @@ def serve(site_packages: Path) -> int:
             if type(request.get("id")) is int:
                 request_id = request["id"]
             response = handle(request, registrations)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
             response = _error_response(
                 request_id,
                 HostError("SANKA_CONNECTOR_JSON", "connector request JSON is malformed"),

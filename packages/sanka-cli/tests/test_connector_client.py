@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 
 from sanka.runtime.connector_client import ConnectorHostClient, build_remote_connector
-from sanka.runtime.connector_host import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES
+from sanka.runtime.connector_host import (
+    MAX_REQUEST_BYTES,
+    MAX_RESPONSE_BYTES,
+    decode_value,
+    encode_value,
+)
 from sanka.runtime.extensions import ExtensionError
 from sanka_connector import (
     Credentials,
@@ -41,6 +46,67 @@ def test_connector_client_rejects_wrong_protocol(tmp_path: Path) -> None:
             client.request("sqlite", "inventory", {"schema": "main"})
     finally:
         client.close()
+
+
+@pytest.mark.parametrize("response_id", ["True", "1.0"])
+def test_connector_client_rejects_non_integer_response_ids(
+    tmp_path: Path, response_id: str
+) -> None:
+    client = ConnectorHostClient(
+        fake_python(
+            tmp_path,
+            "import json, sys\n"
+            "sys.stdin.readline()\n"
+            f"print(json.dumps(dict(protocol_version='sanka-connector/v1', id={response_id}, "
+            "ok=True, result={})), flush=True)\n"
+            "sys.stdin.readline()\n",
+        ),
+        environment=tmp_path,
+    )
+
+    try:
+        with pytest.raises(ExtensionError) as raised:
+            client.request("sqlite", "describe", {})
+    finally:
+        client.close()
+
+    assert raised.value.code == "SANKA_CONNECTOR_PROTOCOL"
+
+
+def test_connector_client_rejects_unbounded_json_integer(tmp_path: Path) -> None:
+    digits = "1" * 5_000
+    client = ConnectorHostClient(
+        fake_python(
+            tmp_path,
+            "import sys\n"
+            "sys.stdin.readline()\n"
+            f'sys.stdout.write(\'{{"protocol_version":"sanka-connector/v1","id":{digits},'
+            '"ok":true,"result":{}}\\n\')\n'
+            "sys.stdout.flush()\n",
+        ),
+        environment=tmp_path,
+    )
+
+    try:
+        with pytest.raises(ExtensionError) as raised:
+            client.request("sqlite", "describe", {})
+    finally:
+        client.close()
+
+    assert raised.value.code == "SANKA_CONNECTOR_JSON"
+    assert digits not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"__sanka_type__": "user", "value": 1},
+        {"__sanka_type__": "set", "items": ["user-value"]},
+        {"__sanka_wire__": "set", "items": ["user-value"]},
+    ],
+)
+def test_connector_wire_codec_round_trips_tag_collisions(value: dict[str, object]) -> None:
+    assert decode_value(encode_value(value)) == value
 
 
 @pytest.mark.parametrize(

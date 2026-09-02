@@ -9,6 +9,10 @@ import pytest
 import sanka
 import sanka.runtime
 from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
+from sanka.runtime.extensions.store import ExtensionStore
+from sanka.runtime.registry import ConnectorRegistry
+
+pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
 
 def _write_content(root: Path) -> None:
@@ -129,3 +133,40 @@ def test_sanka_facade_uses_public_default_state_path(
         pass
 
     assert (tmp_path / ".sanka" / "migrate" / "state.db").is_file()
+
+
+def test_sanka_context_closes_owned_connector_store_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Host:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    class Store(ExtensionStore):
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+            super().close()
+
+    host = Host()
+    store = Store(tmp_path / "project", user_root=tmp_path / "user")
+    store._connector_clients["artifact"] = host  # type: ignore[assignment]
+    registry = ConnectorRegistry({}, owner=store)
+    monkeypatch.setattr(
+        ConnectorRegistry,
+        "discover",
+        classmethod(lambda _cls: registry),
+    )
+
+    with Sanka(state=tmp_path / "state.db") as client:
+        pass
+
+    assert store.close_calls == 1
+    assert host.close_calls == 1
+    assert store._connector_clients == {}
+    client.close()
+    assert store.close_calls == 1
+    assert host.close_calls == 1

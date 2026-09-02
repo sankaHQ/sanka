@@ -18,6 +18,8 @@ from sanka.runtime.registry import ConnectorRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
 
+pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
+
 
 def _write_content(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
