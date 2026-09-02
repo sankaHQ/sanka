@@ -413,10 +413,15 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="verify the target against the source and ledger",
         description=(
             "Check hashes, generated files, route coverage, and configured read-only HTTP "
-            "comparisons. Reports exactly what was verified."
+            "comparisons. With --scenarios, replay a scenario file against the source "
+            "application and a candidate FastAPI app and diff status, body, declared "
+            "headers, and database state; that mode needs no plan or generated manifest."
         ),
         epilog=(
-            "Example: sanka verify .\n"
+            "Examples:\n"
+            "  sanka verify .\n"
+            "  sanka verify . --scenarios public-tests/scenarios.json --candidate . "
+            "--entrypoint target_app.py --db-env BENCH_DB_PATH --edge-probes\n"
             "Use --no-http only when structural verification is sufficient."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -439,6 +444,79 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="JSON file with additional read-only HTTP verification cases",
     )
     verify.add_argument("--no-http", action="store_true", help="skip safe read-only HTTP probes")
+    verify.add_argument(
+        "--scenarios",
+        default=None,
+        help=(
+            "JSON scenario file to replay against the source application and the "
+            "candidate (differential mode; any HTTP method; no plan required)"
+        ),
+    )
+    verify.add_argument(
+        "--candidate",
+        default=None,
+        help="candidate application root (default: the project root)",
+    )
+    verify.add_argument(
+        "--entrypoint",
+        default=None,
+        help="candidate module exposing `app` (default: target_app.py)",
+    )
+    verify.add_argument(
+        "--db-env",
+        dest="db_env",
+        default=None,
+        help=(
+            "environment variable both applications read for the SQLite path; each "
+            "scenario runs from an identical fresh database (default: SANKA_TEST_DB)"
+        ),
+    )
+    verify.add_argument(
+        "--seed",
+        default=None,
+        help="Python file run after migrate to seed the fresh database (Django is configured)",
+    )
+    verify.add_argument(
+        "--ignore-table",
+        dest="ignore_tables",
+        action="append",
+        default=None,
+        metavar="TABLE",
+        help="exclude a table from the database comparison (repeatable)",
+    )
+    verify.add_argument(
+        "--all-headers",
+        dest="all_headers",
+        action="store_true",
+        help="compare every response header, not only the scenario's declared headers",
+    )
+    verify.add_argument(
+        "--edge-probes",
+        dest="edge_probes",
+        action="store_true",
+        help=(
+            "add scan-derived edge probes per route: OPTIONS/Allow, an unsupported "
+            "method, the slash variant, and a missing-object detail request"
+        ),
+    )
+    verify.add_argument(
+        "--source-python",
+        dest="python",
+        metavar="PATH",
+        help=(
+            "interpreter that can import the source application (default: the project's "
+            ".venv when present, otherwise the extension's own interpreter)"
+        ),
+    )
+    verify.add_argument(
+        "--candidate-python",
+        dest="candidate_python",
+        metavar="PATH",
+        help=(
+            "interpreter that can import the candidate application (default: the "
+            "candidate's .venv when present, otherwise the source interpreter)"
+        ),
+    )
     extension_options(verify)
     presentation(verify)
     verify.set_defaults(handler=_cmd_verify)
@@ -727,11 +805,19 @@ def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
         ("min_readiness", "min_readiness"),
         ("bench_candidate", "bench_candidate"),
         ("cases", "cases"),
+        ("scenarios", "scenarios"),
+        ("candidate", "candidate"),
+        ("entrypoint", "entrypoint"),
+        ("db_env", "db_env"),
+        ("seed", "seed"),
+        ("ignore_tables", "ignore_tables"),
+        ("python", "python"),
+        ("candidate_python", "candidate_python"),
     ):
         value = getattr(args, source, None)
         if value is not None:
             configuration[target] = value
-    for name in ("force", "gap_report_only", "no_http"):
+    for name in ("force", "gap_report_only", "no_http", "all_headers", "edge_probes"):
         if getattr(args, name, False):
             configuration[name] = True
     return configuration
