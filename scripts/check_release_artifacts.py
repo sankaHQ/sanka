@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import email.policy
 import re
 import sys
@@ -13,8 +14,7 @@ from email.parser import BytesParser
 from pathlib import Path
 
 EXPECTED_LICENSES = {
-    "sanka-migrate": "AGPL-3.0-only",
-    "sanka-migrate-mcp": "Apache-2.0",
+    "sanka-cli": "Apache-2.0 AND AGPL-3.0-only",
 }
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 FORBIDDEN_RUNTIME_DEPENDENCIES = frozenset(
@@ -24,7 +24,6 @@ FORBIDDEN_RUNTIME_DEPENDENCIES = frozenset(
         "django",
         "djangorestframework",
         "fastapi",
-        "httpx",
         "psycopg",
         "sqlalchemy",
         "tortoise-orm",
@@ -56,23 +55,41 @@ def _metadata_from_wheel(path: Path) -> tuple[EmailMessage, str, set[str]]:
         ]
         entry_points = archive.read(entry_point_names[0]).decode() if entry_point_names else ""
         license_files = [name for name in archive.namelist() if ".dist-info/licenses/" in name]
-        if not any(name.endswith("/LICENSE") for name in license_files):
-            raise ValueError(f"{path.name}: wheel does not contain a LICENSE file")
+        required_licenses = {
+            "LICENSES/Apache-2.0.txt",
+            "LICENSES/AGPL-3.0-only.txt",
+            "NOTICE",
+        }
+        missing_licenses = sorted(
+            name
+            for name in required_licenses
+            if not any(path.endswith("/" + name) for path in license_files)
+        )
+        if missing_licenses:
+            raise ValueError(f"{path.name}: wheel is missing license files: {missing_licenses}")
         return metadata, entry_points, set(archive.namelist())
 
 
-def _sdist_has_license(path: Path) -> bool:
+def _sdist_has_license_files(path: Path) -> bool:
     with tarfile.open(path, mode="r:gz") as archive:
-        return any(member.name.endswith("/LICENSE") for member in archive.getmembers())
+        names = {member.name for member in archive.getmembers()}
+    return all(
+        any(name.endswith("/" + required) for name in names)
+        for required in (
+            "LICENSES/Apache-2.0.txt",
+            "LICENSES/AGPL-3.0-only.txt",
+            "NOTICE",
+        )
+    )
 
 
 def _runtime_boundary_errors(requirement_names: set[str], wheel_members: set[str]) -> list[str]:
     errors = [
-        f"sanka-migrate: target dependency {dependency} leaked into core"
+        f"sanka-cli: target dependency {dependency} leaked into core"
         for dependency in sorted(requirement_names & FORBIDDEN_RUNTIME_DEPENDENCIES)
     ]
     if any(name.startswith("sanka/runtime/frameworks/") for name in wheel_members):
-        errors.append("sanka-migrate: wheel must not ship sanka/runtime/frameworks/")
+        errors.append("sanka-cli: wheel must not ship sanka/runtime/frameworks/")
     return errors
 
 
@@ -124,52 +141,53 @@ def main() -> int:
             for requirement in requirements
             if ";" not in str(requirement)
         }
-        if not _sdist_has_license(sdists[0]):
-            errors.append(f"{sdists[0].name}: sdist does not contain a LICENSE file")
+        if not _sdist_has_license_files(sdists[0]):
+            errors.append(f"{sdists[0].name}: sdist is missing required license files")
 
-        if project_name == "sanka-migrate":
-            expected_core_dependencies = {"pyyaml", "sanka-connector-sdk"}
+        if project_name == "sanka-cli":
+            expected_core_dependencies = {
+                "click",
+                "httpx",
+                "keyring",
+                "platformdirs",
+                "pyyaml",
+                "rich",
+            }
             if core_requirement_names != expected_core_dependencies:
                 errors.append(
-                    "sanka-migrate: core dependencies must be exactly "
+                    "sanka-cli: core dependencies must be exactly "
                     f"{sorted(expected_core_dependencies)}, found {sorted(core_requirement_names)}"
                 )
+            if "sanka-connector-sdk" in requirement_names:
+                errors.append("sanka-cli: must embed the connector SDK instead of depending on it")
             errors.extend(_runtime_boundary_errors(requirement_names, wheel_members))
-            if "sanka-migrate = sanka.cli:main" not in entry_points:
-                errors.append("sanka-migrate: primary CLI entry point is missing")
+            parser = configparser.ConfigParser()
+            parser.read_string(entry_points)
+            console_scripts = (
+                dict(parser["console_scripts"]) if parser.has_section("console_scripts") else {}
+            )
+            if console_scripts != {"sanka": "sanka_cli.main:main"}:
+                errors.append(
+                    "sanka-cli: console scripts must be exactly "
+                    f"{{'sanka': 'sanka_cli.main:main'}}, found {console_scripts}"
+                )
             if "[sanka.connectors]" in entry_points:
-                errors.append("sanka-migrate: runtime wheel must not bundle connector entry points")
+                errors.append("sanka-cli: runtime wheel must not bundle connector entry points")
             required_imports = {
                 "sanka/__init__.py",
                 "sanka/_client.py",
                 "sanka/connector/__init__.py",
                 "sanka/runtime/__init__.py",
+                "sanka_cli/__init__.py",
+                "sanka_cli/main.py",
+                "sanka_connector/__init__.py",
+                "sanka_connector/py.typed",
             }
             missing_imports = sorted(required_imports - wheel_members)
             if missing_imports:
-                errors.append(
-                    f"sanka-migrate: wheel is missing public runtime imports: {missing_imports}"
-                )
+                errors.append(f"sanka-cli: wheel is missing public imports: {missing_imports}")
             if any(name.startswith("sanka_connector_") for name in wheel_members):
-                errors.append("sanka-migrate: wheel must not ship provider packages")
-        elif project_name == "sanka-migrate-mcp":
-            if "sanka-migrate-mcp = sanka_migrate_mcp.server:main" not in entry_points:
-                errors.append("sanka-migrate-mcp: stdio entry point is missing")
-            for dependency in ("httpx", "mcp", "pydantic", "pydantic-settings"):
-                if dependency not in requirement_names:
-                    errors.append(f"sanka-migrate-mcp: {dependency} dependency is missing")
-            required_imports = {
-                "sanka_migrate_mcp/__init__.py",
-                "sanka_migrate_mcp/client.py",
-                "sanka_migrate_mcp/render.py",
-                "sanka_migrate_mcp/server.py",
-                "sanka_migrate_mcp/py.typed",
-            }
-            missing_imports = sorted(required_imports - wheel_members)
-            if missing_imports:
-                errors.append(f"sanka-migrate-mcp: wheel is missing imports: {missing_imports}")
-            if any(name.startswith("sanka/") for name in wheel_members):
-                errors.append("sanka-migrate-mcp: wheel must not ship the runtime namespace")
+                errors.append("sanka-cli: wheel must not ship provider packages")
     expected_files = len(EXPECTED_LICENSES) * 2
     release_files = list(dist.glob("*.whl")) + list(dist.glob("*.tar.gz"))
     if len(release_files) != expected_files:

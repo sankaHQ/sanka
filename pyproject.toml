@@ -1,9 +1,9 @@
 # Workspace root — not a published package. Shared tooling config for all packages.
 [project]
-name = "sanka-migrate-workspace"
+name = "sanka-cli-workspace"
 version = "0.0.0"
 description = "Development workspace for the Sanka open-source monorepo"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 
 [tool.uv]
 package = false
@@ -23,8 +23,7 @@ explicit = true
 
 [tool.uv.workspace]
 members = [
-  "packages/sanka-migrate",
-  "packages/sanka-migrate-mcp",
+  "packages/sanka-cli",
 ]
 
 [dependency-groups]
@@ -41,6 +40,7 @@ dev = [
   "sanka-connector-csv==0.1.0a9",
   "sanka-connector-markdown==0.1.0a9",
   "sanka-connector-postgres==0.1.0a9",
+  "sanka-connector-sdk==0.1.0a9",
   "sanka-connector-sqlite==0.1.0a9",
   "types-pyyaml>=6",
   "tortoise-orm>=1.1,<2",
@@ -65,13 +65,13 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 [tool.ruff.lint.isort]
 known-first-party = [
   "sanka",
+  "sanka_cli",
   "sanka_connector",
   "sanka_connector_clickhouse",
   "sanka_connector_csv",
   "sanka_connector_markdown",
   "sanka_connector_postgres",
   "sanka_connector_sqlite",
-  "sanka_migrate_mcp",
 ]
 
 [tool.mypy]
@@ -81,15 +81,13 @@ namespace_packages = true
 explicit_package_bases = true
 exclude = ["tests/fixtures"]
 mypy_path = [
-  "packages/sanka-migrate/src",
-  "packages/sanka-migrate-mcp/src",
+  "packages/sanka-cli/src",
 ]
 
 [tool.pytest.ini_options]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = [
-  "packages/sanka-migrate/tests",
-  "packages/sanka-migrate-mcp/tests",
+  "packages/sanka-cli/tests",
   "tests",
 ]

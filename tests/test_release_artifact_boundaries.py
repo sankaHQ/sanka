@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Release artifacts keep framework runtimes inside extensions."""
 
-from scripts.check_release_artifacts import _runtime_boundary_errors
+import io
+import sys
+import tarfile
+import zipfile
+from pathlib import Path
+
+from scripts.check_release_artifacts import _runtime_boundary_errors, main
 
 
 def test_runtime_boundary_rejects_target_dependencies_and_framework_members() -> None:
@@ -14,7 +20,57 @@ def test_runtime_boundary_rejects_target_dependencies_and_framework_members() ->
     )
 
     assert errors == [
-        "sanka-migrate: target dependency asyncpg leaked into core",
-        "sanka-migrate: target dependency fastapi leaked into core",
-        "sanka-migrate: wheel must not ship sanka/runtime/frameworks/",
+        "sanka-cli: target dependency asyncpg leaked into core",
+        "sanka-cli: target dependency fastapi leaked into core",
+        "sanka-cli: wheel must not ship sanka/runtime/frameworks/",
     ]
+
+
+def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, monkeypatch) -> None:
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    wheel = dist / "sanka_cli-0.2.0-py3-none-any.whl"
+    wheel_members = {
+        "sanka/__init__.py": b"",
+        "sanka/_client.py": b"",
+        "sanka/connector/__init__.py": b"",
+        "sanka/runtime/__init__.py": b"",
+        "sanka_cli/__init__.py": b"",
+        "sanka_cli/main.py": b"",
+        "sanka_connector/__init__.py": b"",
+        "sanka_connector/py.typed": b"",
+        "sanka_cli-0.2.0.dist-info/METADATA": (
+            b"Metadata-Version: 2.4\n"
+            b"Name: sanka-cli\n"
+            b"Version: 0.2.0\n"
+            b"License-Expression: Apache-2.0 AND AGPL-3.0-only\n"
+            b"Project-URL: Repository, https://github.com/sankaHQ/sanka\n"
+            b"Requires-Dist: click>=8.1,<9\n"
+            b"Requires-Dist: httpx>=0.27,<1\n"
+            b"Requires-Dist: keyring>=25,<26\n"
+            b"Requires-Dist: platformdirs>=4,<5\n"
+            b"Requires-Dist: pyyaml>=6\n"
+            b"Requires-Dist: rich>=13,<15\n"
+        ),
+        "sanka_cli-0.2.0.dist-info/entry_points.txt": (
+            b"[console_scripts]\nsanka = sanka_cli.main:main\n"
+        ),
+        "sanka_cli-0.2.0.dist-info/licenses/LICENSES/Apache-2.0.txt": b"Apache\n",
+        "sanka_cli-0.2.0.dist-info/licenses/LICENSES/AGPL-3.0-only.txt": b"AGPL\n",
+        "sanka_cli-0.2.0.dist-info/licenses/NOTICE": b"MIT License\n",
+    }
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, data in wheel_members.items():
+            archive.writestr(name, data)
+
+    sdist = dist / "sanka_cli-0.2.0.tar.gz"
+    with tarfile.open(sdist, "w:gz") as archive:
+        for name in ("LICENSES/Apache-2.0.txt", "LICENSES/AGPL-3.0-only.txt", "NOTICE"):
+            data = b"license\n"
+            info = tarfile.TarInfo(f"sanka_cli-0.2.0/{name}")
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+    monkeypatch.setattr(sys, "argv", ["check_release_artifacts.py", str(dist)])
+
+    assert main() == 0
