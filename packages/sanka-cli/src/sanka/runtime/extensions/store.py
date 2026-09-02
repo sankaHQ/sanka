@@ -29,13 +29,16 @@ from typing import Any, NoReturn, cast
 from urllib.parse import unquote, urlparse
 from urllib.request import urlopen
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.tags import parse_tag, sys_tags
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+
 from sanka.runtime.connector_client import ConnectorHostClient, build_remote_connector
 from sanka.runtime.extensions.discovery import (
     IDENTIFIER,
     STATUS_ORDER,
     _compatible,
     _normalized_distribution,
-    _valid_specifier,
     _wheel_identity,
     load_marketplace,
     recommend,
@@ -65,10 +68,6 @@ INSTALLATION_SCHEMA = "sanka-extension-installations/v1"
 LOCK_SCHEMA = "sanka-extension-lock/v1"
 _COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 _ENTRY_POINT = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
-_REQUIREMENT = re.compile(
-    r"(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
-    r"(?:\s*(?:\((?P<parenthesized>[^()]*)\)|(?P<bare>(?:<=|>=|==|<|>).+)))?"
-)
 
 
 def user_extension_root() -> Path:
@@ -2099,13 +2098,50 @@ class ExtensionStore:
             self.user_root / "cache" / "wheels" / wheel.sha256 / wheel.name,
         )
 
+    @staticmethod
+    def _select_compatible_wheels(manifest: Manifest) -> tuple[Wheel, ...]:
+        tag_ranks = {tag: rank for rank, tag in enumerate(sys_tags())}
+        candidates: dict[str, list[tuple[int, str, Wheel]]] = {}
+        versions: dict[str, set[str]] = {}
+        for wheel in manifest.wheels:
+            identity = _wheel_identity(wheel.name)
+            try:
+                _distribution, _version, _build, tags = parse_wheel_filename(wheel.name)
+            except InvalidWheelFilename:
+                identity = None
+                tags = frozenset()
+            if identity is None:
+                _error(
+                    "SANKA_EXTENSION_ARTIFACT_INVALID",
+                    "Only valid Python wheels may be installed",
+                    artifact=wheel.name,
+                )
+            versions.setdefault(identity[0], set()).add(identity[1])
+            compatible = [tag_ranks[tag] for tag in tags if tag in tag_ranks]
+            if compatible:
+                candidates.setdefault(identity[0], []).append((min(compatible), wheel.name, wheel))
+        if any(len(items) != 1 for items in versions.values()):
+            _error(
+                "SANKA_EXTENSION_ARTIFACT_INVALID",
+                "Extension wheel variants must pin one version per distribution",
+                extension_id=manifest.id,
+            )
+        selected = tuple(
+            min(items, key=lambda item: (item[0], item[1]))[2]
+            for _distribution, items in sorted(candidates.items())
+        )
+        primary = _normalized_distribution(manifest.distribution)
+        if primary not in candidates:
+            _error(
+                "SANKA_EXTENSION_PLATFORM_UNSUPPORTED",
+                "Extension has no wheel compatible with this Python runtime and platform",
+                extension_id=manifest.id,
+                distribution=manifest.distribution,
+            )
+        return selected
+
     def _cache_wheel(self, wheel: Wheel) -> Path:
-        filename_parts = wheel.name.removesuffix(".whl").split("-")
-        if (
-            not wheel.name.endswith(".whl")
-            or _wheel_identity(wheel.name) is None
-            or filename_parts[-2:] != ["none", "any"]
-        ):
+        if not wheel.name.endswith(".whl") or _wheel_identity(wheel.name) is None:
             _error(
                 "SANKA_EXTENSION_ARTIFACT_INVALID",
                 "Only valid Python wheels may be installed",
@@ -2247,8 +2283,7 @@ class ExtensionStore:
         path: Path,
         wheel: Wheel,
         manifest: Manifest,
-        declared: Mapping[str, str],
-    ) -> None:
+    ) -> tuple[tuple[str, Requirement], ...]:
         identity = _wheel_identity(wheel.name)
         if identity is None:
             _error(
@@ -2343,48 +2378,45 @@ class ExtensionStore:
                 "Extension wheel package identity does not match its filename",
                 artifact=wheel.name,
             )
-        expected_tag = "-".join(wheel.name.removesuffix(".whl").split("-")[-3:])
         declared_tags = wheel_metadata.get_all("Tag", [])
+        try:
+            _distribution, _version, _build, filename_tags = parse_wheel_filename(wheel.name)
+            metadata_tags = frozenset(
+                tag for declared_tag in declared_tags for tag in parse_tag(declared_tag)
+            )
+        except (InvalidWheelFilename, ValueError):
+            metadata_tags = frozenset()
+            filename_tags = frozenset()
         if (
             wheel_metadata.get_all("Wheel-Version", []) != ["1.0"]
-            or wheel_metadata.get_all("Root-Is-Purelib", []) != ["true"]
+            or wheel_metadata.get_all("Root-Is-Purelib", []) not in [["true"], ["false"]]
             or not declared_tags
-            or expected_tag not in declared_tags
-            or any(tag.split("-")[-2:] != ["none", "any"] for tag in declared_tags)
+            or metadata_tags != filename_tags
         ):
             _error(
                 "SANKA_EXTENSION_ARTIFACT_INVALID",
-                "Extension WHEEL metadata must declare a purelib wheel with matching tags",
+                "Extension WHEEL metadata must declare matching wheel tags",
                 artifact=wheel.name,
             )
-        for requirement in package.get_all("Requires-Dist", []):
-            match = _REQUIREMENT.fullmatch(requirement.strip())
-            if match is None:
+        requirements: list[tuple[str, Requirement]] = []
+        for raw_requirement in package.get_all("Requires-Dist", []):
+            try:
+                requirement = Requirement(raw_requirement)
+            except InvalidRequirement:
                 _error(
                     "SANKA_EXTENSION_ARTIFACT_INVALID",
-                    "Extension wheel requirement syntax is unsupported",
+                    "Extension wheel requirement syntax is invalid",
                     artifact=wheel.name,
-                    requirement=requirement,
+                    requirement=raw_requirement,
                 )
-            normalized = _normalized_distribution(match.group("name"))
-            if normalized not in declared:
+            if requirement.url is not None:
                 _error(
-                    "SANKA_EXTENSION_UNDECLARED_REQUIREMENT",
-                    "Extension wheel requires an undeclared distribution",
+                    "SANKA_EXTENSION_ARTIFACT_INVALID",
+                    "Extension wheel requirements cannot use direct URLs",
                     artifact=wheel.name,
-                    requirement=requirement,
+                    requirement=raw_requirement,
                 )
-            specifier = (match.group("parenthesized") or match.group("bare") or "").strip()
-            if specifier and (
-                not _valid_specifier(specifier) or not _compatible(specifier, declared[normalized])
-            ):
-                _error(
-                    "SANKA_EXTENSION_REQUIREMENT_UNSATISFIED",
-                    "Declared extension wheel version does not satisfy Requires-Dist",
-                    artifact=wheel.name,
-                    requirement=requirement,
-                    declared_version=declared[normalized],
-                )
+            requirements.append((raw_requirement, requirement))
         if identity[0] == _normalized_distribution(manifest.distribution):
             parser = configparser.ConfigParser(interpolation=None)
             identity_name = manifest.executable or manifest.entry_point
@@ -2410,6 +2442,85 @@ class ExtensionStore:
                     artifact=wheel.name,
                     entry_point=identity_name,
                 )
+        return tuple(requirements)
+
+    @staticmethod
+    def _validate_dependency_closure(
+        manifest: Manifest,
+        wheels: tuple[Wheel, ...],
+        requirements: Mapping[str, tuple[tuple[str, Requirement], ...]],
+    ) -> None:
+        declared = {
+            identity[0]: identity[1]
+            for wheel in wheels
+            if (identity := _wheel_identity(wheel.name)) is not None
+        }
+        available = {
+            identity[0]
+            for wheel in manifest.wheels
+            if (identity := _wheel_identity(wheel.name)) is not None
+        }
+        artifacts = {
+            identity[0]: wheel.name
+            for wheel in wheels
+            if (identity := _wheel_identity(wheel.name)) is not None
+        }
+        root = _normalized_distribution(manifest.distribution)
+        requested_extras: dict[str, set[str]] = {root: set()}
+        pending = [root]
+        processed: set[tuple[str, tuple[str, ...]]] = set()
+        while pending:
+            distribution = pending.pop()
+            extras = requested_extras[distribution]
+            state = distribution, tuple(sorted(extras))
+            if state in processed:
+                continue
+            processed.add(state)
+            for raw_requirement, requirement in requirements.get(distribution, ()):
+                try:
+                    active = requirement.marker is None or any(
+                        requirement.marker.evaluate({"extra": extra}) for extra in (extras or {""})
+                    )
+                except (KeyError, ValueError) as error:
+                    raise ExtensionError(
+                        "SANKA_EXTENSION_ARTIFACT_INVALID",
+                        "Extension wheel requirement marker is invalid",
+                        details={
+                            "artifact": artifacts[distribution],
+                            "requirement": raw_requirement,
+                        },
+                    ) from error
+                if not active:
+                    continue
+                dependency = _normalized_distribution(requirement.name)
+                if dependency not in declared:
+                    if dependency in available:
+                        _error(
+                            "SANKA_EXTENSION_PLATFORM_UNSUPPORTED",
+                            "Extension dependency has no compatible wheel for this platform",
+                            extension_id=manifest.id,
+                            distribution=requirement.name,
+                        )
+                    _error(
+                        "SANKA_EXTENSION_UNDECLARED_REQUIREMENT",
+                        "Extension wheel requires an undeclared distribution",
+                        artifact=artifacts[distribution],
+                        requirement=raw_requirement,
+                    )
+                if declared[dependency] not in requirement.specifier:
+                    _error(
+                        "SANKA_EXTENSION_REQUIREMENT_UNSATISFIED",
+                        "Declared extension wheel version does not satisfy Requires-Dist",
+                        artifact=artifacts[distribution],
+                        requirement=raw_requirement,
+                        declared_version=declared[dependency],
+                    )
+                first_request = dependency not in requested_extras
+                previous = requested_extras.setdefault(dependency, set())
+                updated = previous | set(requirement.extras)
+                if first_request or updated != previous:
+                    requested_extras[dependency] = updated
+                    pending.append(dependency)
 
     def _wheel_entry_point(
         self,
@@ -2591,6 +2702,16 @@ class ExtensionStore:
                     records[name] = (info.file_size, digest.hexdigest())
         return records
 
+    @staticmethod
+    def _site_packages_relative(platform: str | None = None) -> Path:
+        if (platform or os.name) == "nt":
+            return Path("Lib") / "site-packages"
+        return (
+            Path("lib")
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+
     def _verify_environment_artifacts(
         self,
         root: Path,
@@ -2614,7 +2735,7 @@ class ExtensionStore:
                 subject="Extension environment",
                 allowed_symlinks=self._environment_symlinks(),
             )
-        prefix = f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages/"
+        prefix = self._site_packages_relative().as_posix() + "/"
         actual_imports = {
             str(record["path"])[len(prefix) :]: (
                 cast(int, record["size"]),
@@ -2984,26 +3105,17 @@ class ExtensionStore:
                 distribution = self._default_distribution(manifest, required=True)
                 artifact_digest = self._distribution_digest(distribution)
             else:
-                wheel_identities = tuple(
-                    identity
-                    for wheel in manifest.wheels
-                    if (identity := _wheel_identity(wheel.name)) is not None
-                )
-                declared = {identity[0]: identity[1] for identity in wheel_identities}
-                if len(wheel_identities) != len(manifest.wheels) or len(declared) != len(
-                    wheel_identities
-                ):
-                    _error(
-                        "SANKA_EXTENSION_ARTIFACT_INVALID",
-                        "Extension wheel set contains an invalid or duplicate distribution",
-                        extension_id=extension_id,
-                    )
-                cached = tuple(self._cache_wheel(wheel) for wheel in manifest.wheels)
-                for path, wheel in zip(cached, manifest.wheels, strict=True):
-                    self._inspect_wheel(path, wheel, manifest, declared)
+                selected_wheels = self._select_compatible_wheels(manifest)
+                cached = tuple(self._cache_wheel(wheel) for wheel in selected_wheels)
+                requirements = {}
+                for path, wheel in zip(cached, selected_wheels, strict=True):
+                    identity = _wheel_identity(wheel.name)
+                    assert identity is not None
+                    requirements[identity[0]] = self._inspect_wheel(path, wheel, manifest)
+                self._validate_dependency_closure(manifest, selected_wheels, requirements)
                 verified_wheels = tuple(
                     (path, wheel.sha256)
-                    for path, wheel in zip(cached, manifest.wheels, strict=True)
+                    for path, wheel in zip(cached, selected_wheels, strict=True)
                 )
                 self._wheel_import_records(verified_wheels)
                 if manifest.kind == "migration":
@@ -3057,7 +3169,7 @@ class ExtensionStore:
                             "path": path.relative_to(self.user_root).as_posix(),
                             "sha256": wheel.sha256,
                         }
-                        for path, wheel in zip(cached, manifest.wheels, strict=True)
+                        for path, wheel in zip(cached, selected_wheels, strict=True)
                     ],
                 }
                 installations = [
@@ -3247,6 +3359,7 @@ class ExtensionStore:
         entry: LockEntry,
         manifest: Manifest,
     ) -> dict[str, Any]:
+        selected_wheels = self._select_compatible_wheels(manifest)
         return {
             "artifact_digest": entry.artifact_digest,
             "environment": (Path("environments") / entry.artifact_digest).as_posix(),
@@ -3260,7 +3373,7 @@ class ExtensionStore:
                     "path": (Path("cache") / "wheels" / wheel.sha256 / wheel.name).as_posix(),
                     "sha256": wheel.sha256,
                 }
-                for wheel in manifest.wheels
+                for wheel in selected_wheels
             ],
         }
 
@@ -3404,14 +3517,7 @@ class ExtensionStore:
 
     @staticmethod
     def _connector_site_packages(environment: Path) -> Path:
-        if os.name == "nt":
-            return environment / "Lib" / "site-packages"
-        return (
-            environment
-            / "lib"
-            / f"python{sys.version_info.major}.{sys.version_info.minor}"
-            / "site-packages"
-        )
+        return environment / ExtensionStore._site_packages_relative()
 
     def connector_providers(self) -> tuple[str, ...]:
         disabled = self._load_disabled()
