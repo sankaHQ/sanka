@@ -278,6 +278,16 @@ def test_sdk_command_functional_options_are_explicit() -> None:
             "output",
             "cases",
             "no_http",
+            "scenarios",
+            "candidate",
+            "entrypoint",
+            "db_env",
+            "seed",
+            "ignore_tables",
+            "all_headers",
+            "edge_probes",
+            "python",
+            "candidate_python",
             "extension_config",
             "extension_env",
         },
@@ -302,3 +312,71 @@ def test_help_is_available_for_every_registered_command(capsys: pytest.CaptureFi
             main([*path, "-h"])
         assert help_exit.value.code == 0, path
         assert "-h, --help" in capsys.readouterr().out
+
+
+def test_verify_replay_flags_reach_the_extension_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Lifecycle:
+        def __init__(self, root: Path, **kwargs: object) -> None:
+            captured["root"] = root
+
+        def verify(self, **kwargs: object) -> ExtensionResult:
+            captured["verify"] = kwargs
+            return ExtensionResult("success", {"ok": True}, (), (), (), None)
+
+    monkeypatch.setattr(cli, "ApplicationLifecycle", Lifecycle)
+    scenarios = tmp_path / "scenarios.json"
+    scenarios.write_text("[]", encoding="utf-8")
+    seed = tmp_path / "seed.py"
+    seed.write_text("", encoding="utf-8")
+    assert (
+        main(
+            [
+                "verify",
+                str(tmp_path),
+                "--to",
+                "fastapi",
+                "--scenarios",
+                str(scenarios),
+                "--candidate",
+                str(tmp_path),
+                "--entrypoint",
+                "target_app.py",
+                "--db-env",
+                "BENCH_DB_PATH",
+                "--seed",
+                str(seed),
+                "--ignore-table",
+                "django_session",
+                "--ignore-table",
+                "audit_log",
+                "--all-headers",
+                "--edge-probes",
+                "--source-python",
+                "/opt/source/.venv/bin/python",
+                "--candidate-python",
+                "/opt/candidate/.venv/bin/python",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "verify"
+    configuration = captured["verify"]["configuration"]  # type: ignore[index]
+    assert configuration["scenarios"] == str(scenarios)
+    assert configuration["candidate"] == str(tmp_path)
+    assert configuration["entrypoint"] == "target_app.py"
+    assert configuration["db_env"] == "BENCH_DB_PATH"
+    assert configuration["seed"] == str(seed)
+    assert configuration["ignore_tables"] == ["django_session", "audit_log"]
+    assert configuration["all_headers"] is True
+    assert configuration["edge_probes"] is True
+    assert configuration["python"] == "/opt/source/.venv/bin/python"
+    assert configuration["candidate_python"] == "/opt/candidate/.venv/bin/python"
+    assert "no_http" not in configuration

@@ -37,7 +37,24 @@ SCAN_SCHEMA = "sanka-application-scan/v1"
 PLAN_SCHEMA = "sanka-application-plan/v1"
 MAX_ARTIFACT_FILES = 20_000
 PHASE_CONFIGURATION = frozenset(
-    {"bench_candidate", "cases", "force", "gap_report_only", "min_readiness", "no_http"}
+    {
+        "all_headers",
+        "bench_candidate",
+        "candidate",
+        "candidate_python",
+        "cases",
+        "db_env",
+        "edge_probes",
+        "entrypoint",
+        "force",
+        "gap_report_only",
+        "ignore_tables",
+        "min_readiness",
+        "no_http",
+        "python",
+        "scenarios",
+        "seed",
+    }
 )
 type Prompt = Callable[[str, tuple[str, ...] | None], str | None]
 
