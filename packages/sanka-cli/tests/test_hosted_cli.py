@@ -37,6 +37,29 @@ def test_migration_passthrough_forwards_help(runner: CliRunner, monkeypatch) -> 
 
 
 @pytest.mark.parametrize(
+    ("command", "tail"),
+    [
+        ("scan", ["--", "--help"]),
+        ("verify", ["--", "--program", "literal"]),
+    ],
+)
+def test_local_passthrough_preserves_double_dash(
+    command: str, tail: list[str], runner: CliRunner, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_main(argv):
+        captured["argv"] = argv
+        return 0
+
+    monkeypatch.setattr("sanka.cli.main", _fake_main)
+    result = runner.invoke(cli, [command, *tail])
+
+    assert result.exit_code == 0, result.output
+    assert captured["argv"] == [command, *tail]
+
+
+@pytest.mark.parametrize(
     "command",
     [
         "scan",
@@ -63,6 +86,8 @@ def test_local_help_does_not_load_credentials(command: str, monkeypatch, runner:
 
 
 def test_cloud_plan_loads_credentials(monkeypatch, runner: CliRunner) -> None:
+    monkeypatch.delenv("SANKA_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SANKA_BASE_URL", raising=False)
     monkeypatch.setattr(
         "sanka_cli.config.get_tokens",
         lambda *_: {"access_token": None, "refresh_token": None},

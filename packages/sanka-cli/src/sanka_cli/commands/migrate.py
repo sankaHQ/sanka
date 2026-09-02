@@ -34,6 +34,13 @@ CLOUD_ONLY_COMMANDS: dict[str, str] = {
     "cancel": "permanently cancel a cloud migration",
 }
 
+
+class _ForwardingCommand(click.Command):
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        ctx.meta["sanka.raw_args"] = tuple(args)
+        return super().parse_args(ctx, args)
+
+
 def register_migration_passthroughs(cli: click.Group) -> None:
     for name, help_text in MIGRATION_COMMANDS.items():
         if name in HYBRID_CLOUD_COMMANDS:
@@ -47,6 +54,7 @@ def register_migration_passthroughs(cli: click.Group) -> None:
 def _build_passthrough(name: str, help_text: str) -> click.Command:
     @click.command(
         name,
+        cls=_ForwardingCommand,
         help=help_text,
         # Forward everything verbatim so the local parser renders its own usage.
         context_settings={
@@ -56,8 +64,9 @@ def _build_passthrough(name: str, help_text: str) -> click.Command:
         },
     )
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-    def passthrough(args: tuple[str, ...]) -> None:
-        _run_local(name, args)
+    @click.pass_context
+    def passthrough(ctx: click.Context, args: tuple[str, ...]) -> None:
+        _run_local(name, ctx.meta["sanka.raw_args"])
 
     return passthrough
 
@@ -65,6 +74,7 @@ def _build_passthrough(name: str, help_text: str) -> click.Command:
 def _build_hybrid(name: str, help_text: str) -> click.Command:
     @click.command(
         name,
+        cls=_ForwardingCommand,
         help=f"{help_text} (local; cloud with --program)",
         context_settings={
             "ignore_unknown_options": True,
@@ -79,9 +89,9 @@ def _build_hybrid(name: str, help_text: str) -> click.Command:
         "--migration", "migration_id", default=None, help="Cloud migration ID."
     )
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-    @click.pass_obj
+    @click.pass_context
     def hybrid(
-        state: CLIState,
+        ctx: click.Context,
         program_id: str | None,
         migration_id: str | None,
         args: tuple[str, ...],
@@ -89,13 +99,13 @@ def _build_hybrid(name: str, help_text: str) -> click.Command:
         if program_id or migration_id:
             run_cloud_command(
                 name,
-                state,
+                ctx.obj,
                 program_id=program_id,
                 migration_id=migration_id,
                 args=args,
             )
             return
-        _run_local(name, args)
+        _run_local(name, ctx.meta["sanka.raw_args"])
 
     return hybrid
 
