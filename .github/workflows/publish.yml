@@ -32,7 +32,7 @@ jobs:
       - name: Require a matching version tag
         run: uv run python scripts/check_release_tag.py "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"
       - name: Install the locked workspace
-        run: uv sync --frozen --all-packages
+        run: uv sync --frozen --all-packages --all-extras
       - name: Run repository checks
         run: make check
       - name: Build and stage release

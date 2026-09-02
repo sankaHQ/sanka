@@ -77,6 +77,15 @@ def test_ci_and_publish_do_not_require_private_cross_repo_checkout() -> None:
         assert job["defaults"]["run"]["working-directory"] == "sanka"
 
 
+def test_ci_and_publish_install_optional_mcp_dependencies() -> None:
+    for workflow_name in ("ci.yml", "publish.yml"):
+        workflow = _workflow(workflow_name)
+        job_name = "check" if workflow_name == "ci.yml" else "build"
+        runs = [step.get("run") for step in workflow["jobs"][job_name]["steps"]]
+
+        assert "uv sync --frozen --all-packages --all-extras" in runs
+
+
 def test_private_bench_credentials_only_run_on_trusted_main() -> None:
     workflow = _workflow("bench.yml")
     triggers = workflow["on"]
