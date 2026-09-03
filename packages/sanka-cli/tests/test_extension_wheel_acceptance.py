@@ -101,7 +101,7 @@ def _tracked_manifest(
     return repository, cast(dict[str, Any], manifest)
 
 
-def _preseed_store(
+def _seed_marketplace(
     tmp_path: Path,
     environment: Path,
     extension_release: Path,
@@ -125,14 +125,6 @@ def _preseed_store(
             cached.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(artifact, cached)
 
-    site_packages = _site_packages(environment)
-    sys.path.insert(0, str(site_packages))
-    try:
-        for extension_id in extension_ids:
-            store.add_extension(extension_id)
-    finally:
-        sys.path.remove(str(site_packages))
-
 
 def create_test_environment(
     tmp_path: Path,
@@ -151,26 +143,6 @@ def create_test_environment(
 
     environment = tmp_path / "wheel-environment"
     venv.EnvBuilder(symlinks=True, system_site_packages=True).create(environment)
-    if EXTENSION_ID in extension_ids:
-        _repository, manifest = _tracked_manifest(extension_release)
-        wheels = [extension_release / wheel["name"] for wheel in manifest["wheels"]]
-        assert len(wheels) == 2
-        subprocess.run(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                str(environment / "bin" / "python"),
-                "--no-index",
-                "--no-deps",
-                *map(str, wheels),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
     site_packages = _site_packages(environment)
     runtime_site_packages = Path(sysconfig.get_path("purelib")).resolve()
     (site_packages / "sanka-project-dependencies.pth").write_text(
@@ -178,7 +150,7 @@ def create_test_environment(
         encoding="utf-8",
     )
     (environment / "bin" / "sanka").symlink_to(runtime_entry_point)
-    _preseed_store(tmp_path, environment, extension_release, project, extension_ids)
+    _seed_marketplace(tmp_path, environment, extension_release, project, extension_ids)
     return environment
 
 
@@ -226,6 +198,25 @@ def _assert_wheel_only_extension_imports(environment: Path) -> None:
     )
 
 
+def _assert_extension_is_not_importable(environment: Path) -> None:
+    probe = subprocess.run(
+        [
+            str(environment / "bin" / "python"),
+            "-c",
+            (
+                "import importlib.util,json;"
+                f"names={EXTENSION_MODULES!r};"
+                "print(json.dumps({name:importlib.util.find_spec(name).origin "
+                "if importlib.util.find_spec(name) else None for name in names}))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(probe.stdout) == dict.fromkeys(EXTENSION_MODULES)
+
+
 def test_default_extension_full_chain_from_wheels(
     tmp_path: Path,
     extension_release: Path,
@@ -234,7 +225,7 @@ def test_default_extension_full_chain_from_wheels(
 ) -> None:
     environment = create_test_environment(tmp_path, extension_release, drf_extension_fixture)
     monkeypatch.chdir(drf_extension_fixture)
-    _assert_wheel_only_extension_imports(environment)
+    _assert_extension_is_not_importable(environment)
     plan_config = json.dumps(
         {
             "generation": "minimal",
@@ -248,11 +239,12 @@ def test_default_extension_full_chain_from_wheels(
 
     listed = run_json(environment, "extension", "list", "--json")
     records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}
-    assert records[EXTENSION_ID]["status"] == [
-        "available",
-        "installed",
-        "locked",
-    ]
+    assert records[EXTENSION_ID]["status"] == ["available"]
+    run_json(environment, "extension", "add", EXTENSION_ID, "--json")
+    _assert_wheel_only_extension_imports(environment)
+    listed = run_json(environment, "extension", "list", "--json")
+    records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}
+    assert records[EXTENSION_ID]["status"] == ["available", "installed", "locked"]
     run_json(environment, "scan", str(drf_extension_fixture), "--json")
 
     run_json(environment, "extension", "remove", EXTENSION_ID, "--json")
@@ -335,6 +327,9 @@ def test_markdown_to_sqlite_lifecycle(
     )
     monkeypatch.chdir(project)
 
+    for extension_id in CONNECTOR_IDS:
+        run_json(environment, "extension", "add", extension_id, "--json")
+
     site_packages = _site_packages(environment)
     assert all(not (site_packages / module).exists() for module in CONNECTOR_MODULES)
     assert all(module not in sys.modules for module in CONNECTOR_MODULES)
@@ -371,6 +366,9 @@ def test_all_connector_wheel_closures_install(
         extension_ids=ALL_CONNECTOR_IDS,
     )
     monkeypatch.chdir(project)
+
+    for extension_id in ALL_CONNECTOR_IDS:
+        run_json(environment, "extension", "add", extension_id, "--json")
 
     listed = run_json(environment, "extension", "list", "--json")
     records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}

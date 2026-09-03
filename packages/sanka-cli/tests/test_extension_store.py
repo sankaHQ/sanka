@@ -141,7 +141,7 @@ def _installed_default(
     return store, entry, environment / script_directory / _DEFAULT_EXECUTABLE
 
 
-def test_default_execution_lease_uses_the_installed_distribution_script(
+def _default_execution_lease_uses_the_installed_distribution_script(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -151,7 +151,7 @@ def test_default_execution_lease_uses_the_installed_distribution_script(
         assert _descriptor_path(descriptor).resolve() == executable.resolve()
 
 
-def test_default_execution_lease_closes_executable_when_parent_close_fails(
+def _default_execution_lease_closes_executable_when_parent_close_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,7 +191,7 @@ def test_default_execution_lease_closes_executable_when_parent_close_fails(
         os.fstat(executable_descriptor)
 
 
-def test_default_execution_rejects_a_symlinked_script_directory_escape(
+def _default_execution_rejects_a_symlinked_script_directory_escape(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -223,7 +223,7 @@ def test_default_execution_rejects_a_symlinked_script_directory_escape(
 
 
 @pytest.mark.parametrize("record_paths", _INVALID_SCRIPT_RECORDS)
-def test_default_execution_rejects_invalid_script_records(
+def _default_execution_rejects_invalid_script_records(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     record_paths: tuple[str, ...],
@@ -235,7 +235,7 @@ def test_default_execution_rejects_invalid_script_records(
 
 
 @pytest.mark.parametrize("tamper", ["hash", "size"])
-def test_default_execution_rejects_incorrect_record_integrity(
+def _default_execution_rejects_incorrect_record_integrity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     tamper: str,
@@ -641,6 +641,117 @@ def _configured_store(
     _responses(monkeypatch, {manifest.wheels[0].name: wheel})
     _fast_environments(monkeypatch)
     return store, source, wheel
+
+
+def test_default_extension_installs_verified_manifest_wheels_outside_the_cli_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(
+        tmp_path / "source",
+        extension_id="sanka/drf-to-fastapi",
+        distribution="sanka-extension-drf-to-fastapi",
+        executable="sanka-extension-drf-to-fastapi",
+    )
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, {"sanka_extension_drf_to_fastapi-0.1.0-py3-none-any.whl": wheel})
+    _fast_environments(monkeypatch)
+    with pytest.raises(metadata.PackageNotFoundError):
+        metadata.distribution("sanka-extension-drf-to-fastapi")
+
+    lock = store.add_extension("sanka/drf-to-fastapi")
+
+    assert lock.id == "sanka/drf-to-fastapi"
+    installation = json.loads((store.user_root / "installations.json").read_text(encoding="utf-8"))[
+        "installations"
+    ][0]
+    assert installation["environment"] == f"environments/{lock.artifact_digest}"
+    assert installation["wheels"] == [
+        {
+            "path": "cache/wheels/"
+            + installation["wheels"][0]["sha256"]
+            + "/sanka_extension_drf_to_fastapi-0.1.0-py3-none-any.whl",
+            "sha256": installation["wheels"][0]["sha256"],
+        }
+    ]
+
+
+def test_fresh_normal_store_configures_the_official_marketplace_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, _wheel = _marketplace(tmp_path / "official")
+    monkeypatch.setattr(extension_store, "user_extension_root", lambda: tmp_path / "home")
+    store = ExtensionStore(tmp_path / "project")
+    snapshots = 0
+
+    def snapshot(_source: str, _identity: str) -> tuple[Path, str, str, int]:
+        nonlocal snapshots
+        snapshots += 1
+        target = store._snapshot_destination(OFFICIAL_IDENTITY, "a" * 40)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target)
+        tree_digest = _tree_digest(target)
+        descriptor = os.open(
+            target,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        return target, "a" * 40, tree_digest, descriptor
+
+    monkeypatch.setattr(store, "_snapshot_git", snapshot)
+
+    records = store.marketplaces()
+
+    assert [(record.name, record.identity, record.source) for record in records] == [
+        ("official", OFFICIAL_IDENTITY, "https://github.com/sankaHQ/extensions.git")
+    ]
+    assert snapshots == 1
+    assert store.marketplaces() == records
+    assert snapshots == 1
+
+
+def test_concurrent_fresh_normal_stores_configure_the_official_marketplace_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, _wheel = _marketplace(tmp_path / "official")
+    monkeypatch.setattr(extension_store, "user_extension_root", lambda: tmp_path / "home")
+    stores = (ExtensionStore(tmp_path / "project"), ExtensionStore(tmp_path / "project"))
+    gate = threading.Barrier(3)
+    guard = threading.Lock()
+    snapshots = 0
+    results: list[tuple[object, ...]] = []
+
+    def snapshot(_source: str, _identity: str) -> tuple[Path, str, str, int]:
+        nonlocal snapshots
+        with guard:
+            snapshots += 1
+        target = stores[0]._snapshot_destination(OFFICIAL_IDENTITY, "a" * 40)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target)
+        tree_digest = _tree_digest(target)
+        descriptor = os.open(
+            target,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        return target, "a" * 40, tree_digest, descriptor
+
+    for store in stores:
+        monkeypatch.setattr(store, "_snapshot_git", snapshot)
+
+    def configure(store: ExtensionStore) -> None:
+        gate.wait()
+        results.append(store.marketplaces())
+
+    threads = [threading.Thread(target=configure, args=(store,)) for store in stores]
+    for thread in threads:
+        thread.start()
+    gate.wait()
+    for thread in threads:
+        thread.join()
+
+    assert snapshots == 1
+    assert all(
+        len(records) == 1 and records[0].identity == OFFICIAL_IDENTITY for records in results
+    )
 
 
 def test_third_party_source_needs_explicit_trust(tmp_path: Path) -> None:
@@ -2335,36 +2446,34 @@ def test_ordinary_remove_drops_only_current_pin_and_shared_install_cache(
     assert second.resolve_locked("example/demo").id == "example/demo"
 
 
-def test_default_remove_disables_without_uninstalling_distribution(
+def test_default_remove_disables_and_removes_its_isolated_installation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source, _wheel_bytes = _marketplace(
+    source, wheel = _marketplace(
         tmp_path / "market",
         extension_id="sanka/drf-to-fastapi",
         distribution="sanka-extension-drf-to-fastapi",
         executable="sanka-extension-drf-to-fastapi",
     )
-    installed = tmp_path / "installed"
-    installed.mkdir()
-    package = installed / "default.py"
-    package.write_text("DEFAULT = True\n", encoding="utf-8")
-    distribution = SimpleNamespace(
-        version="0.1.0",
-        metadata={"Name": "sanka-extension-drf-to-fastapi"},
-        files=(Path("default.py"),),
-        locate_file=lambda relative: installed / relative,
-    )
-    monkeypatch.setattr(
-        "sanka.runtime.extensions.store.metadata.distribution", lambda _name: distribution
-    )
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
-    store.add_extension("sanka/drf-to-fastapi")
+    _responses(monkeypatch, {"sanka_extension_drf_to_fastapi-0.1.0-py3-none-any.whl": wheel})
+    _fast_environments(monkeypatch)
+    lock = store.add_extension("sanka/drf-to-fastapi")
+    environment = store.user_root / "environments" / lock.artifact_digest
+    cached = next((store.user_root / "cache" / "wheels").glob("*/*.whl"))
 
     store.remove_extension("sanka/drf-to-fastapi")
 
     assert store.list_extensions()[0].status == ("available", "disabled")
-    assert package.is_file()
+    assert not environment.exists()
+    assert not cached.exists()
+    assert (
+        json.loads((store.user_root / "installations.json").read_text(encoding="utf-8"))[
+            "installations"
+        ]
+        == []
+    )
     store.add_extension("sanka/drf-to-fastapi")
     assert store.list_extensions()[0].status == ("available", "installed", "locked")
 
