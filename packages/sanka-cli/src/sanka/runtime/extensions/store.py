@@ -1238,7 +1238,7 @@ class ExtensionStore:
         )
 
     def _ensure_official_marketplace(self) -> None:
-        if not self._configure_official_marketplace:
+        if not self._configure_official_marketplace or self._marketplace_path.exists():
             return
         with (
             _locked(self.user_root, self._marketplace_path),
@@ -3009,6 +3009,7 @@ class ExtensionStore:
         marketplace: str | None = None,
         configuration: Mapping[str, Any] | None = None,
     ) -> LockEntry:
+        self._ensure_official_marketplace()
         with (
             _locked(self.user_root, self._installation_path),
             _locked(self.project_root, self._project_lock_path),
