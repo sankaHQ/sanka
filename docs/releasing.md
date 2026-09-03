@@ -7,7 +7,7 @@ SHA-256 hashes, and publishes through job-scoped OIDC.
 
 ## Candidate and prerequisite
 
-The consolidated candidate is `sanka-cli==0.2.1`, tagged `v0.2.1`. Its source
+The current candidate is `sanka-cli==0.2.2`, tagged `v0.2.2`. Its source
 authority is the reviewed, merged `sankaHQ/sanka` commit; PyPI becomes the
 artifact authority only after publication and clean-install verification.
 
@@ -30,14 +30,14 @@ With exact sibling `sanka` and `extensions` checkouts:
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.2.1 tag
+uv run python scripts/check_release_tag.py v0.2.2 tag
 ```
 
 `make build-release` clears `dist/`, builds only:
 
 ```text
-sanka_cli-0.2.1-py3-none-any.whl
-sanka_cli-0.2.1.tar.gz
+sanka_cli-0.2.2-py3-none-any.whl
+sanka_cli-0.2.2.tar.gz
 ```
 
 It checks package metadata, dependencies, entry points, licenses, imports, and
@@ -55,8 +55,7 @@ PyPI `sanka-cli` project to trust:
 - workflow: `publish.yml`; and
 - protected GitHub environment: `pypi`.
 
-Keep the old publisher active until `0.2.1` is published and verified. The
-protected environment and the exact tag/artifact hashes require explicit
+The protected environment and the exact tag/artifact hashes require explicit
 human authorization. No long-lived PyPI token belongs in GitHub secrets,
 local environment files, or repository history.
 
@@ -66,18 +65,18 @@ local environment files, or repository history.
    pinned commit.
 2. Merge the reviewed Sanka change through `sanka-pr-flow` and verify required
    CI on the exact final head.
-3. Create and push `v0.2.1` only with explicit authorization. Do not move or
-   reuse the existing `v0.2.0` tag.
+3. Create and push `v0.2.2` only with explicit authorization. Do not move or
+   reuse the existing `v0.2.1` tag.
 4. Verify local `release/SOURCE_COMMIT` and `release/SHA256SUMS` against the
    approved tag.
-5. Dispatch **Publish sanka-cli** at `v0.2.1` with confirmation
-   `publish-v0.2.1`.
+5. Dispatch **Publish sanka-cli** at `v0.2.2` with confirmation
+   `publish-v0.2.2`.
 6. The build job runs the full checks, builds once, stages once, and uploads
    one workflow artifact. It has no OIDC permission.
 7. The `pypi` job receives only `id-token: write`, downloads the named
    artifact, verifies its source commit and hashes, and invokes the PyPI action
    once.
-8. Install `sanka-cli==0.2.1` and `sanka-cli[mcp]` in fresh environments;
+8. Install `sanka-cli==0.2.2` and `sanka-cli[mcp]` in fresh environments;
    verify CLI help, local tokenless behavior, hosted authentication failure,
    extension installation from GitHub, one connector migration, MCP tool
    names, and both SDK adapters.
