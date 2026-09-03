@@ -57,6 +57,24 @@ class TerminalOutput:
         if not self.quiet:
             print(self.style(value, "cyan"), file=self.stdout)
 
+    def table(self, headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
+        if self.quiet:
+            return
+        widths = [
+            max(len(header), *(len(row[index]) for row in rows))
+            for index, header in enumerate(headers)
+        ]
+        print(
+            "  ".join(header.ljust(width) for header, width in zip(headers, widths, strict=True)),
+            file=self.stdout,
+        )
+        print("  ".join("-" * width for width in widths), file=self.stdout)
+        for row in rows:
+            print(
+                "  ".join(value.ljust(width) for value, width in zip(row, widths, strict=True)),
+                file=self.stdout,
+            )
+
     def success(self, value: str) -> None:
         print(self.style(f"✓ OK  {value}", "green"), file=self.stdout)
 

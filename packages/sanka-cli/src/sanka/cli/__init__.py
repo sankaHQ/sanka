@@ -669,9 +669,51 @@ def _extension_result(
     data = {"operation": operation, "records": records}
     if args.json:
         _print_json(_json_result("extension", data, migration_state="not_started"))
-    else:
-        for record in records:
-            print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    terminal = _terminal(args)
+    if operation == "list":
+        terminal.heading("Extensions")
+        terminal.table(
+            ("Extension", "Kind", "Version", "Status", "Marketplace"),
+            [
+                (
+                    str(record.get("id", "")),
+                    str(record.get("kind", "")),
+                    str(record.get("version", "")),
+                    ", ".join(map(str, record.get("status", []))),
+                    str(record.get("marketplace", "")),
+                )
+                for record in records
+            ],
+        )
+    elif operation == "marketplace_list":
+        terminal.heading("Marketplaces")
+        terminal.table(
+            ("Marketplace", "Source", "Commit", "Trusted"),
+            [
+                (
+                    str(record.get("name", "")),
+                    str(record.get("source", "")),
+                    str(record.get("resolved_commit") or "-")[:12],
+                    "yes" if record.get("trusted") else "no",
+                )
+                for record in records
+            ],
+        )
+    elif operation == "add":
+        record = records[0]
+        terminal.success(f"Installed {record['id']} {record['version']}")
+    elif operation == "remove":
+        terminal.success(f"Removed {records[0]['id']}")
+    elif operation == "marketplace_add":
+        terminal.success(f"Added marketplace {records[0]['name']}")
+    elif operation == "marketplace_upgrade":
+        terminal.success(
+            "Updated marketplace " + ", ".join(str(record["name"]) for record in records)
+        )
+    elif operation == "marketplace_remove":
+        terminal.success(f"Removed marketplace {records[0]['name']}")
     return 0
 
 

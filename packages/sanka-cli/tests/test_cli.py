@@ -163,6 +163,73 @@ def test_extension_management_uses_stable_json_envelopes(
     ]
 
 
+def test_extension_lists_use_human_readable_tables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Record:
+        def __init__(self, data: dict[str, object]) -> None:
+            self.data = data
+
+        def to_dict(self) -> dict[str, object]:
+            return self.data
+
+    class Store:
+        def __init__(self, project_root: Path) -> None:
+            assert project_root == tmp_path
+
+        def list_extensions(self) -> tuple[Record, ...]:
+            return (
+                Record(
+                    {
+                        "id": "sanka/drf-to-fastapi",
+                        "kind": "migration",
+                        "version": "0.1.0a3",
+                        "status": ["installed", "enabled"],
+                        "marketplace": "official",
+                        "wheels": [{"sha256": "secret-noise"}],
+                    }
+                ),
+            )
+
+        def marketplaces(self) -> tuple[Record, ...]:
+            return (
+                Record(
+                    {
+                        "name": "official",
+                        "source": "https://github.com/sankaHQ/extensions.git",
+                        "resolved_commit": "a44ab1794924d45e8eeaeec456ce5c28c1c17d56",
+                        "trusted": True,
+                        "snapshot_root": "/private/cache/noise",
+                    }
+                ),
+            )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "ExtensionStore", Store)
+
+    assert main(["extension", "list", "--no-color"]) == 0
+    extensions = capsys.readouterr().out
+    assert "Extension" in extensions
+    assert "sanka/drf-to-fastapi" in extensions
+    assert "installed, enabled" in extensions
+    assert "wheels" not in extensions
+    assert "secret-noise" not in extensions
+    assert not extensions.lstrip().startswith("{")
+
+    assert main(["extension", "marketplace", "list", "--no-color"]) == 0
+    marketplaces = capsys.readouterr().out
+    assert "Marketplace" in marketplaces
+    assert "official" in marketplaces
+    assert "github.com/sankaHQ/extensions" in marketplaces
+    assert "a44ab179492" in marketplaces
+    assert "yes" in marketplaces
+    assert "snapshot_root" not in marketplaces
+    assert "private/cache/noise" not in marketplaces
+    assert not marketplaces.lstrip().startswith("{")
+
+
 def test_extension_errors_preserve_stable_code_and_details(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
