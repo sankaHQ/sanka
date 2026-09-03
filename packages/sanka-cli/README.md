@@ -24,6 +24,19 @@ uv tool install 'sanka-cli[mcp]'
 sanka mcp
 ```
 
+Install the bundled `sanka-cli` skill into an AI coding harness:
+
+```bash
+sanka skill install claude
+sanka skill install codex --scope project
+sanka skill install --scope global
+```
+
+The command prompts for project or global scope when `--scope` is omitted.
+Without a harness argument, it installs into every detected Claude Code or
+Codex CLI. Existing matching installs are left unchanged; different content
+requires `--force`.
+
 The base tool does not install framework migrations or provider drivers.
 Components are immutable GitHub release wheels selected through the extension
 manager:
