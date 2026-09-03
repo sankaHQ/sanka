@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -49,7 +48,9 @@ def _command_environment(environment: Path) -> dict[str, str]:
     site_packages = _site_packages(environment)
     return os.environ | {
         "PATH": os.pathsep.join((str(environment / "bin"), os.environ.get("PATH", ""))),
-        "PYTHONPATH": str(site_packages),
+        "PYTHONPATH": os.pathsep.join(
+            (str(site_packages), str(Path(sysconfig.get_path("purelib")).resolve()))
+        ),
         "SANKA_HOME": str(environment.parent / "user-home"),
     }
 
@@ -116,6 +117,14 @@ def _seed_marketplace(
     user_root = environment.parent / "user-home" / "extensions"
     store = ExtensionStore(project, user_root=user_root)
     store.add_marketplace(marketplace, name="official-wheel-fixture", trust=True)
+    _cache_release_wheels(user_root, extension_release, extension_ids)
+
+
+def _cache_release_wheels(
+    user_root: Path,
+    extension_release: Path,
+    extension_ids: tuple[str, ...] = (EXTENSION_ID,),
+) -> None:
     for extension_id in extension_ids:
         _repository, manifest = _tracked_manifest(extension_release, extension_id)
         for wheel in manifest["wheels"]:
@@ -167,10 +176,15 @@ def test_explicit_cli_executable_selection_does_not_fall_back(
         create_test_environment(tmp_path, tmp_path / "release", tmp_path / "project")
 
 
-def _assert_wheel_only_extension_imports(environment: Path) -> None:
+def _assert_extension_is_importable_from_its_isolated_environment(
+    environment: Path, lock: dict[str, object]
+) -> None:
+    artifact_digest = lock.get("artifact_digest")
+    assert isinstance(artifact_digest, str)
+    isolated = environment.parent / "user-home" / "extensions" / "environments" / artifact_digest
     probe = subprocess.run(
         [
-            str(environment / "bin" / "python"),
+            str(isolated / "bin" / "python"),
             "-c",
             (
                 "import importlib.util,json,sys;"
@@ -184,17 +198,11 @@ def _assert_wheel_only_extension_imports(environment: Path) -> None:
         text=True,
     )
     payload = json.loads(probe.stdout)
-    environment = environment.resolve()
-    assert Path(payload["executable"]).is_relative_to(environment)
+    isolated = isolated.resolve()
+    assert Path(payload["executable"]).is_relative_to(isolated)
     assert all(
-        Path(origin).resolve().is_relative_to(environment) for origin in payload["origins"].values()
-    )
-    assert not any("extension-marketplace-extensions" in path for path in payload["sys_path"])
-    assert not any(name in sys.modules for name in EXTENSION_MODULES)
-    assert all(
-        (spec := importlib.util.find_spec(name)) is None
-        or "extension-marketplace-extensions" not in str(spec.origin)
-        for name in EXTENSION_MODULES
+        isinstance(origin, str) and Path(origin).resolve().is_relative_to(isolated)
+        for origin in payload["origins"].values()
     )
 
 
@@ -226,6 +234,7 @@ def test_default_extension_full_chain_from_wheels(
     environment = create_test_environment(tmp_path, extension_release, drf_extension_fixture)
     monkeypatch.chdir(drf_extension_fixture)
     _assert_extension_is_not_importable(environment)
+    extension_env = ("--extension-env", "PYTHONPATH")
     plan_config = json.dumps(
         {
             "generation": "minimal",
@@ -240,18 +249,22 @@ def test_default_extension_full_chain_from_wheels(
     listed = run_json(environment, "extension", "list", "--json")
     records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}
     assert records[EXTENSION_ID]["status"] == ["available"]
-    run_json(environment, "extension", "add", EXTENSION_ID, "--json")
-    _assert_wheel_only_extension_imports(environment)
+    added = run_json(environment, "extension", "add", EXTENSION_ID, "--json")
+    added_records = cast(dict[str, list[dict[str, object]]], added["data"])["records"]
+    assert len(added_records) == 1
+    _assert_extension_is_not_importable(environment)
+    _assert_extension_is_importable_from_its_isolated_environment(environment, added_records[0])
     listed = run_json(environment, "extension", "list", "--json")
     records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}
     assert records[EXTENSION_ID]["status"] == ["available", "installed", "locked"]
-    run_json(environment, "scan", str(drf_extension_fixture), "--json")
+    run_json(environment, "scan", str(drf_extension_fixture), *extension_env, "--json")
 
     run_json(environment, "extension", "remove", EXTENSION_ID, "--json")
     returncode, missing = _run_json_process(
         environment,
         "scan",
         str(drf_extension_fixture),
+        *extension_env,
         "--json",
     )
     error = cast(dict[str, Any], missing["error"])
@@ -261,8 +274,9 @@ def test_default_extension_full_chain_from_wheels(
         "sanka extension add sanka/drf-to-fastapi"
     )
 
+    _cache_release_wheels(environment.parent / "user-home" / "extensions", extension_release)
     run_json(environment, "extension", "add", EXTENSION_ID, "--json")
-    scan = run_json(environment, "scan", str(drf_extension_fixture), "--json")
+    scan = run_json(environment, "scan", str(drf_extension_fixture), *extension_env, "--json")
     assert cast(dict[str, Any], scan["data"])["recommendations"][0]["id"] == EXTENSION_ID
     plan = run_json(
         environment,
@@ -272,6 +286,7 @@ def test_default_extension_full_chain_from_wheels(
         "fastapi",
         "--extension-config",
         plan_config,
+        *extension_env,
         "--json",
     )
     plan_hash = cast(dict[str, object], plan["data"])["plan_hash"]
@@ -282,13 +297,16 @@ def test_default_extension_full_chain_from_wheels(
         str(drf_extension_fixture),
         "--plan-hash",
         str(plan_hash),
+        *extension_env,
         "--json",
     )
-    assert run_json(environment, "test", str(drf_extension_fixture), "--json")["outcome"] == (
-        "success"
-    )
+    assert run_json(environment, "test", str(drf_extension_fixture), *extension_env, "--json")[
+        "outcome"
+    ] == ("success")
     assert (
-        run_json(environment, "verify", str(drf_extension_fixture), "--json")["outcome"]
+        run_json(environment, "verify", str(drf_extension_fixture), *extension_env, "--json")[
+            "outcome"
+        ]
         == "success"
     )
 
