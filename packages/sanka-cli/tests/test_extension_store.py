@@ -1749,6 +1749,82 @@ def test_venv_normalization_rejects_a_nonstandard_lib64_alias(tmp_path: Path) ->
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+def test_venv_normalization_accepts_python_314_unicode_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = tmp_path / "environment"
+    (environment / "bin").mkdir(parents=True)
+    (environment / "bin" / "𝜋thon").symlink_to("python3.14")
+
+    class VersionInfo(tuple[object, ...]):
+        major = 3
+        minor = 14
+
+    version_info = VersionInfo((3, 14, 0, "final", 0))
+    monkeypatch.setattr(sys, "version_info", version_info)
+    monkeypatch.setattr(sys, "getfilesystemencoding", lambda: "utf-8")
+
+    descriptor = os.open(environment, os.O_RDONLY)
+    try:
+        extension_store._normalize_venv_launchers(descriptor)
+        extension_store._tree_records(
+            descriptor,
+            error_code="SANKA_EXTENSION_PATH",
+            subject="Extension environment",
+            allowed_symlinks=ExtensionStore._environment_symlinks(),
+        )
+    finally:
+        os.close(descriptor)
+
+    launcher = environment / "bin" / "𝜋thon"
+    assert launcher.is_symlink()
+    assert Path(os.readlink(launcher)) == Path(sys.executable).resolve()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+def test_add_rebuilds_an_orphaned_environment_with_an_unverified_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    manifest = load_marketplace(store.marketplaces()[0].snapshot_root)[0]
+    _responses(monkeypatch, {manifest.wheels[0].name: wheel})
+    environment = store.user_root / "environments" / store._manifest_artifact_digest(manifest)
+    (environment / "bin").mkdir(parents=True)
+    stale_launcher = environment / "bin" / "stale-python"
+    stale_launcher.symlink_to("python")
+
+    lock = store.add_extension("example/demo")
+
+    assert lock.artifact_digest == environment.name
+    assert not stale_launcher.exists() and not stale_launcher.is_symlink()
+    assert store.resolve_locked("example/demo") == lock
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+def test_add_rejects_an_unverified_symlink_in_a_recorded_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, wheel = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    manifest = load_marketplace(store.marketplaces()[0].snapshot_root)[0]
+    _responses(monkeypatch, {manifest.wheels[0].name: wheel})
+    lock = store.add_extension("example/demo")
+    stale_launcher = (
+        store.user_root / "environments" / lock.artifact_digest / "bin" / "stale-python"
+    )
+    stale_launcher.symlink_to("python")
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/demo")
+
+    assert raised.value.code == "SANKA_EXTENSION_PATH"
+    assert stale_launcher.is_symlink()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
 def test_real_posix_materializer_installs_without_a_venv_test_hook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

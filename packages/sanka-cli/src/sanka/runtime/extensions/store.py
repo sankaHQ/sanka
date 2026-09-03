@@ -529,6 +529,13 @@ def _create_venv(
     )
 
 
+def _venv_launcher_names() -> tuple[str, ...]:
+    names = ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}")
+    if sys.version_info[:2] == (3, 14) and sys.getfilesystemencoding() == "utf-8":
+        names += ("𝜋thon",)
+    return names
+
+
 def _normalize_venv_launchers(environment_descriptor: int) -> None:
     if os.name == "nt":
         return
@@ -543,10 +550,9 @@ def _normalize_venv_launchers(environment_descriptor: int) -> None:
                 )
             os.unlink("lib64", dir_fd=environment_descriptor)
     interpreter = Path(sys.executable).resolve()
-    names = ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}")
     with _directory_at(environment_descriptor, "bin", Path("bin")) as bin_descriptor:
         assert bin_descriptor is not None
-        for name in names:
+        for name in _venv_launcher_names():
             with suppress(FileNotFoundError):
                 status = os.stat(name, dir_fd=bin_descriptor, follow_symlinks=False)
                 if not (stat.S_ISLNK(status.st_mode) or stat.S_ISREG(status.st_mode)):
@@ -2830,24 +2836,29 @@ class ExtensionStore:
                 missing_ok=True,
             ) as existing:
                 if existing is not None:
-                    digest = content_hash(
-                        _tree_records(
-                            existing,
-                            error_code="SANKA_EXTENSION_PATH",
-                            subject="Extension environment",
-                            allowed_symlinks=self._environment_symlinks(),
-                        )
-                    )
-                    if digest == expected_digest:
-                        try:
-                            self._verify_environment_artifacts(
-                                root, executable, wheels, providers=providers
+                    try:
+                        digest = content_hash(
+                            _tree_records(
+                                existing,
+                                error_code="SANKA_EXTENSION_PATH",
+                                subject="Extension environment",
+                                allowed_symlinks=self._environment_symlinks(),
                             )
-                        except ExtensionError as error:
-                            if error.code != "SANKA_EXTENSION_HASH_MISMATCH":
-                                raise
-                        else:
-                            return root
+                        )
+                    except ExtensionError as error:
+                        if error.code != "SANKA_EXTENSION_PATH" or expected_digest is not None:
+                            raise
+                    else:
+                        if digest == expected_digest:
+                            try:
+                                self._verify_environment_artifacts(
+                                    root, executable, wheels, providers=providers
+                                )
+                            except ExtensionError as error:
+                                if error.code != "SANKA_EXTENSION_HASH_MISMATCH":
+                                    raise
+                            else:
+                                return root
                     replace_existing = True
             if replace_existing:
                 shutil.rmtree(environment_name, dir_fd=environments)
@@ -3212,11 +3223,7 @@ class ExtensionStore:
     def _environment_symlinks() -> dict[str, Path]:
         interpreter = Path(sys.executable).resolve()
         return dict.fromkeys(
-            (
-                "bin/python",
-                "bin/python3",
-                f"bin/python{sys.version_info.major}.{sys.version_info.minor}",
-            ),
+            (f"bin/{name}" for name in _venv_launcher_names()),
             interpreter,
         )
 
