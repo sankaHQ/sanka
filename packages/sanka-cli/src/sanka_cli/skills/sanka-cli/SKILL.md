@@ -1,37 +1,62 @@
 ---
 name: sanka-cli
-description: Use when inspecting, planning, applying, testing, or verifying an application migration with the sanka command-line interface.
+description: Use when inspecting, planning, applying, testing, verifying, or monitoring application and data migrations with the sanka command-line interface.
 ---
 
 # Sanka CLI
 
-Use `sanka` to inspect and migrate an application while keeping the reviewed plan as the safety boundary.
+Use `sanka` for application modernization and data movement. Derive the migration mode and destination from the user's task; never assume FastAPI or any other target.
 
-## Workflow
+## Choose the migration mode
 
-1. Run `sanka --help` and `sanka <command> --help` before choosing options. Do not guess unsupported flags.
-2. Inspect the source without changing it:
-   ```bash
-   sanka scan . --json
-   ```
-3. Build a plan and review its readiness, limitations, target path, and `plan_hash`:
-   ```bash
-   sanka plan . --to fastapi --json
-   ```
-4. Before writing a target, show the plan and get explicit user authorization. Apply only the exact reviewed hash:
-   ```bash
-   sanka apply --root . --plan-hash <reviewed-plan-hash> --json
-   ```
-5. Test generated scope, then verify source parity:
-   ```bash
-   sanka test . --json
-   sanka verify . --json
-   ```
-6. If a check fails, fix the generated candidate and repeat the failing check. Do not claim completion until verification passes or report the remaining limitation plainly.
+Run `sanka --help`, the selected command's `--help`, and `sanka extension list --json` before choosing options. Do not guess target names, component IDs, or flags.
 
-## Rules
+- **Application migration:** a source repository is converted to a task-selected framework or runtime. Use target-specific flags only when the task and command help require them.
+- **Data migration:** records move between task-selected systems described by `sanka.yaml`. Use environment references for credentials and install only the required trusted extensions after authorization.
 
-- Treat source behavior and the user's task contract as authoritative. Generated output is a candidate, not proof of parity.
-- Never bypass the plan hash, readiness gate, target-drift protection, or verification step.
+## Application migration
+
+```bash
+sanka scan . --json
+sanka plan . --json
+sanka apply --root . --plan-hash <reviewed-plan-hash> --json
+sanka test . --json
+sanka verify . --json
+```
+
+Add task-specific plan, output, or target options from `sanka plan --help`; the sequence does not imply a particular destination.
+
+## Data migration
+
+Define the source and target in `sanka.yaml`. This is the basic shape; use exact types and options reported by installed extensions:
+
+```yaml
+source:
+  type: <source-type>
+  connection: <path-or-environment-reference>
+target:
+  type: <target-type>
+  connection: <path-or-environment-reference>
+```
+
+Then run:
+
+```bash
+sanka plan --json
+sanka validate --json
+sanka apply --plan-hash <reviewed-plan-hash> --json
+sanka verify --json
+sanka status
+```
+
+`validate` checks source records against the plan without writing to the destination. Review its result before applying. Use `sanka extension --help` when a required source, target, or migration capability is not installed.
+
+## Safety boundary
+
+- Planning must not write to the destination. Review the source, target, mappings, readiness, limitations, output path, and exact `plan_hash`.
+- Get explicit user authorization immediately before `apply`; apply only the reviewed hash.
+- Treat source behavior and the task contract as authoritative. Generated applications require parity verification; data `apply` performs real destination writes.
+- If pre-write testing or validation fails, fix the plan or configuration and re-plan. If post-write verification fails, inspect `status`; never rerun `apply` blindly. Any changed plan requires review and authorization of its new hash.
+- Never silently switch between local and hosted execution. Use the configured profile only when the task selects hosted operation.
 - Use `--bench-candidate <path>` on `sanka apply` only when a benchmark task requests that artifact layout.
 - Do not expose credentials in command arguments, logs, generated files, or reports.
