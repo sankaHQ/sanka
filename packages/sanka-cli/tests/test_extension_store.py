@@ -26,6 +26,7 @@ from sanka.runtime.extensions.store import (
     OFFICIAL_IDENTITY,
     ExtensionStore,
     LockEntry,
+    MarketplaceRecord,
     _parent_descriptor,
     _tree_digest,
 )
@@ -571,7 +572,7 @@ def test_concurrent_fresh_normal_stores_configure_the_official_marketplace_once(
     gate = threading.Barrier(3)
     guard = threading.Lock()
     snapshots = 0
-    results: list[tuple[object, ...]] = []
+    results: list[tuple[MarketplaceRecord, ...]] = []
 
     def snapshot(_source: str, _identity: str) -> tuple[Path, str, str, int]:
         nonlocal snapshots
