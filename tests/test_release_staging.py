@@ -10,8 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_NAMES = (
-    "sanka_cli-0.2.0-py3-none-any.whl",
-    "sanka_cli-0.2.0.tar.gz",
+    "sanka_cli-0.2.1-py3-none-any.whl",
+    "sanka_cli-0.2.1.tar.gz",
 )
 
 

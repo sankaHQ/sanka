@@ -21,7 +21,15 @@ def test_root_version_uses_unified_public_version(runner: CliRunner) -> None:
     result = runner.invoke(cli, ["--version"])
 
     assert result.exit_code == 0
-    assert result.output == "sanka, version 0.2.0\n"
+    assert result.output == "sanka, version 0.2.1\n"
+
+
+def test_mcp_client_uses_the_cli_version_in_its_user_agent() -> None:
+    from sanka_cli.mcp.client import SankaMigrateApiClient
+
+    client = SankaMigrateApiClient()
+
+    assert client._client.headers["User-Agent"] == "sanka-cli/0.2.1"
 
 
 def test_mcp_without_extra_has_install_hint(
