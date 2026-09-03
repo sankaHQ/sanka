@@ -22,6 +22,21 @@ uv tool install 'sanka-cli[mcp]'
 sanka mcp
 ```
 
+Install Sanka's AI skill into Claude Code or Codex. Without `--scope`, the CLI
+prompts for a project or global installation; automation should pass the scope
+explicitly. Omitting the harness installs into every detected supported CLI.
+
+```bash
+sanka skill install claude
+sanka skill install codex --scope project
+sanka skill install --scope global
+```
+
+Project skills go under `.claude/skills/` or `.codex/skills/`. Global installs
+respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, falling back to `~/.claude` and
+`~/.codex`. Repeated installs are idempotent; use `--force` only to replace a
+different installed `SKILL.md`.
+
 The base installation contains no provider or framework implementation.
 Official extensions are immutable GitHub release wheels described by the
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions) marketplace.

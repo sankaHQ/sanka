@@ -10,6 +10,7 @@ from sanka_cli.commands.code import code
 from sanka_cli.commands.migrate import register_migration_passthroughs
 from sanka_cli.commands.profiles import profiles
 from sanka_cli.commands.resources import attach_resource_group
+from sanka_cli.commands.skill import skill
 from sanka_cli.commands.workflows import workflows
 from sanka_cli.output import print_error
 from sanka_cli.state import CLIState
@@ -43,6 +44,7 @@ cli.add_command(profiles)
 cli.add_command(workflows)
 cli.add_command(ai)
 cli.add_command(code)
+cli.add_command(skill)
 
 attach_resource_group(cli, "companies", "/v2/public/companies")
 attach_resource_group(cli, "contacts", "/v2/public/contacts")
