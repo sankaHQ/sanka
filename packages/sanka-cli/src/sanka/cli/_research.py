@@ -11,6 +11,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from sanka_cli import __version__
+
 DEFAULT_API_BASE = "https://api.sanka.com/v2/migrate"
 DEFAULT_SIGNUP_BASE = "https://app.sanka.com"
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -116,7 +118,7 @@ class SankaMigrateApiClient:
         params = {key: value for key, value in (query or {}).items() if value not in (None, "")}
         suffix = f"?{urlencode(params)}" if params else ""
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
-        headers = {"Accept": "application/json", "User-Agent": "sanka-cli/0.2.0"}
+        headers = {"Accept": "application/json", "User-Agent": f"sanka-cli/{__version__}"}
         if body is not None:
             headers["Content-Type"] = "application/json"
         request = Request(

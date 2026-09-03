@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import base64
 import configparser
 import fcntl
 import hashlib
@@ -23,7 +22,6 @@ from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, replace
 from email.parser import BytesParser
 from functools import wraps
-from importlib import metadata
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, cast
 from urllib.parse import unquote, urlparse
@@ -918,6 +916,7 @@ class ExtensionStore:
     def __init__(self, project_root: Path, user_root: Path | None = None) -> None:
         self.project_root = self._real_root(project_root, "project")
         self.user_root = self._real_root(user_root or user_extension_root(), "user")
+        self._configure_official_marketplace = user_root is None
         self._marketplace_path = self.user_root / "marketplaces.json"
         self._installation_path = self.user_root / "installations.json"
         self._disabled_path = self.user_root / "disabled.json"
@@ -950,38 +949,17 @@ class ExtensionStore:
                 "Resolved extension changed before execution",
                 extension_id=entry.id,
             )
-        if entry.id == DEFAULT_EXTENSION_ID:
-            executable = _default_executable(entry)
-        else:
-            executable = (
-                self.user_root
-                / "environments"
-                / entry.artifact_digest
-                / ("Scripts" if os.name == "nt" else "bin")
-                / entry.executable
-            )
+        executable = (
+            self.user_root
+            / "environments"
+            / entry.artifact_digest
+            / ("Scripts" if os.name == "nt" else "bin")
+            / entry.executable
+        )
         descriptor: int | None = None
         try:
             try:
-                if entry.id == DEFAULT_EXTENSION_ID:
-                    environment = executable.parent.parent
-                    environment_descriptor = os.open(environment, _DIRECTORY_FLAGS)
-                    try:
-                        with _directory_at(
-                            environment_descriptor,
-                            executable.parent.name,
-                            executable.parent,
-                        ) as script_directory:
-                            assert script_directory is not None
-                            descriptor = os.open(
-                                executable.name,
-                                _FILE_FLAGS,
-                                dir_fd=script_directory,
-                            )
-                    finally:
-                        _close_descriptor(environment_descriptor)
-                else:
-                    descriptor = os.open(executable, _FILE_FLAGS)
+                descriptor = os.open(executable, _FILE_FLAGS)
             except OSError as error:
                 raise ExtensionError(
                     "SANKA_EXTENSION_NOT_CACHED",
@@ -1247,6 +1225,7 @@ class ExtensionStore:
 
     @_store_operation
     def marketplaces(self) -> tuple[MarketplaceRecord, ...]:
+        self._ensure_official_marketplace()
         records, snapshots = self._marketplace_state()
         history = {
             (item["identity"], item["snapshot_digest"]): item["tree_digest"] for item in snapshots
@@ -1257,6 +1236,45 @@ class ExtensionStore:
                 key=lambda item: item.name,
             )
         )
+
+    def _ensure_official_marketplace(self) -> None:
+        if not self._configure_official_marketplace or self._marketplace_path.exists():
+            return
+        with (
+            _locked(self.user_root, self._marketplace_path),
+            _locked(self.project_root, self._project_lock_path),
+        ):
+            if self._marketplace_path.exists():
+                return
+            root, digest, tree_digest, descriptor = self._snapshot_git(
+                OFFICIAL_SOURCE, OFFICIAL_IDENTITY
+            )
+            try:
+                self._load_verified_snapshot(root, descriptor, tree_digest)
+                raw = {
+                    "content_digest": None,
+                    "identity": OFFICIAL_IDENTITY,
+                    "kind": "git",
+                    "name": "official",
+                    "resolved_commit": digest,
+                    "snapshot_digest": digest,
+                    "snapshot_root": root.relative_to(self.user_root).as_posix(),
+                    "source": OFFICIAL_SOURCE,
+                    "tree_digest": tree_digest,
+                    "trusted": True,
+                }
+                self._write_marketplace_state(
+                    [raw],
+                    [
+                        {
+                            "identity": OFFICIAL_IDENTITY,
+                            "snapshot_digest": digest,
+                            "tree_digest": tree_digest,
+                        }
+                    ],
+                )
+            finally:
+                _close_descriptor(descriptor)
 
     def _write_marketplace_state(
         self,
@@ -1946,10 +1964,6 @@ class ExtensionStore:
                 and item.get("version") == manifest.version
                 for item in installations
             )
-            if manifest.id == DEFAULT_EXTENSION_ID and manifest.id not in disabled:
-                installed = (
-                    installed or self._default_distribution(manifest, required=False) is not None
-                )
             if installed and manifest.id not in disabled:
                 statuses.add("installed")
             if exact_lock and exact_lock.enabled:
@@ -2021,9 +2035,6 @@ class ExtensionStore:
                     and item.get("manifest_digest") == lock.manifest_digest
                     and item.get("version") == lock.version
                     for item in installations
-                ) or (
-                    lock.id == DEFAULT_EXTENSION_ID
-                    and self._default_distribution(manifest, required=False) is not None
                 ):
                     statuses.add("installed")
                 available_current = next(
@@ -2990,88 +3001,6 @@ class ExtensionStore:
         self._verify_environment_artifacts(root, executable, wheels, providers=providers)
         return root
 
-    @staticmethod
-    def _default_distribution(manifest: Manifest, *, required: bool) -> Any | None:
-        try:
-            distribution = metadata.distribution(manifest.distribution)
-        except metadata.PackageNotFoundError:
-            if required:
-                _error(
-                    "SANKA_EXTENSION_NOT_CACHED",
-                    "Default extension distribution is not installed",
-                    distribution=manifest.distribution,
-                )
-            return None
-        if (
-            _normalized_distribution(distribution.metadata.get("Name", ""))
-            != _normalized_distribution(manifest.distribution)
-            or distribution.version != manifest.distribution_version
-        ):
-            if required:
-                _error(
-                    "SANKA_EXTENSION_IDENTITY",
-                    "Installed default extension does not match the marketplace manifest",
-                    distribution=manifest.distribution,
-                )
-            return None
-        return distribution
-
-    @staticmethod
-    def _distribution_digest(distribution: Any) -> str:
-        files = distribution.files
-        if not files:
-            _error(
-                "SANKA_EXTENSION_IDENTITY",
-                "Installed default extension does not expose verifiable files",
-            )
-        records: list[dict[str, object]] = []
-        for relative in sorted(files, key=lambda item: str(item)):
-            path = Path(distribution.locate_file(relative))
-            if path.is_symlink() or not path.is_file():
-                _error(
-                    "SANKA_EXTENSION_IDENTITY",
-                    "Installed default extension contains an unverifiable file",
-                    path=str(relative),
-                )
-            status = path.lstat()
-            sha256 = _sha256_file(path, require_single_link=False)
-            record_hash = getattr(relative, "hash", None)
-            if record_hash is not None:
-                mode = getattr(record_hash, "mode", None)
-                value = getattr(record_hash, "value", None)
-                expected_hash = (
-                    base64.urlsafe_b64encode(bytes.fromhex(sha256)).rstrip(b"=").decode()
-                )
-                if (
-                    mode != "sha256"
-                    or not isinstance(value, str)
-                    or re.fullmatch(r"[A-Za-z0-9_-]{43}", value) is None
-                    or value != expected_hash
-                ):
-                    _error(
-                        "SANKA_EXTENSION_IDENTITY",
-                        "Installed default extension RECORD hash is invalid",
-                        path=str(relative),
-                    )
-            record_size = getattr(relative, "size", None)
-            if record_size is not None and (
-                type(record_size) is not int or record_size != status.st_size
-            ):
-                _error(
-                    "SANKA_EXTENSION_IDENTITY",
-                    "Installed default extension RECORD size is invalid",
-                    path=str(relative),
-                )
-            records.append(
-                {
-                    "type": "file",
-                    "path": str(relative).replace(os.sep, "/"),
-                    "size": status.st_size,
-                    "sha256": sha256,
-                }
-            )
-        return content_hash(records).removeprefix("sha256:")
-
     @_store_operation
     def add_extension(
         self,
@@ -3080,6 +3009,7 @@ class ExtensionStore:
         marketplace: str | None = None,
         configuration: Mapping[str, Any] | None = None,
     ) -> LockEntry:
+        self._ensure_official_marketplace()
         with (
             _locked(self.user_root, self._installation_path),
             _locked(self.project_root, self._project_lock_path),
@@ -3095,87 +3025,74 @@ class ExtensionStore:
                 )
             installations = self._load_installations()
             disabled = self._load_disabled()
-            if extension_id == DEFAULT_EXTENSION_ID:
-                if manifest.kind != "migration":
-                    _error(
-                        "SANKA_EXTENSION_IDENTITY",
-                        "Default extension id must resolve to a migration extension",
-                        extension_id=extension_id,
-                    )
-                distribution = self._default_distribution(manifest, required=True)
-                artifact_digest = self._distribution_digest(distribution)
+            selected_wheels = self._select_compatible_wheels(manifest)
+            cached = tuple(self._cache_wheel(wheel) for wheel in selected_wheels)
+            requirements = {}
+            for path, wheel in zip(cached, selected_wheels, strict=True):
+                identity = _wheel_identity(wheel.name)
+                assert identity is not None
+                requirements[identity[0]] = self._inspect_wheel(path, wheel, manifest)
+            self._validate_dependency_closure(manifest, selected_wheels, requirements)
+            verified_wheels = tuple(
+                (path, wheel.sha256) for path, wheel in zip(cached, selected_wheels, strict=True)
+            )
+            self._wheel_import_records(verified_wheels)
+            if manifest.kind == "migration":
+                assert manifest.executable is not None
+                self._wheel_entry_point(verified_wheels, manifest.executable)
             else:
-                selected_wheels = self._select_compatible_wheels(manifest)
-                cached = tuple(self._cache_wheel(wheel) for wheel in selected_wheels)
-                requirements = {}
-                for path, wheel in zip(cached, selected_wheels, strict=True):
-                    identity = _wheel_identity(wheel.name)
-                    assert identity is not None
-                    requirements[identity[0]] = self._inspect_wheel(path, wheel, manifest)
-                self._validate_dependency_closure(manifest, selected_wheels, requirements)
-                verified_wheels = tuple(
-                    (path, wheel.sha256)
-                    for path, wheel in zip(cached, selected_wheels, strict=True)
+                self._wheel_connector_entry_points(verified_wheels, manifest.providers)
+            artifact_digest = self._manifest_artifact_digest(manifest)
+            prior = next(
+                (
+                    item
+                    for item in installations
+                    if item.get("artifact_digest") == artifact_digest
+                    and item.get("id") == manifest.id
+                    and item.get("manifest_digest") == manifest.digest
+                    and item.get("marketplace_identity") == source.identity
+                    and item.get("snapshot_digest") == source.snapshot_digest
+                    and item.get("version") == manifest.version
+                ),
+                None,
+            )
+            expected_digest = prior.get("environment_digest") if isinstance(prior, dict) else None
+            if manifest.kind == "migration":
+                environment = self._materialize_environment(
+                    artifact_digest,
+                    manifest.executable,
+                    verified_wheels,
+                    expected_digest=expected_digest,
                 )
-                self._wheel_import_records(verified_wheels)
-                if manifest.kind == "migration":
-                    assert manifest.executable is not None
-                    self._wheel_entry_point(verified_wheels, manifest.executable)
-                else:
-                    self._wheel_connector_entry_points(verified_wheels, manifest.providers)
-                artifact_digest = self._manifest_artifact_digest(manifest)
-                prior = next(
-                    (
-                        item
-                        for item in installations
-                        if item.get("artifact_digest") == artifact_digest
-                        and item.get("id") == manifest.id
-                        and item.get("manifest_digest") == manifest.digest
-                        and item.get("marketplace_identity") == source.identity
-                        and item.get("snapshot_digest") == source.snapshot_digest
-                        and item.get("version") == manifest.version
-                    ),
+            else:
+                environment = self._materialize_environment(
+                    artifact_digest,
                     None,
+                    verified_wheels,
+                    expected_digest=expected_digest,
+                    providers=manifest.providers,
                 )
-                expected_digest = (
-                    prior.get("environment_digest") if isinstance(prior, dict) else None
-                )
-                if manifest.kind == "migration":
-                    environment = self._materialize_environment(
-                        artifact_digest,
-                        manifest.executable,
-                        verified_wheels,
-                        expected_digest=expected_digest,
-                    )
-                else:
-                    environment = self._materialize_environment(
-                        artifact_digest,
-                        None,
-                        verified_wheels,
-                        expected_digest=expected_digest,
-                        providers=manifest.providers,
-                    )
-                installation = {
-                    "artifact_digest": artifact_digest,
-                    "environment": environment.relative_to(self.user_root).as_posix(),
-                    "environment_digest": self._environment_digest(environment),
-                    "id": manifest.id,
-                    "manifest_digest": manifest.digest,
-                    "marketplace_identity": source.identity,
-                    "snapshot_digest": source.snapshot_digest,
-                    "version": manifest.version,
-                    "wheels": [
-                        {
-                            "path": path.relative_to(self.user_root).as_posix(),
-                            "sha256": wheel.sha256,
-                        }
-                        for path, wheel in zip(cached, selected_wheels, strict=True)
-                    ],
-                }
-                installations = [
-                    item for item in installations if item.get("artifact_digest") != artifact_digest
-                ] + [installation]
-                self._write_installations(installations)
+            installation = {
+                "artifact_digest": artifact_digest,
+                "environment": environment.relative_to(self.user_root).as_posix(),
+                "environment_digest": self._environment_digest(environment),
+                "id": manifest.id,
+                "manifest_digest": manifest.digest,
+                "marketplace_identity": source.identity,
+                "snapshot_digest": source.snapshot_digest,
+                "version": manifest.version,
+                "wheels": [
+                    {
+                        "path": path.relative_to(self.user_root).as_posix(),
+                        "sha256": wheel.sha256,
+                    }
+                    for path, wheel in zip(cached, selected_wheels, strict=True)
+                ],
+            }
+            installations = [
+                item for item in installations if item.get("artifact_digest") != artifact_digest
+            ] + [installation]
+            self._write_installations(installations)
             disabled.discard(extension_id)
             self._write_disabled(disabled)
             entry = LockEntry(
@@ -3210,9 +3127,7 @@ class ExtensionStore:
             entry = entries.pop(extension_id, None)
             disabled = self._load_disabled()
             installations = self._load_installations()
-            if extension_id == DEFAULT_EXTENSION_ID:
-                disabled.add(extension_id)
-            elif entry is not None:
+            if entry is not None:
                 client = self._connector_clients.pop(entry.artifact_digest, None)
                 if client is not None:
                     client.close()
@@ -3263,6 +3178,8 @@ class ExtensionStore:
                             )
                             _unlink_store_file(self.user_root, path)
                 self._write_installations(installations)
+            if extension_id == DEFAULT_EXTENSION_ID:
+                disabled.add(extension_id)
             self._write_disabled(disabled)
             self._write_lock(entries)
 
@@ -3411,15 +3328,6 @@ class ExtensionStore:
                 runtime=__version__,
                 required=manifest.runtime_sanka_cli,
             )
-        if extension_id == DEFAULT_EXTENSION_ID:
-            distribution = self._default_distribution(manifest, required=True)
-            if self._distribution_digest(distribution) != entry.artifact_digest:
-                _error(
-                    "SANKA_EXTENSION_HASH_MISMATCH",
-                    "Installed default extension content has changed",
-                    extension_id=extension_id,
-                )
-            return entry
         if self._manifest_artifact_digest(manifest) != entry.artifact_digest:
             _error(
                 "SANKA_EXTENSION_IDENTITY",
@@ -3595,98 +3503,6 @@ class ExtensionStore:
             source=cast(Any, source),
             destination=cast(Any, destination),
         )
-
-
-def _default_executable(entry: LockEntry) -> Path:
-    if entry.kind != "migration" or entry.executable is None:
-        _error(
-            "SANKA_EXTENSION_IDENTITY",
-            "Default extension lock must identify a migration executable",
-            extension_id=entry.id,
-        )
-    try:
-        distribution = metadata.distribution(entry.distribution)
-    except metadata.PackageNotFoundError as error:
-        raise ExtensionError(
-            "SANKA_EXTENSION_NOT_CACHED",
-            "Default extension distribution is not installed",
-            details={"distribution": entry.distribution},
-        ) from error
-    if (
-        _normalized_distribution(distribution.metadata.get("Name", ""))
-        != _normalized_distribution(entry.distribution)
-        or distribution.version != entry.version
-        or ExtensionStore._distribution_digest(distribution) != entry.artifact_digest
-    ):
-        _error(
-            "SANKA_EXTENSION_IDENTITY",
-            "Installed default extension does not match the project lock",
-            distribution=entry.distribution,
-        )
-    site_packages = Path(cast(str | os.PathLike[str], distribution.locate_file(""))).resolve()
-    if site_packages.name != "site-packages":
-        _error(
-            "SANKA_EXTENSION_IDENTITY",
-            "Installed default extension environment is invalid",
-            distribution=entry.distribution,
-        )
-    if os.name == "nt":
-        valid_layout = (
-            len(site_packages.parents) >= 2 and site_packages.parent.name.casefold() == "lib"
-        )
-        environment_parent = 1
-        script_directory = "Scripts"
-    else:
-        valid_layout = (
-            len(site_packages.parents) >= 3
-            and site_packages.parent.parent.name in {"lib", "lib64"}
-            and re.fullmatch(r"python\d+\.\d+", site_packages.parent.name) is not None
-        )
-        environment_parent = 2
-        script_directory = "bin"
-    if not valid_layout:
-        _error(
-            "SANKA_EXTENSION_IDENTITY",
-            "Installed default extension environment is invalid",
-            distribution=entry.distribution,
-        )
-    environment = site_packages.parents[environment_parent]
-    expected = environment / script_directory / entry.executable
-    expected_record = os.path.relpath(expected, site_packages).replace(os.sep, "/")
-    scripts = []
-    for relative in distribution.files or ():
-        raw = str(relative)
-        located = Path(
-            os.path.abspath(cast(str | os.PathLike[str], distribution.locate_file(relative)))
-        )
-        if located == expected and raw == expected_record:
-            scripts.append(relative)
-    if len(scripts) != 1:
-        _error(
-            "SANKA_EXTENSION_NOT_CACHED",
-            "Installed default extension does not expose its exact executable",
-            executable=entry.executable,
-        )
-    try:
-        physical_script_directory = expected.parent.resolve(strict=True)
-        physical_executable = expected.resolve(strict=True)
-    except (OSError, RuntimeError) as error:
-        raise ExtensionError(
-            "SANKA_EXTENSION_PATH",
-            "Installed default extension executable cannot be resolved",
-            details={"path": str(expected), "reason": str(error)},
-        ) from error
-    if (
-        physical_script_directory != expected.parent
-        or physical_executable != expected
-        or not physical_executable.is_relative_to(environment)
-    ):
-        _error(
-            "SANKA_EXTENSION_PATH",
-            "Installed default extension executable escaped its environment",
-            path=str(expected),
-        )
-    return physical_executable
 
 
 __all__ = [

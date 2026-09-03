@@ -11,6 +11,8 @@ from urllib.parse import quote
 
 import httpx
 
+from sanka_cli import __version__
+
 DEFAULT_API_BASE = "https://api.sanka.com/v2/migrate"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -50,7 +52,7 @@ class SankaMigrateApiClient:
             base_url=configured_base.rstrip("/"),
             timeout=timeout,
             transport=transport,
-            headers={"Accept": "application/json", "User-Agent": "sanka-cli/0.2.0"},
+            headers={"Accept": "application/json", "User-Agent": f"sanka-cli/{__version__}"},
         )
 
     async def __aenter__(self) -> Self:

@@ -17,12 +17,7 @@ from pathlib import Path
 from typing import Any, NoReturn, cast
 
 from sanka.runtime.extensions.model import LIFECYCLE_COMMANDS, ExtensionError
-from sanka.runtime.extensions.store import (
-    DEFAULT_EXTENSION_ID,
-    LockEntry,
-    _default_executable,
-    user_extension_root,
-)
+from sanka.runtime.extensions.store import LockEntry, user_extension_root
 
 SCHEMA_VERSION = "sanka-extension/v1"
 SAFE_ENV = ("LANG", "LC_ALL", "PATH", "PYTHONUTF8", "TMPDIR", "VIRTUAL_ENV")
@@ -105,8 +100,6 @@ class ExtensionRunner:
         configured = Path(executable_name)
         if configured.is_absolute():
             executable = configured
-        elif lock.id == DEFAULT_EXTENSION_ID:
-            executable = _default_executable(lock)
         else:
             executable = (
                 self.user_root
