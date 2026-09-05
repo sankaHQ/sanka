@@ -13,6 +13,13 @@ Use Sanka for supported generation; reserve model work for unsupported behavior 
 - Reuse supplied scan/plan results and generated files matching the source, target, and toolchain. Do not restart generation or overwrite repairs merely to follow a checklist.
 - Read JSON summaries and returned artifact paths first. Inspect source/generated code for a specific gap or mismatch, instead of dumping the repository or large artifacts.
 
+## Make the smallest correct change
+
+- Trace the affected behavior and callers. Reuse generated artifacts, existing helpers, the standard library, and installed dependencies before writing replacements.
+- Fix requested behavior and demonstrated mismatches. Preserve passing code; fix a shared cause rather than duplicating patches across callers.
+- Skip speculative features, refactors, abstractions, configuration, and dependencies. Add them only when the current task requires them.
+- Keep explanations and tool output brief. Never trade validation, authorization, transaction boundaries, or required checks for fewer tokens or lines.
+
 ## Application migration
 
 Without reusable artifacts, scan and plan before writing migration code:
@@ -31,13 +38,13 @@ Work in the generated target's reported location. Use `--bench-candidate <path>`
 
 ## Verify and repair
 
-For generated or repaired candidates, prefer differential replay:
+When the selected extension advertises differential replay, use it for generated or repaired candidates:
 
 ```bash
 sanka verify . --scenarios <scenario-file> --candidate <target-path> --json
 ```
 
-Supply task-required target, entrypoint, database, and environment options. Replay uses equivalent fresh fixtures and does not require a reviewed plan. `sanka test . --json` requires an unchanged plan fingerprint; if edits invalidate it, preserve repairs and use the target's tests plus replay instead of regenerating. Seed required records when scenarios assume existing data. Check exercised statuses and mutations; boot success, zero scenarios, or matching missing-record errors do not establish the intended behavior.
+Supply task-required target, entrypoint, database, and environment options. Replay uses equivalent fresh fixtures and does not require a reviewed plan. If replay is unsupported, compare the source and target with their test clients and equivalent fixtures. When supported, `sanka test . --json` requires an unchanged plan fingerprint; if edits invalidate it, preserve repairs and use the target's tests plus replay instead of regenerating. Seed required records when scenarios assume existing data. Check exercised statuses and mutations; boot success, zero scenarios, or matching missing-record errors do not establish the intended behavior.
 
 Repair reported mismatches in the generated target; rerun affected checks, then complete task-required verification. Preserve passing behavior. Stop when acceptance checks pass; disclose unresolved gaps. Correct a command's reported cause before retrying.
 
