@@ -353,13 +353,17 @@ does not silently call a partial generation complete.
 
 ## Launch acceptance gate
 
-The tool-neutral acceptance suite is Sanka Migration Bench
-(`sankaHQ/sanka-bench`). Its native-target gate is decided by recorded serving
-evidence from a guarded process, so only output whose serving path genuinely
-excludes DRF can pass; the compatibility bridge is pinned there as a
-permanent negative control. `sanka apply --plan-hash <hash> --bench-candidate`
-produces the
-candidate the benchmark grades.
+The tool-neutral acceptance suite is Sanka Migration Bench (`sankaHQ/bench`).
+Converter regression checks are owned by
+[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions/blob/main/docs/converter-regression.md)
+and run in the private benchmark repository for the exact reviewed extensions
+commit. The runner uses the converter's versioned stdio contract and the pinned
+independent evaluator; it no longer depends on core CLI plan artifacts.
+
+The evaluator grades the converter's Bench candidate projection, which retains
+Django ORM. Fully generatable candidates must pass every independent hard gate;
+partial candidates must preserve reviewed coverage floors and remain explicitly
+partial. This check does not establish standalone generated-project acceptance.
 
 Do not publish a numerical compatibility or time-saved claim until a pinned
 public reference repository proves it. The launch packet must record:

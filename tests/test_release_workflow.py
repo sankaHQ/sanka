@@ -92,23 +92,3 @@ def test_ci_defers_connector_e2e_until_marketplace_artifacts_exist() -> None:
     assert "services" not in job
     assert "SANKA_MIGRATE_TEST_POSTGRES_DSN" not in job.get("env", {})
     assert "SANKA_MIGRATE_TEST_CLICKHOUSE_URL" not in job.get("env", {})
-
-
-def test_private_bench_credentials_only_run_on_trusted_main() -> None:
-    workflow = _workflow("bench.yml")
-    triggers = workflow["on"]
-    assert "pull_request" not in triggers
-    assert triggers == {"push": {"branches": ["main"]}}
-
-    steps = workflow["jobs"]["bench"]["steps"]
-    secret_checkouts = [
-        step
-        for step in steps
-        if step.get("with", {}).get("token") == "${{ secrets.SANKA_BENCH_TOKEN }}"
-    ]
-    assert len(secret_checkouts) == 1
-    assert secret_checkouts[0]["with"]["persist-credentials"] == "false"
-    for step in steps:
-        uses = step.get("uses")
-        if uses is not None:
-            assert "@v" not in uses
