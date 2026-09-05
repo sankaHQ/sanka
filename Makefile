@@ -1,6 +1,6 @@
 UV ?= uv
 
-.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release bench
+.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release
 
 check: lint typecheck test boundaries headers naming licenses connector-sdk-sync
 
@@ -39,10 +39,3 @@ build-release:
 	$(UV) run python scripts/check_release_artifacts.py dist
 	$(UV) run python -m scripts.stage_release_artifacts dist release
 	$(UV) publish --dry-run --trusted-publishing never dist/*
-
-# Converter regression gate: generate candidates for every benchmark task and
-# grade them with the tool-neutral evaluator from a sanka-bench checkout.
-BENCH_DIR ?= ../sanka-bench
-
-bench:
-	$(UV) run python scripts/run_bench.py --bench-dir $(BENCH_DIR)
