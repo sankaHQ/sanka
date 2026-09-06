@@ -11,6 +11,7 @@ Use Sanka for supported generation; reserve model work for unsupported behavior 
 
 - Use the supplied executable, environment, and pinned extensions. Consult command `--help` for unknown options and `sanka extension list --json` for unknown capabilities; avoid repeated discovery.
 - Reuse supplied scan/plan results and generated files matching the source, target, and toolchain. Do not restart generation or overwrite repairs merely to follow a checklist.
+- Establish a bootable target and serving settings early. If a scaffold exists, boot it before expanding it; if none exists, create the smallest valid target first. Spend most of the task implementing and checking behavior, and reserve time for final repairs.
 - Read JSON summaries and returned artifact paths first. Inspect source/generated code for a specific gap or mismatch, instead of dumping the repository or large artifacts.
 
 ## Make the smallest correct change
