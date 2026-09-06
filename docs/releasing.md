@@ -7,20 +7,14 @@ SHA-256 hashes, and publishes through job-scoped OIDC.
 
 ## Candidate and prerequisite
 
-The current candidate is `sanka-cli==0.2.3`, tagged `v0.2.3`. Its source
+The current candidate is `sanka-cli==0.2.4`, tagged `v0.2.4`. Its source
 authority is the reviewed, merged `sankaHQ/sanka` commit; PyPI becomes the
 artifact authority only after publication and clean-install verification.
 
-CI and the release build pin the canonical Connector SDK checkout to:
-
-```text
-sankaHQ/extensions@0852273fbddd614c03486b3d834f69b10331ecab
-```
-
-That commit must be reachable from `sankaHQ/extensions` before either workflow
-can check it out. Land the reviewed extensions branch and publish its immutable
-GitHub marketplace release first. Do not replace the pin with mutable `main` to
-change the order.
+Publish and verify the reviewed `extensions-v0.1.0a15` GitHub marketplace release
+first. Its immutable wheels provide the shared DRF replay and Flask verifier
+used by the updated CLI Skill. CI and the CLI build use the locked workspace;
+they do not require a private cross-repository SDK checkout.
 
 ## Local, write-free preparation
 
@@ -30,14 +24,14 @@ With exact sibling `sanka` and `extensions` checkouts:
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.2.3 tag
+uv run python scripts/check_release_tag.py v0.2.4 tag
 ```
 
 `make build-release` clears `dist/`, builds only:
 
 ```text
-sanka_cli-0.2.3-py3-none-any.whl
-sanka_cli-0.2.3.tar.gz
+sanka_cli-0.2.4-py3-none-any.whl
+sanka_cli-0.2.4.tar.gz
 ```
 
 It checks package metadata, dependencies, entry points, licenses, imports, and
@@ -61,22 +55,21 @@ local environment files, or repository history.
 
 ## Publication gate
 
-1. Publish and verify the extensions GitHub release whose manifests match the
-   pinned commit.
+1. Publish and verify `extensions-v0.1.0a15` and its manifest wheel hashes.
 2. Merge the reviewed Sanka change through `sanka-pr-flow` and verify required
    CI on the exact final head.
-3. Create and push `v0.2.3` only with explicit authorization. Do not move or
-   reuse the existing `v0.2.2` tag.
+3. Create and push `v0.2.4` only with explicit authorization. Do not move or
+   reuse an existing release tag or the published `0.2.3` package version.
 4. Verify local `release/SOURCE_COMMIT` and `release/SHA256SUMS` against the
    approved tag.
-5. Dispatch **Publish sanka-cli** at `v0.2.3` with confirmation
-   `publish-v0.2.3`.
+5. Dispatch **Publish sanka-cli** at `v0.2.4` with confirmation
+   `publish-v0.2.4`.
 6. The build job runs the full checks, builds once, stages once, and uploads
    one workflow artifact. It has no OIDC permission.
 7. The `pypi` job receives only `id-token: write`, downloads the named
    artifact, verifies its source commit and hashes, and invokes the PyPI action
    once.
-8. Install `sanka-cli==0.2.3` and `sanka-cli[mcp]` in fresh environments;
+8. Install `sanka-cli==0.2.4` and `sanka-cli[mcp]` in fresh environments;
    verify CLI help, local tokenless behavior, hosted authentication failure,
    extension installation from GitHub, one connector migration, MCP tool
    names, and both SDK adapters.
