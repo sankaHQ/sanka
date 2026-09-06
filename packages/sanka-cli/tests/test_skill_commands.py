@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -34,7 +35,12 @@ def test_install_claude_skill_in_project(runner: CliRunner, tmp_path: Path) -> N
     assert result.exit_code == 0, result.output
     skill_file = tmp_path / ".claude" / "skills" / "sanka-cli" / "SKILL.md"
     assert skill_file.is_file()
-    assert skill_file.read_text().startswith("---\nname: sanka-cli\n")
+    bundled = Path(__file__).parents[1] / "src/sanka_cli/skills/sanka-cli/SKILL.md"
+    assert skill_file.read_bytes() == bundled.read_bytes()
+    assert (
+        json.loads(result.output)["content_sha256"]
+        == hashlib.sha256(skill_file.read_bytes()).hexdigest()
+    )
     assert json.loads(result.output)["installations"] == [
         {
             "harness": "claude",

@@ -1,62 +1,55 @@
 ---
 name: sanka-cli
-description: Use when inspecting, planning, applying, testing, verifying, or monitoring application and data migrations with the sanka command-line interface.
+description: Generate, reuse, repair, and verify application migrations with Sanka CLI, or plan and execute data migrations. Use when migrating a repository or continuing a Sanka-generated target.
 ---
 
 # Sanka CLI
 
-Use `sanka` for application modernization and data movement. Derive the migration mode and destination from the user's task; never assume FastAPI or any other target.
+Use Sanka for supported generation; reserve model work for unsupported behavior and verified differences. Follow the task's source, destination, acceptance criteria, and local/hosted execution mode.
 
-## Choose the migration mode
+## Start from existing work
 
-Run `sanka --help`, the selected command's `--help`, and `sanka extension list --json` before choosing options. Do not guess target names, component IDs, or flags.
+- Use the supplied executable, environment, and pinned extensions. Consult command `--help` for unknown options and `sanka extension list --json` for unknown capabilities; avoid repeated discovery.
+- Reuse supplied scan/plan results and generated files matching the source, target, and toolchain. Do not restart generation or overwrite repairs merely to follow a checklist.
+- Read JSON summaries and returned artifact paths first. Inspect source/generated code for a specific gap or mismatch, instead of dumping the repository or large artifacts.
 
-- **Application migration:** a source repository is converted to a task-selected framework or runtime. Use target-specific flags only when the task and command help require them.
-- **Data migration:** records move between task-selected systems described by `sanka.yaml`. Use environment references for credentials and install only the required trusted extensions after authorization.
+## Make the smallest correct change
+
+- Trace the affected behavior and callers. Reuse generated artifacts, existing helpers, the standard library, and installed dependencies before writing replacements.
+- Fix requested behavior and demonstrated mismatches. Preserve passing code; fix a shared cause rather than duplicating patches across callers.
+- Skip speculative features, refactors, abstractions, configuration, and dependencies. Add them only when the current task requires them.
+- Keep explanations and tool output brief. Never trade validation, authorization, transaction boundaries, or required checks for fewer tokens or lines.
 
 ## Application migration
+
+Without reusable artifacts, scan and plan before writing migration code:
 
 ```bash
 sanka scan . --json
 sanka plan . --json
-sanka apply --root . --plan-hash <reviewed-plan-hash> --json
-sanka test . --json
-sanka verify . --json
+sanka apply --root . --plan-hash <reviewed-core-plan-hash> --json
 ```
 
-Add task-specific plan, output, or target options from `sanka plan --help`; the sequence does not imply a particular destination.
+Supply the task's target, strategy, generation mode, package manager, and output using supported extension options. Resolve reported required inputs together. Apply the CLI response's `data.plan_hash`, not the nested extension hash; do not edit source or plan artifacts between review and apply.
 
-## Data migration
+For isolated imports, `--extension-env NAME` forwards an existing variable by name, not `NAME=value`. Forward only required variables on commands needing them.
 
-Define the source and target in `sanka.yaml`. This is the basic shape; use exact types and options reported by installed extensions:
+Work in the generated target's reported location. Use `--bench-candidate <path>` only when requested; follow its placement contract and preserve source files. If generation is unsupported or below a task-defined readiness threshold, implement the gaps identified by the plan.
 
-```yaml
-source:
-  type: <source-type>
-  connection: <path-or-environment-reference>
-target:
-  type: <target-type>
-  connection: <path-or-environment-reference>
-```
+## Verify and repair
 
-Then run:
+When the selected extension advertises differential replay, use it for generated or repaired candidates:
 
 ```bash
-sanka plan --json
-sanka validate --json
-sanka apply --plan-hash <reviewed-plan-hash> --json
-sanka verify --json
-sanka status
+sanka verify . --scenarios <scenario-file> --candidate <target-path> --json
 ```
 
-`validate` checks source records against the plan without writing to the destination. Review its result before applying. Use `sanka extension --help` when a required source, target, or migration capability is not installed.
+Supply task-required target, entrypoint, database, and environment options. Replay uses equivalent fresh fixtures and does not require a reviewed plan. If replay is unsupported, compare the source and target with their test clients and equivalent fixtures. When supported, `sanka test . --json` requires an unchanged plan fingerprint; if edits invalidate it, preserve repairs and use the target's tests plus replay instead of regenerating. Seed required records when scenarios assume existing data. Check exercised statuses and mutations; boot success, zero scenarios, or matching missing-record errors do not establish the intended behavior.
 
-## Safety boundary
+Repair reported mismatches in the generated target; rerun affected checks, then complete task-required verification. Preserve passing behavior. Stop when acceptance checks pass; disclose unresolved gaps. Correct a command's reported cause before retrying.
 
-- Planning must not write to the destination. Review the source, target, mappings, readiness, limitations, output path, and exact `plan_hash`.
-- Get explicit user authorization immediately before `apply`; apply only the reviewed hash.
-- Treat source behavior and the task contract as authoritative. Generated applications require parity verification; data `apply` performs real destination writes.
-- If pre-write testing or validation fails, fix the plan or configuration and re-plan. If post-write verification fails, inspect `status`; never rerun `apply` blindly. Any changed plan requires review and authorization of its new hash.
-- Never silently switch between local and hosted execution. Use the configured profile only when the task selects hosted operation.
-- Use `--bench-candidate <path>` on `sanka apply` only when a benchmark task requests that artifact layout.
-- Do not expose credentials in command arguments, logs, generated files, or reports.
+## Data migration and authorization
+
+Use task-selected source/target types and connection references in `sanka.yaml`. Plan, then `sanka validate --json` before applying the reviewed hash; validation must not write to the destination. Verify afterward; inspect status on failure instead of blindly replaying writes.
+
+Review mappings, readiness, limitations, output, and exact plan hash before apply. Honor existing authorization for isolated local generation. Data transfers and production writes require explicit authorization for the reviewed operation. Re-review changed plans; seek approval if effects exceed authorized scope. Install only required trusted extensions within that scope. Never expose credentials in arguments, logs, artifacts, or reports.
