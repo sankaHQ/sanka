@@ -270,6 +270,7 @@ def test_sdk_command_functional_options_are_explicit() -> None:
             "extension_env",
         },
         "verify": {
+            "settings",
             "root",
             "file",
             "state",
