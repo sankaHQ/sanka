@@ -414,7 +414,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         description=(
             "Check hashes, generated files, route coverage, and configured read-only HTTP "
             "comparisons. With --scenarios, replay a scenario file against the source "
-            "application and a candidate FastAPI app and diff status, body, declared "
+            "application and a candidate FastAPI or Flask app and diff status, body, declared "
             "headers, and database state; that mode needs no plan or generated manifest."
         ),
         epilog=(
@@ -436,6 +436,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="application repository root",
     )
     verify.add_argument("--to", help="select an application plan")
+    verify.add_argument("--settings", help="source Django settings module for scenario replay")
     verify.add_argument("--artifact-dir", default=DEFAULT_ARTIFACT_DIR)
     verify.add_argument("--output", default=None, help="generated FastAPI output directory")
     verify.add_argument(

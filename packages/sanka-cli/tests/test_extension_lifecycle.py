@@ -796,6 +796,7 @@ def test_verify_replay_runs_without_a_reviewed_plan_and_after_source_changes(
     # No scan and no plan yet: replay only needs the enabled extension.
     replayed = lifecycle.verify(configuration={"scenarios": "scenarios.json", "edge_probes": True})
     assert replayed.outcome == "success"
+    assert "extension" not in replayed.data
     request = runner.calls[-1][1]
     assert request["command"] == "verify"
     assert request["configuration"] == {"edge_probes": True, "scenarios": "scenarios.json"}
