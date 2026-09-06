@@ -119,3 +119,22 @@ The distribution license expression is
 `Apache-2.0 AND AGPL-3.0-only`. Both license texts and the historical hosted
 CLI notice ship in the wheel and source archive. File-level SPDX identifiers
 are authoritative.
+
+
+### Compact lifecycle output
+
+Use `--compact-dsl` instead of `--json` on `scan`, `plan`, `apply`, `test`,
+`verify`, and extension management commands when an agent needs a short result.
+The flags are mutually exclusive; `--json` retains its existing contract.
+Compact output starts with `sanka-compact/v1 <command> <outcome> <migration_state>`
+then emits one `key=JSON-value` per line. Strings use JSON escaping, including
+newlines and quotes. Failures, warnings, plan hashes, and limitations are retained.
+Legacy aliases are not repeated. With full artifacts available, generated file
+contents and route source code are replaced by explicit omission counts and file
+names. Read the returned artifact for those details; a compact summary is not a
+replacement for the full report. `data.plan_hash` becomes the `plan_hash` line;
+use that core hash for apply, not a nested extension hash.
+
+Keep the lifecycle: scan → plan → apply → test → verify. An applied scaffold with
+manual gaps is not complete. Test establishes generated scope; scenario verification
+checks HTTP and database parity within the supplied fixtures and cases.

@@ -226,7 +226,7 @@ def _command_parser(parser: argparse.ArgumentParser, name: str) -> argparse.Argu
 
 def test_sdk_command_functional_options_are_explicit() -> None:
     parser = _build_parser()
-    presentation = {"help", "json", "no_color", "quiet", "verbose"}
+    presentation = {"help", "json", "compact_dsl", "no_color", "quiet", "verbose"}
     expected = {
         "scan": {"root", "settings", "artifact_dir", "extension_config", "extension_env"},
         "plan": {
@@ -381,3 +381,67 @@ def test_verify_replay_flags_reach_the_extension_configuration(
     assert configuration["python"] == "/opt/source/.venv/bin/python"
     assert configuration["candidate_python"] == "/opt/candidate/.venv/bin/python"
     assert "no_http" not in configuration
+
+
+def test_compact_dsl_preserves_errors_without_legacy_duplicates(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = argparse.Namespace(command="verify", json=False, compact_dsl=True)
+    error = ExtensionError(
+        "PARITY",
+        "Mismatch\nInspect details",
+        details={
+            "summary": {"matched": 17, "scenarios": 19},
+            "failures": [{"id": "headers", "message": 'Expected "Allow"'}],
+            "warnings": ["Seed protected records"],
+            "report_path": "reports/full result.json",
+        },
+    )
+    assert cli._print_cli_error(args, error, exit_code=1) == 1
+    output = capsys.readouterr().out
+    assert output.startswith("sanka-compact/v1 verify error failed\n")
+    fields = dict(line.split("=", 1) for line in output.splitlines()[1:])
+    details = json.loads(fields["error"])["details"]
+    assert details == error.details
+    assert output.count('"matched"') == 1
+    assert "\\n" in output
+    assert "\x1b" not in output
+
+
+def test_compact_dsl_usage_errors_and_exclusive_formats(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["apply", "--compact-dsl"]) == 2
+    assert "SANKA_USAGE" in capsys.readouterr().out
+    assert main(["scan", "--json", "--compact-dsl"]) == 2
+    assert "not allowed" in capsys.readouterr().out
+
+
+def test_compact_plan_keeps_review_hash_and_summarizes_generated_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = argparse.Namespace(command="plan", json=False, compact_dsl=True)
+    data = {
+        "plan_hash": "sha256:core",
+        "error": {"details": {"files": {"target_app.py": "invalid syntax"}}},
+        "extension": {
+            "plan_hash": "sha256:extension",
+            "files": {"target_app.py": "pass\n" * 1000},
+            "routes": [
+                {
+                    "path": "/items/",
+                    "method": "GET",
+                    "source": "pass\n" * 1000,
+                    "classification": "native",
+                    "reasons": [],
+                }
+            ],
+        },
+    }
+    result = ExtensionResult("success", data, ("/tmp/plan.json",), ("Scope is limited",), (), None)
+    assert cli._print_application_result(args, "plan", result, migration_state="planned") == 0
+    output = capsys.readouterr().out
+    assert '"files":{"target_app.py":"invalid syntax"}' in output
+    assert 'plan_hash="sha256:core"' in output
+    assert '"plan_hash":"sha256:extension"' in output
+    assert "target_app.py" in output and "Scope is limited" in output
+    assert "omitted" in output and "/tmp/plan.json" in output
+    assert len(output) < 1000
