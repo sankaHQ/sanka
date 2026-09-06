@@ -45,9 +45,11 @@ When the selected extension advertises differential replay, use it for generated
 sanka verify . --scenarios <scenario-file> --candidate <target-path> --json
 ```
 
-For additional edge cases, extend the replay scenario and seed files instead of building another test runner. Write custom verification code only when the advertised replay cannot express a required check.
+Seed required records with `--seed <seed.py>` and authenticate protected requests. On supporting versions, declare `expected_source_status` for intended success cases (for example, 200 for a read); never weaken it to accept missing fixtures. Reuse `--edge-probes` with the existing scan for contextual OPTIONS and HEAD checks. Check coverage warnings, source statuses and database effects before accepting parity: matching 401/404s does not verify successful behavior. Add explicit scenarios for other roles or tenants.
 
-Supply task-required target, entrypoint, database, and environment options. Replay uses equivalent fresh fixtures and does not require a reviewed plan. If replay is unsupported, compare the source and target with their test clients and equivalent fixtures. When supported, `sanka test . --json` requires an unchanged plan fingerprint; if edits invalidate it, preserve repairs and use the target's tests plus replay instead of regenerating. Seed required records when scenarios assume existing data. Check exercised statuses and mutations; boot success, zero scenarios, or matching missing-record errors do not establish the intended behavior.
+Read failing scenarios next; open the full report only for details needed to repair a failure. After fixing failures and coverage gaps, run the required scenarios once more and finish when they pass. Add edge cases or expectations in a separate scenario file; preserve supplied acceptance tests. Reuse replay and seed files instead of building another test runner unless replay cannot express a required check.
+
+Supply task-required target, entrypoint, database, and environment options. Replay uses equivalent fresh fixtures and does not require a reviewed plan. If replay is unsupported, compare the source and target with their test clients and equivalent fixtures. When supported, `sanka test . --json` requires an unchanged plan fingerprint; if edits invalidate it, preserve repairs and use the target's tests plus replay instead of regenerating.
 
 Repair reported mismatches in the generated target; rerun affected checks, then complete task-required verification. Preserve passing behavior. Stop when acceptance checks pass; disclose unresolved gaps. Correct a command's reported cause before retrying.
 

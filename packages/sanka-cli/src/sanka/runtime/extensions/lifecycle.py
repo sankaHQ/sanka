@@ -820,7 +820,7 @@ class ApplicationLifecycle:
         written, so the source fingerprint legitimately differs from any reviewed plan and
         a plan may not exist yet. The extension lock still has to match its recommendation
         exactly; only the plan, fingerprint, and artifact checks that guard apply and test
-        are skipped, because replay writes nothing into the project.
+        are skipped, because replay only writes verification artifacts in its artifact directory.
         """
         explicit_env_names = _canonical_environment_names(explicit_env_names)
         fingerprint = fingerprint_repository(self.project_root)
@@ -839,7 +839,6 @@ class ApplicationLifecycle:
         if result.outcome != "success":
             self._raise_failure(result)
         data = dict(result.data)
-        data["extension"] = result.data
         return ExtensionResult(
             outcome="success",
             data=data,
