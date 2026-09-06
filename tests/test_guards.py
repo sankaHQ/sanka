@@ -20,7 +20,7 @@ def test_unified_project_metadata() -> None:
         "project"
     ]
     assert project["name"] == "sanka-cli"
-    assert project["version"] == "0.2.3"
+    assert project["version"] == "0.2.4"
     assert project["license"] == "Apache-2.0 AND AGPL-3.0-only"
     assert project["scripts"] == {"sanka": "sanka_cli.main:main"}
 
