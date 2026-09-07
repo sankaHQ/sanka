@@ -62,3 +62,30 @@ an active run can still charge its elapsed compute.
 Developer API tokens need `migrate:cloud:read` and `migrate:cloud:write` scopes;
 resource-limited ingestion tokens cannot start Cloud Runs. The API rejects a
 workspace code that differs from the token's workspace.
+
+## Repair a failed candidate
+
+When Repair is enabled, select the exact output digest from a failed run and the
+application files that may change. One attempt uses the configured model and the
+fixed generated-test/static-verification profile. It cannot edit tests or
+configuration, add dependencies, or reach external networks.
+
+```sh
+sanka cloud repair FAILED_RUN_UUID --workspace WORKSPACE_CODE \
+  --candidate-sha256 OUTPUT_SHA256 --target-gate test \
+  --path app/main.py --max-credits 2000 --timeout-seconds 600 \
+  --idempotency-key my-reviewed-repair
+```
+
+Repeat `--path` to allow up to 20 existing Python files under `app/` (32 KiB per
+file). The command reads the failed run and its candidate before asking you to
+confirm the hold. The cap is 1,001–7,000 credits and includes a 1,000-credit
+success premium; only the remaining cap funds compute. Failed or cancelled repairs
+have no premium. Reuse the same options and key after an uncertain response.
+
+Use the returned repair run ID with the same `status`, `events`, `cancel`,
+`receipt`, and `download` commands. The output ZIP includes `repair.patch` and
+`repair-result.json` under `artifacts/`, with the failing check before repair and
+the same checks afterward. `--artifact repair-response.json` downloads the saved
+model patch. Passing generated tests and static checks is not an independent
+behavior-parity certificate.

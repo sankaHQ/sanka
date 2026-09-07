@@ -50,6 +50,78 @@ def test_declined_credit_hold_does_not_call_api(api):
     api.assert_not_called()
 
 
+def repair_arguments():
+    return [
+        "cloud",
+        "repair",
+        RUN,
+        "--workspace",
+        "10101010",
+        "--candidate-sha256",
+        "b" * 64,
+        "--path",
+        "app/main.py",
+        "--target-gate",
+        "test",
+        "--max-credits",
+        "1100",
+        "--idempotency-key",
+        "one-approved-repair",
+    ]
+
+
+def test_repair_pins_the_saved_failed_run_and_explicit_candidate(api):
+    parent = {
+        "id": RUN,
+        "status": "failed",
+        "request": {
+            "source_id": SOURCE,
+            "source_sha256": "a" * 64,
+            "settings_module": "config.settings",
+        },
+    }
+    artifacts = {"artifacts": [{"name": "output.zip", "sha256": "b" * 64}]}
+    api.side_effect = [{"data": parent}, {"data": artifacts}, {"data": {"id": "repair-run"}}] * 2
+    for _ in range(2):
+        result = CliRunner().invoke(cli, [*repair_arguments(), "--yes"])
+        assert result.exit_code == 0, result.output
+    first, second = api.call_args_list[2], api.call_args_list[5]
+    assert first.kwargs == second.kwargs
+    assert first.kwargs["headers"] == {
+        "X-Workspace-Code": "10101010",
+        "Idempotency-Key": "one-approved-repair",
+    }
+    assert first.kwargs["json_body"]["repair"]["candidate_sha256"] == "b" * 64
+    assert first.kwargs["json_body"]["source_id"] == SOURCE
+
+
+@pytest.mark.parametrize(
+    "path", ["tests/test_generated.py", "../app/main.py", "app/__pycache__/x.py"]
+)
+def test_repair_rejects_unapproved_file_scope_before_reading(api, path):
+    args = repair_arguments()
+    args[args.index("--path") + 1] = path
+    assert CliRunner().invoke(cli, [*args, "--yes"]).exit_code != 0
+    api.assert_not_called()
+
+
+def test_repair_decline_or_candidate_mismatch_never_starts_paid_work(api):
+    parent = {
+        "id": RUN,
+        "status": "failed",
+        "request": {"source_id": SOURCE, "source_sha256": "a" * 64},
+    }
+    for digest, answer in [("b" * 64, "n\n"), ("c" * 64, "y\n")]:
+        api.reset_mock()
+        api.side_effect = [
+            {"data": parent},
+            {"data": {"artifacts": [{"name": "output.zip", "sha256": digest}]}},
+        ]
+        result = CliRunner().invoke(cli, repair_arguments(), input=answer)
+        assert result.exit_code != 0
+        assert all(call.args[1] == "GET" for call in api.call_args_list)
+
+
 def test_repeated_intent_preserves_workspace_source_budget_and_key(api):
     for _ in range(2):
         result = CliRunner().invoke(cli, [*arguments(), "--yes"])
