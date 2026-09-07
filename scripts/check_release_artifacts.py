@@ -147,6 +147,7 @@ def main() -> int:
         if project_name == "sanka-cli":
             expected_core_dependencies = {
                 "click",
+                "cryptography",
                 "httpx",
                 "keyring",
                 "packaging",
