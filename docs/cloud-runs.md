@@ -8,6 +8,10 @@ command. The service must be enabled by the workspace operator. Local `scan`,
 The initial recipe is DRF to FastAPI using a pinned, offline Python environment.
 It runs generated tests and static checks. It does not issue an independent
 certificate, perform HTTP replay, or install arbitrary project dependencies.
+Database-backed route tests need a synthetic or sanitized SQLite test database
+in the ZIP and Django settings that reference it. An empty in-memory database
+has no tables for those tests. Remote databases are unreachable; omit their
+credentials from the archive.
 
 1. Prepare and review a ZIP containing the repository files you intend to upload.
    For tracked files at a specific commit, `git archive --format=zip HEAD -o source.zip`
