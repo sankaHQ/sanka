@@ -8,6 +8,10 @@ integration behind one `sanka` executable.
 
 Python 3.12 or newer is required.
 
+For optional hosted repository execution with a credit limit, see
+[Cloud Runs](docs/cloud-runs.md). The `sanka cloud` commands use the workspace's
+developer API token; the hosted service must be enabled separately.
+
 ## Install
 
 ```bash
