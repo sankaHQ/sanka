@@ -85,17 +85,21 @@ class _CliArgumentParser(argparse.ArgumentParser):
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    json_errors = "--json" in arguments
+    json_errors = "--json" in arguments or "--compact-dsl" in arguments
     parser = _build_parser(json_errors=json_errors)
     try:
         args = parser.parse_args(arguments)
     except CliUsageError as error:
         command = arguments[0] if arguments and arguments[0] in SDK_COMMANDS else "sanka"
         return _print_cli_error(
-            argparse.Namespace(command=command, json=json_errors),
+            argparse.Namespace(
+                command=command, json=json_errors, compact_dsl="--compact-dsl" in arguments
+            ),
             error,
             exit_code=2,
         )
+    if getattr(args, "compact_dsl", False):
+        args.json = True
     if args.command is None:
         parser.print_help()
         return 0
@@ -173,12 +177,17 @@ def _json_result(
     return envelope
 
 
-def _print_json(payload: dict[str, Any]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+def _print_result(args: argparse.Namespace, payload: dict[str, Any]) -> None:
+    if getattr(args, "compact_dsl", False):
+        from sanka.cli._compact import render_compact
+
+        print(render_compact(payload))
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def _print_cli_error(args: argparse.Namespace, error: Exception, *, exit_code: int) -> int:
-    if getattr(args, "json", False):
+    if getattr(args, "json", False) or getattr(args, "compact_dsl", False):
         code = getattr(error, "code", None)
         details = getattr(error, "details", None)
         structured_error: dict[str, Any] = {
@@ -187,13 +196,14 @@ def _print_cli_error(args: argparse.Namespace, error: Exception, *, exit_code: i
         }
         if isinstance(details, dict) and details:
             structured_error["details"] = details
-        _print_json(
+        _print_result(
+            args,
             _json_result(
                 str(getattr(args, "command", "sanka") or "sanka"),
                 {"error": structured_error},
                 outcome="error",
                 migration_state="not_started" if exit_code == 2 else "failed",
-            )
+            ),
         )
     else:
         _terminal(args).failure(str(error))
@@ -221,8 +231,14 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
 
     def presentation(sub: argparse.ArgumentParser, *, json_option: bool = True) -> None:
         if json_option:
-            sub.add_argument(
+            formats = sub.add_mutually_exclusive_group()
+            formats.add_argument(
                 "--json", action="store_true", help="print one sanka-cli/v1 JSON document"
+            )
+            formats.add_argument(
+                "--compact-dsl",
+                action="store_true",
+                help="print a compact result; full generated code stays in artifacts",
             )
         sub.add_argument("--no-color", action="store_true", help="disable ANSI color")
         detail = sub.add_mutually_exclusive_group()
@@ -668,8 +684,8 @@ def _extension_result(
     records: list[dict[str, Any]],
 ) -> int:
     data = {"operation": operation, "records": records}
-    if args.json:
-        _print_json(_json_result("extension", data, migration_state="not_started"))
+    if args.json or getattr(args, "compact_dsl", False):
+        _print_result(args, _json_result("extension", data, migration_state="not_started"))
         return 0
 
     terminal = _terminal(args)
@@ -896,8 +912,9 @@ def _print_application_result(
     *,
     migration_state: str,
 ) -> int:
-    if args.json:
-        _print_json(
+    if args.json or getattr(args, "compact_dsl", False):
+        _print_result(
+            args,
             _json_result(
                 command,
                 result.data,
@@ -905,7 +922,7 @@ def _print_application_result(
                 artifacts=list(result.artifacts),
                 limitations=list(result.limitations),
                 next_actions=list(result.next_actions),
-            )
+            ),
         )
     else:
         terminal = _terminal(args)
@@ -927,8 +944,9 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
     engine = _engine(args.state)
     run_id = engine.create(spec)
     migration_plan = await engine.plan(run_id)
-    if args.json:
-        _print_json(
+    if args.json or getattr(args, "compact_dsl", False):
+        _print_result(
+            args,
             _json_result(
                 "plan",
                 {
@@ -954,7 +972,7 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
                         ]
                     )
                 ],
-            )
+            ),
         )
     else:
         _print_plan(run_id, migration_plan)
@@ -996,8 +1014,9 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
     if run.plan_json is None:
         raise ExecutionError("no plan for this spec yet; run `sanka plan` first")
     await engine.apply(run_id, plan_hash=args.plan_hash)
-    if args.json:
-        _print_json(
+    if args.json or getattr(args, "compact_dsl", False):
+        _print_result(
+            args,
             _json_result(
                 "apply",
                 {
@@ -1018,7 +1037,7 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
                         ]
                     )
                 ],
-            )
+            ),
         )
     else:
         print(f"run {run_id}: applied")
@@ -1054,8 +1073,9 @@ async def _cmd_verify(args: argparse.Namespace) -> int:
     engine = _engine(args.state)
     run_id = engine.create(spec)
     verify_report = await engine.verify(run_id)
-    if args.json:
-        _print_json(
+    if args.json or getattr(args, "compact_dsl", False):
+        _print_result(
+            args,
             _json_result(
                 "verify",
                 {
@@ -1078,7 +1098,7 @@ async def _cmd_verify(args: argparse.Namespace) -> int:
                     "verified_within_scope" if verify_report.ok else "verification_failed"
                 ),
                 artifacts=[str(Path(args.state).resolve())],
-            )
+            ),
         )
     else:
         _print_verify(verify_report)
