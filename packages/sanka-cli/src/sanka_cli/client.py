@@ -87,16 +87,43 @@ class SankaApiClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        max_bytes: int | None = None,
     ) -> tuple[bytes, dict[str, str]]:
         """Fetch a non-JSON body (currently only the Custom Code bundle download).
 
         Returns headers alongside the payload so the caller can verify the digest the
         server reports without a second request.
         """
+        request_headers = self._headers()
+        request_headers.update(headers or {})
+        if max_bytes is not None:
+            with self.client.stream(
+                method.upper(),
+                path,
+                headers=request_headers,
+                params=params,
+            ) as response:
+                content = bytearray()
+                for chunk in response.iter_bytes(chunk_size=65536):
+                    if len(content) + len(chunk) > max_bytes:
+                        raise APIError(
+                            status_code=413, message="API artifact exceeds its size limit"
+                        )
+                    content.extend(chunk)
+                if response.status_code >= 400:
+                    self._raise_for_response(
+                        httpx.Response(
+                            response.status_code,
+                            content=bytes(content),
+                            headers=response.headers,
+                        )
+                    )
+                return bytes(content), dict(response.headers)
         response = self.client.request(
             method.upper(),
             path,
-            headers=self._headers(),
+            headers=request_headers,
             params=params,
         )
         if response.status_code >= 400:
