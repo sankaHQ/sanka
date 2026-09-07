@@ -77,6 +77,17 @@ workflows, AI, Custom Code, and explicitly cloud-selected migrations retain
 their existing authentication requirements. Add `--json` to local lifecycle
 commands for the stable `sanka-cli/v1` response envelope.
 
+## Hosted repository runs
+
+`sanka cloud` uploads reviewed repository ZIPs, starts runs with an explicit
+credit cap, and reads status, receipts, and retained artifacts. When enabled by
+the operator, `cloud repair` makes one bounded patch attempt and `cloud certify`
+compares selected HTTP cases in a fresh worker. `cloud certificate-verify`
+verifies signed evidence online or with an explicitly trusted offline key ring.
+Every hosted command pins its workspace; paid operations require confirmation.
+See [Hosted repository runs](../../docs/cloud-runs.md) for inputs, pricing,
+verification scope, and revocation limits.
+
 ## Extension trust
 
 The manager verifies a trusted marketplace snapshot, manifest schema,

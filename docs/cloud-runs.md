@@ -6,8 +6,9 @@ command. The service must be enabled by the workspace operator. Local `scan`,
 `plan`, `apply`, `test`, and `verify` behavior is unchanged.
 
 The initial recipe is DRF to FastAPI using a pinned, offline Python environment.
-It runs generated tests and static checks. It does not issue an independent
-certificate, perform HTTP replay, or install arbitrary project dependencies.
+An ordinary run executes generated tests and static checks. Independent HTTP
+certification is a separate, explicitly requested run. Neither profile installs
+arbitrary project dependencies.
 Database-backed route tests need a synthetic or sanitized SQLite test database
 in the ZIP and Django settings that reference it. An empty in-memory database
 has no tables for those tests. Remote databases are unreachable; omit their
@@ -89,3 +90,56 @@ Use the returned repair run ID with the same `status`, `events`, `cancel`,
 the same checks afterward. `--artifact repair-response.json` downloads the saved
 model patch. Passing generated tests and static checks is not an independent
 behavior-parity certificate.
+
+## Certify a selected HTTP scope
+
+When certification is enabled, use an existing run's retained candidate and its
+original source. The original run must specify a Django settings module and a
+synthetic or sanitized SQLite database in the source archive. Review a JSON array
+of 1–50 requests, with unique IDs and local paths, and save it as `cases.json`:
+
+```json
+[
+  {"id": "list-items", "method": "GET", "path": "/api/items/"},
+  {"id": "create-item", "method": "POST", "path": "/api/items/", "json_body": {"name": "Example"}}
+]
+```
+
+Use paths and request bodies from your application. Requests run in order against
+the source and candidate, each with its own fresh database copy, in an isolated
+worker. Generated checks must pass, HTTP responses must match, no case may return
+a server error, and at least one case must succeed. The certificate records tested
+and untested declared routes; it does not establish behavior outside those cases.
+
+```sh
+sanka cloud certify RUN_UUID --workspace WORKSPACE_CODE \
+  --candidate-sha256 OUTPUT_SHA256 --cases cases.json \
+  --max-credits 3000 --timeout-seconds 600 \
+  --idempotency-key my-reviewed-certification
+sanka cloud certificate CERTIFICATION_RUN_UUID --workspace WORKSPACE_CODE --to certificate.json
+sanka cloud certificate-verify certificate.json --workspace WORKSPACE_CODE
+```
+
+The cap is 2,001–8,000 credits, including a 2,000-credit fee only when the signed
+certificate is issued. The remaining cap funds compute at the standard rate.
+Failed or cancelled verification has no certificate fee. Use the same reviewed
+inputs and idempotency key after an uncertain create response. Normal run status,
+cancellation, events, receipts, and artifact downloads also apply.
+
+Certificates retain their signed evidence after source artifacts expire. Online
+verification uses the service's published Ed25519 key ring and checks the current
+certificate and revocation state in the specified workspace. For offline signature
+verification, supply an independently trusted issuer key ring:
+
+```sh
+sanka cloud certificate-verify certificate.json --trusted-keys trusted-issuer-keys.json
+sanka cloud certificate-revoke CERTIFICATION_RUN_UUID --workspace WORKSPACE_CODE \
+  --reason "The covered behavior is no longer approved"
+```
+
+The key ring has a `keys` array whose entries contain `key_id`, `algorithm`
+(`Ed25519`), and `public_key_base64`; obtain it from the authenticated
+`/api/v2/migrate/cloud-runs/certificate-keys` endpoint. Do not trust a key merely
+because it accompanies a certificate. Offline verification reports revocation
+as `not_checked_offline`. Revocation is permanent and preserves the original
+signature and evidence.
