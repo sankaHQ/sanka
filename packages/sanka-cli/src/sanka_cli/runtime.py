@@ -148,10 +148,17 @@ def request_bytes(
     path: str,
     *,
     params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    max_bytes: int | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     client = build_client(state)
     try:
-        return client.request_bytes(method, path, params=params)
+        options: dict[str, Any] = {}
+        if headers is not None:
+            options["headers"] = headers
+        if max_bytes is not None:
+            options["max_bytes"] = max_bytes
+        return client.request_bytes(method, path, params=params, **options)
     except APIError as exc:
         handle_api_error(exc)
         raise
