@@ -6,14 +6,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import re
 import zipfile
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import click
 
 import sanka_cli.runtime as runtime
+from sanka_cli.certificates import load_scenarios, read_json, verify_certificate
 from sanka_cli.state import CLIState
 
 ROOT = "/v2/migrate/cloud-runs"
@@ -255,6 +258,188 @@ def repair(
                     "max_attempts": 1,
                 },
             },
+        ),
+        state,
+    )
+
+
+@cloud.command("certify")
+@WORKSPACE
+@RUN
+@click.option("--candidate-sha256", required=True, help="Exact saved output.zip digest.")
+@click.option(
+    "--cases", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+@click.option("--max-credits", required=True, type=click.IntRange(2001, 8000))
+@click.option("--timeout-seconds", default=600, show_default=True, type=click.IntRange(1, 3600))
+@click.option("--idempotency-key", required=True, help="Reuse only with the same reviewed inputs.")
+@click.option("--yes", is_flag=True, help="Confirm the full credit hold and selected HTTP scope.")
+@click.pass_obj
+def certify(
+    state: CLIState,
+    workspace: str,
+    run_id: Any,
+    candidate_sha256: str,
+    cases: Path,
+    max_credits: int,
+    timeout_seconds: int,
+    idempotency_key: str,
+    yes: bool,
+) -> None:
+    """Compare reviewed HTTP cases independently and issue a certificate on success."""
+    headers = _headers(workspace)
+    _digest(candidate_sha256)
+    _intent_key(idempotency_key)
+    try:
+        scenarios = load_scenarios(cases)
+    except (ValueError, OSError, RecursionError) as error:
+        raise click.ClickException(str(error)) from error
+    parent = _data(_read(state, workspace, f"{ROOT}/{run_id}"))
+    if parent.get("id") != str(run_id) or parent.get("status") not in {
+        "succeeded",
+        "failed",
+        "cancelled",
+    }:
+        raise click.ClickException("Certification requires the selected settled run")
+    artifacts = _data(_read(state, workspace, f"{ROOT}/{run_id}/artifacts"))
+    if not any(
+        item.get("name") == "output.zip" and item.get("sha256") == candidate_sha256
+        for item in artifacts.get("artifacts", [])
+    ):
+        raise click.ClickException("Candidate digest does not match the retained output.zip")
+    request = parent.get("request") or {}
+    if not all(request.get(name) for name in ("source_id", "source_sha256", "settings_module")):
+        raise click.ClickException(
+            "The original run needs a pinned source and Django settings module"
+        )
+    if not yes:
+        click.confirm(
+            f"Certify candidate {candidate_sha256} in workspace {workspace} using {len(scenarios)} "
+            f"reviewed HTTP cases? Reserve up to {max_credits} credits, including 2,000 only on "
+            "successful certificate issuance plus 100 per active worker-minute. "
+            "Untested behavior is outside this certificate",
+            abort=True,
+        )
+    headers["Idempotency-Key"] = idempotency_key
+    runtime.emit_payload(
+        runtime.request_json(
+            state,
+            "POST",
+            ROOT,
+            headers=headers,
+            json_body={
+                "source_id": request["source_id"],
+                "source_sha256": request["source_sha256"],
+                "settings_module": request["settings_module"],
+                "max_credits": max_credits,
+                "timeout_seconds": timeout_seconds,
+                "verification_profile": "independent-http-replay-v1",
+                "certification": {
+                    "parent_run_id": str(run_id),
+                    "candidate_sha256": candidate_sha256,
+                    "scenarios": scenarios,
+                },
+            },
+        ),
+        state,
+    )
+
+
+@cloud.command("certificate")
+@WORKSPACE
+@RUN
+@click.option("--to", "destination", type=click.Path(dir_okay=False, path_type=Path), default=None)
+@click.pass_obj
+def certificate(state: CLIState, workspace: str, run_id: Any, destination: Path | None) -> None:
+    """Read the certificate and revocation status; optionally save a new JSON file."""
+    if destination and (destination.exists() or destination.is_symlink()):
+        raise click.ClickException("Destination already exists; choose a new file")
+    document = _data(_read(state, workspace, f"{ROOT}/{run_id}/certificate"))
+    if destination:
+        with destination.open("x", encoding="utf-8") as stream:
+            json.dump(document, stream, ensure_ascii=True, indent=2)
+            stream.write("\n")
+        runtime.emit_payload(
+            {"path": str(destination), "revoked_at": document.get("revoked_at")}, state
+        )
+    else:
+        runtime.emit_payload(document, state)
+
+
+@cloud.command("certificate-verify")
+@click.argument("document", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--workspace", default=None, help="Verify online using this exact workspace code.")
+@click.option(
+    "--trusted-keys",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Explicit trusted issuer key ring for offline signature verification.",
+)
+@click.pass_obj
+def certificate_verify(
+    state: CLIState, document: Path, workspace: str | None, trusted_keys: Path | None
+) -> None:
+    """Verify a signature and, in online mode, check current revocation status."""
+    if bool(workspace) == bool(trusted_keys):
+        raise click.UsageError(
+            "Choose --workspace for online verification or --trusted-keys for offline verification"
+        )
+    try:
+        data = read_json(document)
+        keys = (
+            read_json(trusted_keys)
+            if trusted_keys
+            else _data(_read(state, workspace or "", f"{ROOT}/certificate-keys"))
+        )
+        payload = verify_certificate(data, keys)
+        run_id = str(UUID(payload["run_id"]))
+        if workspace:
+            current = _data(_read(state, workspace, f"{ROOT}/{run_id}/certificate"))
+            if current.get("certificate") != data.get("certificate", data):
+                raise ValueError("The API certificate does not match the supplied signed record")
+            if current.get("revoked_at"):
+                raise ValueError("This certificate has been revoked by its owner")
+    except (ValueError, KeyError, TypeError, AttributeError, OSError, RecursionError) as error:
+        raise click.ClickException(str(error)) from error
+    runtime.emit_payload(
+        {
+            "signature_valid": True,
+            "run_id": run_id,
+            "revocation_status": "active_at_check" if workspace else "not_checked_offline",
+            "verification_scope": payload["evidence"]["profile"],
+            "tested_routes": payload["evidence"]["tested_routes"],
+            "untested_routes": payload["evidence"]["untested_routes"],
+            "limitations": payload["limitations"],
+        },
+        state,
+    )
+
+
+@cloud.command("certificate-revoke")
+@WORKSPACE
+@RUN
+@click.option(
+    "--reason", required=True, help="Reason for withdrawing this certificate (1-500 characters)."
+)
+@click.option("--yes", is_flag=True, help="Confirm permanent certificate revocation.")
+@click.pass_obj
+def certificate_revoke(
+    state: CLIState, workspace: str, run_id: Any, reason: str, yes: bool
+) -> None:
+    """Revoke this certificate while preserving its original signed evidence."""
+    headers = _headers(workspace)
+    reason = reason.strip()
+    if not 1 <= len(reason) <= 500:
+        raise click.BadParameter("must be 1-500 nonblank characters", param_hint="--reason")
+    if not yes:
+        click.confirm(f"Revoke certificate for run {run_id} in workspace {workspace}?", abort=True)
+    runtime.emit_payload(
+        runtime.request_json(
+            state,
+            "POST",
+            f"{ROOT}/{run_id}/certificate/revoke",
+            headers=headers,
+            json_body={"reason": reason},
         ),
         state,
     )
