@@ -26,7 +26,7 @@ sanka test . --compact-dsl
 sanka verify . --scenarios <scenario-file> --candidate <target-path> --compact-dsl
 ```
 
-Use `--compact-dsl` when advertised; otherwise use `--json`, also retained for machine parsing. Read outcome, migration state, counts, warnings, and artifact paths first. Extract only relevant routes or failing scenarios from full artifacts; avoid dumping reports, repositories, or framework modules.
+Use `--compact-dsl` when advertised; otherwise use `--json`, also retained for machine parsing. Read outcome, migration state, counts, warnings, and artifact paths first. Read relevant ranges from saved output and report artifacts; do not rerun a command just to obtain another output excerpt. Avoid whole-file dumps.
 
 Supply required target, strategy, generation mode, package manager, and output together. Apply the **core** `plan_hash` (`data.plan_hash` in JSON), not the nested extension hash. Preserve source and plan artifacts between review and apply. `--extension-env NAME` forwards an existing variable by name, not `NAME=value`; forward only required variables.
 
@@ -37,6 +37,7 @@ Work in the reported target location and establish native boot early. Use `--ben
 - Prefer the extension's differential replay and existing seed files over another probing harness. Supply required settings, entrypoint, database, and environment options. Replay uses equivalent fresh fixtures and needs no reviewed plan. If unsupported, compare source/target test clients with equivalent fixtures.
 - Seed records with `--seed <seed.py>` and authenticate protected requests. Declare `expected_source_status` for intended successes when supported; never weaken it to accept missing fixtures. Matching 401/404s does not establish completeness. Inspect coverage warnings, source statuses, and database effects.
 - Reuse `--edge-probes` for contextual HEAD/OPTIONS checks; cover required roles and tenants. Add expectations or extra cases in separate scenario files, preserving supplied acceptance tests.
+- Treat missing fixture/auth coverage as verification setup, not a target-code defect. Supply the missing prerequisite; if unavailable, report incomplete coverage instead of repeating the unchanged check.
 - Repair only demonstrated mismatches in the generated target. Read failing scenario IDs and focused differences; correct the reported cause before retrying. Rerun affected checks, then complete required verification. Stop when acceptance passes; disclose unresolved gaps.
 - `sanka test` may require an unchanged plan fingerprint and generated files. If repairs invalidate that gate, preserve them and use target tests plus replay. Disclose the uncompleted planned test gate; do not regenerate over repairs or report boot/partial replay as a full migration pass.
 
