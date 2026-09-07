@@ -42,6 +42,18 @@ def _data(payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _intent_key(value: str) -> str:
+    if (
+        not 8 <= len(value) <= 200
+        or not value.isascii()
+        or any(ord(char) < 33 or ord(char) > 126 for char in value)
+    ):
+        raise click.BadParameter(
+            "must be 8-200 visible ASCII characters", param_hint="--idempotency-key"
+        )
+    return value
+
+
 def _read(state: CLIState, workspace: str, path: str, **params: Any) -> dict[str, Any]:
     return runtime.request_json(state, "GET", path, headers=_headers(workspace), params=params)
 
@@ -118,14 +130,7 @@ def run(
     """Reserve the credit limit and queue one run. Retries keep the same source and key."""
     headers = _headers(workspace)
     _digest(sha256)
-    if (
-        not 8 <= len(idempotency_key) <= 200
-        or not idempotency_key.isascii()
-        or any(ord(char) < 33 or ord(char) > 126 for char in idempotency_key)
-    ):
-        raise click.BadParameter(
-            "must be 8-200 visible ASCII characters", param_hint="--idempotency-key"
-        )
+    _intent_key(idempotency_key)
     if settings_module is not None and (
         len(settings_module) > 200
         or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", settings_module)
@@ -153,6 +158,106 @@ def run(
         },
     )
     runtime.emit_payload(payload, state)
+
+
+@cloud.command("repair")
+@WORKSPACE
+@RUN
+@click.option("--candidate-sha256", required=True, help="Exact saved output.zip digest.")
+@click.option(
+    "--path",
+    "paths",
+    multiple=True,
+    required=True,
+    help="Existing application Python file to allow; repeat for multiple paths.",
+)
+@click.option("--target-gate", required=True, type=click.Choice(["test", "verify"]))
+@click.option("--max-credits", required=True, type=click.IntRange(1001, 7000))
+@click.option("--timeout-seconds", default=600, show_default=True, type=click.IntRange(1, 3600))
+@click.option(
+    "--idempotency-key",
+    required=True,
+    help="Reuse this key with identical inputs after an uncertain response.",
+)
+@click.option(
+    "--yes", is_flag=True, help="Confirm the full credit hold, including the success premium."
+)
+@click.pass_obj
+def repair(
+    state: CLIState,
+    workspace: str,
+    run_id: Any,
+    candidate_sha256: str,
+    paths: tuple[str, ...],
+    target_gate: str,
+    max_credits: int,
+    timeout_seconds: int,
+    idempotency_key: str,
+    yes: bool,
+) -> None:
+    """Attempt one bounded code repair of a failed run's pinned output."""
+    headers = _headers(workspace)
+    _digest(candidate_sha256)
+    _intent_key(idempotency_key)
+    if (
+        not 1 <= len(paths) <= 20
+        or len(set(paths)) != len(paths)
+        or any(
+            len(path) > 240
+            or not re.fullmatch(
+                r"app/(?:[A-Za-z_][A-Za-z0-9_-]*/)*[A-Za-z_][A-Za-z0-9_-]*\.py", path
+            )
+            or "__pycache__" in path.split("/")
+            for path in paths
+        )
+    ):
+        raise click.BadParameter(
+            "select 1-20 unique existing Python paths under app/", param_hint="--path"
+        )
+    parent = _data(_read(state, workspace, f"{ROOT}/{run_id}"))
+    if parent.get("id") != str(run_id) or parent.get("status") != "failed":
+        raise click.ClickException("Repair requires the selected failed run")
+    artifacts = _data(_read(state, workspace, f"{ROOT}/{run_id}/artifacts"))
+    if not any(
+        item.get("name") == "output.zip" and item.get("sha256") == candidate_sha256
+        for item in artifacts.get("artifacts", [])
+    ):
+        raise click.ClickException("Candidate digest does not match the retained output.zip")
+    request = parent.get("request") or {}
+    if not request.get("source_id") or not request.get("source_sha256"):
+        raise click.ClickException("The failed run has no pinned source")
+    if not yes:
+        click.confirm(
+            f"Repair run {run_id} in workspace {workspace}, check {target_gate}, "
+            f"paths {', '.join(sorted(paths))}? Reserve up to {max_credits} credits, including "
+            "1,000 only on success plus 100 per active worker-minute; one model attempt",
+            abort=True,
+        )
+    headers["Idempotency-Key"] = idempotency_key
+    runtime.emit_payload(
+        runtime.request_json(
+            state,
+            "POST",
+            ROOT,
+            headers=headers,
+            json_body={
+                "source_id": request["source_id"],
+                "source_sha256": request["source_sha256"],
+                "settings_module": request.get("settings_module"),
+                "max_credits": max_credits,
+                "timeout_seconds": timeout_seconds,
+                "repair": {
+                    "parent_run_id": str(run_id),
+                    "candidate_sha256": candidate_sha256,
+                    "target_gate": target_gate,
+                    "allowed_paths": sorted(paths),
+                    "model_policy": "bounded-patch-v1",
+                    "max_attempts": 1,
+                },
+            },
+        ),
+        state,
+    )
 
 
 @cloud.command("list")
@@ -210,7 +315,11 @@ def cancel(state: CLIState, workspace: str, run_id: Any) -> None:
 @cloud.command("download")
 @WORKSPACE
 @RUN
-@click.option("--artifact", type=click.Choice(["output.zip", "logs.txt"]), default="output.zip")
+@click.option(
+    "--artifact",
+    type=click.Choice(["output.zip", "logs.txt", "repair-response.json"]),
+    default="output.zip",
+)
 @click.option("--to", "destination", required=True, type=click.Path(dir_okay=False, path_type=Path))
 @click.pass_obj
 def download(
