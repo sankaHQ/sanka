@@ -734,7 +734,9 @@ def test_identity_manifest_survives_mapping_validation_and_journal_round_trip() 
 
 
 @pytest.mark.parametrize("identities", [["email"], [], None])
-def test_changed_or_removed_identities_reject_a_previously_reviewed_manifest(identities) -> None:
+def test_changed_or_removed_identities_reject_a_previously_reviewed_manifest(
+    identities: list[str] | None,
+) -> None:
     field = MigrationMappingField(
         source_field="accounts.Domain",
         target_object="companies",
@@ -751,7 +753,7 @@ def test_changed_or_removed_identities_reject_a_previously_reviewed_manifest(ide
 
 
 @pytest.mark.parametrize("identities", [None, "email", [1], [""], [" email"], {}])
-def test_invalid_identity_fields_fail_closed(identities) -> None:
+def test_invalid_identity_fields_fail_closed(identities: Any) -> None:
     saved = _manifest()
     saved[0]["identityFields"] = identities
     with pytest.raises(ExecutionFault) as excinfo:
