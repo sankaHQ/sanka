@@ -143,3 +143,80 @@ The key ring has a `keys` array whose entries contain `key_id`, `algorithm`
 because it accompanies a certificate. Offline verification reports revocation
 as `not_checked_offline`. Revocation is permanent and preserves the original
 signature and evidence.
+
+## Run a selected repository Fleet
+
+When Fleet is enabled, prepare an exact ZIP and full commit revision for each
+repository. Upload each ZIP once with its revision:
+
+```sh
+git archive --format=zip COMMIT_SHA -o source.zip
+sanka cloud upload source.zip --workspace WORKSPACE_CODE --revision COMMIT_SHA
+```
+
+The service binds your declared revision to the immutable ZIP digest. It does not
+independently verify that the ZIP represents that Git commit. Use the returned
+source ID and SHA-256 in a reviewed JSON array, saved as `fleet-items.json`:
+
+```json
+[
+  {
+    "key": "orders",
+    "repository": "team/orders",
+    "revision": "1111111111111111111111111111111111111111",
+    "request": {
+      "source_id": "00000000-0000-4000-8000-000000000001",
+      "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_credits": 1000,
+      "timeout_seconds": 600,
+      "settings_module": "config.settings"
+    }
+  }
+]
+```
+
+Replace these example identities with your uploaded source. Select 1–20
+repositories, each with a unique repository name and item key. Revision values
+must have 40 or 64 lowercase hexadecimal characters. A child `request` accepts
+the same compute, Repair or certification fields as a single Cloud Run, including
+explicit candidate digests and approved file or HTTP scopes. Source and candidate
+retention must cover the entire Fleet execution window.
+
+```sh
+sanka cloud fleet create --workspace WORKSPACE_CODE --manifest fleet-items.json \
+  --max-credits 1000 --concurrency 2 --idempotency-key my-reviewed-fleet
+sanka cloud fleet list --workspace WORKSPACE_CODE
+sanka cloud fleet status FLEET_UUID --workspace WORKSPACE_CODE
+sanka cloud fleet cancel FLEET_UUID --workspace WORKSPACE_CODE
+```
+
+The total cap must equal the sum of all child caps. The service reserves all
+children in one transaction before any child becomes eligible to run. Insufficient
+credits rejects the whole Fleet with no child reservations. The parent has no
+additional execution charge. Each child retains its ordinary compute rate,
+success or issuance fee, credit limit, cancellation behavior and separate receipt.
+The concurrency limit is 1–5 children; the workspace also has a shared five-run
+capacity across all Fleets and ordinary runs. Children waiting for capacity are
+free. Their queue timeout starts when they receive a slot.
+
+`status` reports partial progress and per-repository run IDs, revisions and
+receipts. It separates the initial reservation, charged compute, success or
+issuance credits, released credits and still-reserved credits. Use a child run ID
+with the ordinary `status`, `events`, `receipt`, `certificate` and `download`
+commands. Cancellation releases queued children and requests cancellation of
+active children; completed results and receipts remain unchanged.
+
+After every child has settled, retry only the failed keys you explicitly select:
+
+```sh
+sanka cloud fleet retry FLEET_UUID --workspace WORKSPACE_CODE --item orders \
+  --max-credits 1000 --concurrency 1 --idempotency-key my-reviewed-fleet-retry
+```
+
+Repeat `--item` for more failures. Confirm a new total cap equal to those selected
+child caps. The new Fleet reuses their selected source and run request and links to
+their original run IDs. Successful and cancelled children cannot be retried by
+this command. Original receipts stay unchanged. For an uncertain create or retry
+response, repeat the identical request with the same idempotency key; a new
+intentional attempt requires a new key. The console provides the same repository
+review, aggregate limits, partial receipts, cancellation and selective retry flow.

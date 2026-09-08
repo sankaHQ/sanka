@@ -17,6 +17,7 @@ import click
 
 import sanka_cli.runtime as runtime
 from sanka_cli.certificates import load_scenarios, read_json, verify_certificate
+from sanka_cli.commands.cloud_fleet import fleet
 from sanka_cli.state import CLIState
 
 ROOT = "/v2/migrate/cloud-runs"
@@ -66,14 +67,22 @@ def cloud() -> None:
     """Hosted DRF-to-FastAPI runs, credit receipts, and artifacts (when enabled)."""
 
 
+cloud.add_command(fleet)
+
+
 @cloud.command("upload")
 @WORKSPACE
 @click.argument("archive", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--yes", is_flag=True, help="Confirm uploading this ZIP to the selected workspace.")
+@click.option(
+    "--revision", default=None, help="Exact commit SHA represented by this ZIP; required for Fleet."
+)
 @click.pass_obj
-def upload(state: CLIState, workspace: str, archive: Path, yes: bool) -> None:
+def upload(state: CLIState, workspace: str, archive: Path, yes: bool, revision: str | None) -> None:
     """Upload an explicit ZIP, returning its source ID and SHA-256; no compute charge."""
     headers = _headers(workspace)
+    if revision is not None and not re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", revision):
+        raise click.BadParameter("must be an exact lowercase commit SHA", param_hint="--revision")
     with archive.open("rb") as stream:
         content = stream.read(SOURCE_BYTES + 1)
     if not content or len(content) > SOURCE_BYTES:
@@ -88,7 +97,8 @@ def upload(state: CLIState, workspace: str, archive: Path, yes: bool) -> None:
     if not yes:
         click.confirm(
             f"Upload {archive.name} ({len(content)} bytes, SHA-256 {sha256}) "
-            f"to workspace {workspace}? Source retention: 7 days",
+            f"to workspace {workspace}, revision {revision or 'unspecified'}? "
+            "Source retention: 7 days",
             abort=True,
         )
     payload = runtime.request_json(
@@ -96,10 +106,16 @@ def upload(state: CLIState, workspace: str, archive: Path, yes: bool) -> None:
         "POST",
         "/v2/migrate/cloud-sources",
         headers=headers,
-        json_body={"sha256": sha256, "archive_base64": base64.b64encode(content).decode("ascii")},
+        json_body={
+            "sha256": sha256,
+            "archive_base64": base64.b64encode(content).decode("ascii"),
+            **({"revision": revision} if revision else {}),
+        },
     )
     if _data(payload).get("sha256") != sha256:
         raise click.ClickException("Uploaded source digest does not match the selected ZIP")
+    if revision and _data(payload).get("revision") != revision:
+        raise click.ClickException("Uploaded source revision does not match the selected commit")
     runtime.emit_payload(payload, state)
 
 
