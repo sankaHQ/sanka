@@ -48,6 +48,7 @@ def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, m
             b"License-Expression: Apache-2.0 AND AGPL-3.0-only\n"
             b"Project-URL: Repository, https://github.com/sankaHQ/sanka\n"
             b"Requires-Dist: click>=8.1,<9\n"
+            b"Requires-Dist: cryptography>=43,<52\n"
             b"Requires-Dist: httpx>=0.27,<1\n"
             b"Requires-Dist: keyring>=25,<26\n"
             b"Requires-Dist: packaging>=24,<27\n"

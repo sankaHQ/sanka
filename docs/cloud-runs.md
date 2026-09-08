@@ -6,8 +6,9 @@ command. The service must be enabled by the workspace operator. Local `scan`,
 `plan`, `apply`, `test`, and `verify` behavior is unchanged.
 
 The initial recipe is DRF to FastAPI using a pinned, offline Python environment.
-It runs generated tests and static checks. It does not issue an independent
-certificate, perform HTTP replay, or install arbitrary project dependencies.
+An ordinary run executes generated tests and static checks. Independent HTTP
+certification is a separate, explicitly requested run. Neither profile installs
+arbitrary project dependencies.
 Database-backed route tests need a synthetic or sanitized SQLite test database
 in the ZIP and Django settings that reference it. An empty in-memory database
 has no tables for those tests. Remote databases are unreachable; omit their
@@ -62,3 +63,160 @@ an active run can still charge its elapsed compute.
 Developer API tokens need `migrate:cloud:read` and `migrate:cloud:write` scopes;
 resource-limited ingestion tokens cannot start Cloud Runs. The API rejects a
 workspace code that differs from the token's workspace.
+
+## Repair a failed candidate
+
+When Repair is enabled, select the exact output digest from a failed run and the
+application files that may change. One attempt uses the configured model and the
+fixed generated-test/static-verification profile. It cannot edit tests or
+configuration, add dependencies, or reach external networks.
+
+```sh
+sanka cloud repair FAILED_RUN_UUID --workspace WORKSPACE_CODE \
+  --candidate-sha256 OUTPUT_SHA256 --target-gate test \
+  --path app/main.py --max-credits 2000 --timeout-seconds 600 \
+  --idempotency-key my-reviewed-repair
+```
+
+Repeat `--path` to allow up to 20 existing Python files under `app/` (32 KiB per
+file). The command reads the failed run and its candidate before asking you to
+confirm the hold. The cap is 1,001–7,000 credits and includes a 1,000-credit
+success premium; only the remaining cap funds compute. Failed or cancelled repairs
+have no premium. Reuse the same options and key after an uncertain response.
+
+Use the returned repair run ID with the same `status`, `events`, `cancel`,
+`receipt`, and `download` commands. The output ZIP includes `repair.patch` and
+`repair-result.json` under `artifacts/`, with the failing check before repair and
+the same checks afterward. `--artifact repair-response.json` downloads the saved
+model patch. Passing generated tests and static checks is not an independent
+behavior-parity certificate.
+
+## Certify a selected HTTP scope
+
+When certification is enabled, use an existing run's retained candidate and its
+original source. The original run must specify a Django settings module and a
+synthetic or sanitized SQLite database in the source archive. Review a JSON array
+of 1–50 requests, with unique IDs and local paths, and save it as `cases.json`:
+
+```json
+[
+  {"id": "list-items", "method": "GET", "path": "/api/items/"},
+  {"id": "create-item", "method": "POST", "path": "/api/items/", "json_body": {"name": "Example"}}
+]
+```
+
+Use paths and request bodies from your application. Requests run in order against
+the source and candidate, each with its own fresh database copy, in an isolated
+worker. Generated checks must pass, HTTP responses must match, no case may return
+a server error, and at least one case must succeed. The certificate records tested
+and untested declared routes; it does not establish behavior outside those cases.
+
+```sh
+sanka cloud certify RUN_UUID --workspace WORKSPACE_CODE \
+  --candidate-sha256 OUTPUT_SHA256 --cases cases.json \
+  --max-credits 3000 --timeout-seconds 600 \
+  --idempotency-key my-reviewed-certification
+sanka cloud certificate CERTIFICATION_RUN_UUID --workspace WORKSPACE_CODE --to certificate.json
+sanka cloud certificate-verify certificate.json --workspace WORKSPACE_CODE
+```
+
+The cap is 2,001–8,000 credits, including a 2,000-credit fee only when the signed
+certificate is issued. The remaining cap funds compute at the standard rate.
+Failed or cancelled verification has no certificate fee. Use the same reviewed
+inputs and idempotency key after an uncertain create response. Normal run status,
+cancellation, events, receipts, and artifact downloads also apply.
+
+Certificates retain their signed evidence after source artifacts expire. Online
+verification uses the service's published Ed25519 key ring and checks the current
+certificate and revocation state in the specified workspace. For offline signature
+verification, supply an independently trusted issuer key ring:
+
+```sh
+sanka cloud certificate-verify certificate.json --trusted-keys trusted-issuer-keys.json
+sanka cloud certificate-revoke CERTIFICATION_RUN_UUID --workspace WORKSPACE_CODE \
+  --reason "The covered behavior is no longer approved"
+```
+
+The key ring has a `keys` array whose entries contain `key_id`, `algorithm`
+(`Ed25519`), and `public_key_base64`; obtain it from the authenticated
+`/api/v2/migrate/cloud-runs/certificate-keys` endpoint. Do not trust a key merely
+because it accompanies a certificate. Offline verification reports revocation
+as `not_checked_offline`. Revocation is permanent and preserves the original
+signature and evidence.
+
+## Run a selected repository Fleet
+
+When Fleet is enabled, prepare an exact ZIP and full commit revision for each
+repository. Upload each ZIP once with its revision:
+
+```sh
+git archive --format=zip COMMIT_SHA -o source.zip
+sanka cloud upload source.zip --workspace WORKSPACE_CODE --revision COMMIT_SHA
+```
+
+The service binds your declared revision to the immutable ZIP digest. It does not
+independently verify that the ZIP represents that Git commit. Use the returned
+source ID and SHA-256 in a reviewed JSON array, saved as `fleet-items.json`:
+
+```json
+[
+  {
+    "key": "orders",
+    "repository": "team/orders",
+    "revision": "1111111111111111111111111111111111111111",
+    "request": {
+      "source_id": "00000000-0000-4000-8000-000000000001",
+      "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_credits": 1000,
+      "timeout_seconds": 600,
+      "settings_module": "config.settings"
+    }
+  }
+]
+```
+
+Replace these example identities with your uploaded source. Select 1–20
+repositories, each with a unique repository name and item key. Revision values
+must have 40 or 64 lowercase hexadecimal characters. A child `request` accepts
+the same compute, Repair or certification fields as a single Cloud Run, including
+explicit candidate digests and approved file or HTTP scopes. Source and candidate
+retention must cover the entire Fleet execution window.
+
+```sh
+sanka cloud fleet create --workspace WORKSPACE_CODE --manifest fleet-items.json \
+  --max-credits 1000 --concurrency 2 --idempotency-key my-reviewed-fleet
+sanka cloud fleet list --workspace WORKSPACE_CODE
+sanka cloud fleet status FLEET_UUID --workspace WORKSPACE_CODE
+sanka cloud fleet cancel FLEET_UUID --workspace WORKSPACE_CODE
+```
+
+The total cap must equal the sum of all child caps. The service reserves all
+children in one transaction before any child becomes eligible to run. Insufficient
+credits rejects the whole Fleet with no child reservations. The parent has no
+additional execution charge. Each child retains its ordinary compute rate,
+success or issuance fee, credit limit, cancellation behavior and separate receipt.
+The concurrency limit is 1–5 children; the workspace also has a shared five-run
+capacity across all Fleets and ordinary runs. Children waiting for capacity are
+free. Their queue timeout starts when they receive a slot.
+
+`status` reports partial progress and per-repository run IDs, revisions and
+receipts. It separates the initial reservation, charged compute, success or
+issuance credits, released credits and still-reserved credits. Use a child run ID
+with the ordinary `status`, `events`, `receipt`, `certificate` and `download`
+commands. Cancellation releases queued children and requests cancellation of
+active children; completed results and receipts remain unchanged.
+
+After every child has settled, retry only the failed keys you explicitly select:
+
+```sh
+sanka cloud fleet retry FLEET_UUID --workspace WORKSPACE_CODE --item orders \
+  --max-credits 1000 --concurrency 1 --idempotency-key my-reviewed-fleet-retry
+```
+
+Repeat `--item` for more failures. Confirm a new total cap equal to those selected
+child caps. The new Fleet reuses their selected source and run request and links to
+their original run IDs. Successful and cancelled children cannot be retried by
+this command. Original receipts stay unchanged. For an uncertain create or retry
+response, repeat the identical request with the same idempotency key; a new
+intentional attempt requires a new key. The console provides the same repository
+review, aggregate limits, partial receipts, cancellation and selective retry flow.
