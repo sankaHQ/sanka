@@ -207,6 +207,15 @@ def canonical_route_manifest(raw: Any) -> MappingRouteManifest:
                 code="SANKA_MIGRATE_ROUTE_MANIFEST_INVALID",
             )
         seen.add(route_key)
+        identity_fields = item.get("identityFields", [])
+        if not isinstance(identity_fields, list) or any(
+            not isinstance(value, str) or not value.strip() or value != value.strip()
+            for value in identity_fields
+        ):
+            raise ExecutionFault(
+                "The saved Sanka route manifest contains invalid identity fields.",
+                code="SANKA_MIGRATE_ROUTE_MANIFEST_INVALID",
+            )
         normalized.append(
             {
                 "routeKey": route_key,
@@ -215,6 +224,7 @@ def canonical_route_manifest(raw: Any) -> MappingRouteManifest:
                 "sourceFilter": (
                     _source_filter_payload(source_filter) if source_filter is not None else None
                 ),
+                **({"identityFields": sorted(set(identity_fields))} if identity_fields else {}),
             }
         )
     return sorted(normalized, key=lambda row: str(row["routeKey"]))
