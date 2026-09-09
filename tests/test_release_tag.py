@@ -10,9 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_release_tag_guard_accepts_the_025_tag() -> None:
+def test_release_tag_guard_accepts_the_026_tag() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts/check_release_tag.py", "v0.2.5", "tag"],
+        [sys.executable, "scripts/check_release_tag.py", "v0.2.6", "tag"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -20,4 +20,4 @@ def test_release_tag_guard_accepts_the_025_tag() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "release tag OK: v0.2.5\n"
+    assert result.stdout == "release tag OK: v0.2.6\n"
