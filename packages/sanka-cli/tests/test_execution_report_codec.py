@@ -604,7 +604,7 @@ def test_route_progress_keys_are_validated_by_the_remap() -> None:
 
 def test_canonical_route_manifest_sorts_rows_and_drops_extra_keys() -> None:
     rows = list(reversed(_filtered_manifest()))
-    rows[0] = {**rows[0], "identityFields": ["email"]}  # v0 manifest extra key
+    rows[0] = {**rows[0], "unusedMetadata": "ignored"}
     normalized = canonical_route_manifest(rows)
     assert [row["routeKey"] for row in normalized] == [FILTERED_ROUTE, "contacts|contacts"]
     assert all(
@@ -711,6 +711,60 @@ def test_execution_route_manifest_reads_the_saved_manifest() -> None:
     with pytest.raises(ExecutionFault) as excinfo:
         execution_route_manifest({})
     assert excinfo.value.code == "SANKA_MIGRATE_ROUTE_MANIFEST_MISSING"
+
+
+def test_identity_manifest_survives_mapping_validation_and_journal_round_trip() -> None:
+    from sanka.runtime.mapping.record_mapping import mapping_route_manifest
+
+    field = MigrationMappingField(
+        source_field="accounts.Domain",
+        target_object="companies",
+        target_field="domain",
+        identity=True,
+    )
+    groups: list[MappingGroup] = [("accounts", "companies", None, [field])]
+    saved = mapping_route_manifest(groups)
+    assert saved[0]["identityFields"] == ["domain"]
+    validated = require_matching_route_manifest(groups, saved)
+    assert validated == saved
+    report = _queued_report()
+    report["execution"]["routeManifest"] = validated
+    restored = _round_trip(report)
+    assert restored["execution"]["routeManifest"] == saved
+
+
+@pytest.mark.parametrize("identities", [["email"], [], None])
+def test_changed_or_removed_identities_reject_a_previously_reviewed_manifest(
+    identities: list[str] | None,
+) -> None:
+    field = MigrationMappingField(
+        source_field="accounts.Domain",
+        target_object="companies",
+        target_field="domain",
+        identity=True,
+    )
+    groups: list[MappingGroup] = [("accounts", "companies", None, [field])]
+    saved = _manifest()
+    if identities is not None:
+        saved[0]["identityFields"] = identities
+    with pytest.raises(ExecutionFault) as excinfo:
+        require_matching_route_manifest(groups, saved)
+    assert excinfo.value.code == "SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED"
+
+
+@pytest.mark.parametrize("identities", [None, "email", [1], [""], [" email"], {}])
+def test_invalid_identity_fields_fail_closed(identities: Any) -> None:
+    saved = _manifest()
+    saved[0]["identityFields"] = identities
+    with pytest.raises(ExecutionFault) as excinfo:
+        canonical_route_manifest(saved)
+    assert excinfo.value.code == "SANKA_MIGRATE_ROUTE_MANIFEST_INVALID"
+
+
+def test_identity_order_and_duplicates_are_canonical() -> None:
+    saved = _manifest()
+    saved[0]["identityFields"] = ["external_id", "email", "email"]
+    assert canonical_route_manifest(saved)[0]["identityFields"] == ["email", "external_id"]
 
 
 # -- route selection -----------------------------------------------------------
