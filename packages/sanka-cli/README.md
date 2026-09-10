@@ -145,6 +145,13 @@ contents and route source code are replaced by explicit omission counts and file
 names. Read the returned artifact for those details; a compact summary is not a
 replacement for the full report. `data.plan_hash` becomes the `plan_hash` line;
 use that core hash for apply, not a nested extension hash.
+Successful scan/plan inventories replace descriptive serializer, view, OPTIONS,
+parity-note and fingerprint-evidence metadata with counts and artifact references.
+Identical core/extension scan fields appear once. Route decisions, adaptation
+reasons, hashes and diagnostics remain inline; metadata containing diagnostics
+also stays inline. Full `--json` output and saved artifacts are unchanged, and
+results without artifacts retain their details.
+
 
 Keep the lifecycle: scan → plan → apply → test → verify. An applied scaffold with
 manual gaps is not complete. Test establishes generated scope; scenario verification

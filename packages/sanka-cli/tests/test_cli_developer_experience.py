@@ -445,3 +445,78 @@ def test_compact_plan_keeps_review_hash_and_summarizes_generated_code(
     assert "target_app.py" in output and "Scope is limited" in output
     assert "omitted" in output and "/tmp/plan.json" in output
     assert len(output) < 1000
+
+
+@pytest.mark.parametrize("command", ["scan", "plan"])
+def test_compact_inventory_keeps_decisions_and_artifacts_without_metadata_repetition(
+    command: str,
+) -> None:
+    from copy import deepcopy
+
+    from sanka.cli._compact import render_compact
+
+    route = {
+        "method": "POST",
+        "path": "/items/",
+        "native": False,
+        "adaptation_reasons": [{"code": "CUSTOM_WRITE", "message": "Preserve validation"}],
+        "parity_notes": [{"code": "EXACT_MESSAGE", "message": "details" * 1000}],
+        "options": {"anonymous": {"actions": "metadata" * 1000}},
+        "warnings": ["Requires authentication"],
+    }
+    data = {
+        "plan_hash": "sha256:core",
+        "routes": [route],
+        "serializer_details": [{"fields": "fields" * 1000}],
+        "view_details": [{"source": "source" * 1000}],
+        "status_codes": {"HTTP_200_OK": 200},
+        "fingerprint": {"sha256": "sha256:source", "evidence": ["evidence" * 1000]},
+        "warnings": [{"routes": [route]}],
+        "extensions": [
+            {
+                "extension": {"id": "example", "manifest_digest": "sha256:manifest"},
+                "data": {"routes": [route], "plan_hash": "sha256:extension"},
+            }
+        ],
+    }
+    payload = {
+        "command": command,
+        "outcome": "success",
+        "migration_state": "planned",
+        "data": data,
+        "artifacts": [".sanka/full.json"],
+    }
+    before = deepcopy(payload)
+    output = render_compact(payload)
+    fields = {k: json.loads(v) for k, v in (line.split("=", 1) for line in output.splitlines()[1:])}
+    assert fields["routes"][0]["adaptation_reasons"] == route["adaptation_reasons"]
+    assert fields["routes"][0]["native"] is False
+    assert fields["routes"][0]["parity_notes"] == {"count": 1, "details": "artifacts"}
+    assert fields["warnings"] == data["warnings"]
+    assert fields["extensions"][0]["data"] == {"plan_hash": "sha256:extension"}
+    assert fields["extensions"][0]["extension"]["manifest_digest"] == "sha256:manifest"
+    assert fields["fingerprint"]["sha256"] == "sha256:source"
+    assert fields["plan_hash"] == "sha256:core"
+    assert fields["artifacts"] == payload["artifacts"]
+    assert payload == before
+    # Without a saved artifact, or on failure, metadata must remain inline.
+    payload["artifacts"] = []
+    assert '"actions":"metadata' in render_compact(payload)
+    payload["artifacts"] = [".sanka/full.json"]
+    payload["outcome"] = "error"
+    assert '"actions":"metadata' in render_compact(payload)
+
+
+def test_compact_keeps_diagnostics_nested_inside_descriptive_metadata() -> None:
+    from sanka.cli._compact import render_compact
+
+    data = {"serializer_details": [{"nested": {"warnings": ["Unsupported validator"]}}]}
+    payload = {
+        "command": "scan",
+        "outcome": "success",
+        "migration_state": "scanned",
+        "data": data,
+        "artifacts": [".sanka/scan.json"],
+    }
+    text = render_compact(payload)
+    assert json.loads(text.splitlines()[1].split("=", 1)[1]) == data["serializer_details"]
