@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import DataExtensionRegistry
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -67,9 +67,9 @@ def trusted_connector_discovery(monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
         registration.name: registration for registration in (markdown, postgres, sqlite)
     }
     monkeypatch.setattr(
-        ConnectorRegistry,
+        DataExtensionRegistry,
         "discover",
-        classmethod(lambda _cls, *_args, **_kwargs: ConnectorRegistry(dict(registrations))),
+        classmethod(lambda _cls, *_args, **_kwargs: DataExtensionRegistry(dict(registrations))),
     )
     yield
     for name in tuple(sys.modules):

@@ -43,5 +43,6 @@ build-backend = "hatchling.build"
 packages = [
   "src/sanka",
   "src/sanka_cli",
+  "src/sanka_data",
   "src/sanka_connector",
 ]

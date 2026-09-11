@@ -22,8 +22,8 @@ from sanka.runtime.extensions.model import (
     Manifest,
     MatchedEvidence,
     Matcher,
-    Provider,
     Recommendation,
+    SystemSupport,
     Wheel,
 )
 from sanka.runtime.hashing import content_hash
@@ -484,7 +484,7 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
     targets: tuple[str, ...] = ()
     match_all: tuple[Matcher, ...] = ()
     match_any: tuple[Matcher, ...] = ()
-    providers: tuple[Provider, ...] = ()
+    providers: tuple[SystemSupport, ...] = ()
     if kind == "migration":
         commands = _string_list(payload["commands"], code=code, path=path, label="commands")
         if not set(commands).issubset(LIFECYCLE_COMMANDS):
@@ -507,7 +507,7 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
         raw_providers = payload["providers"]
         if not isinstance(raw_providers, list) or not raw_providers:
             _invalid(code, path, "providers must be a non-empty array")
-        parsed_providers: list[Provider] = []
+        parsed_providers: list[SystemSupport] = []
         for raw_provider in raw_providers:
             provider = _object(raw_provider, {"name", "roles"}, code, path, "provider")
             name = provider["name"]
@@ -519,7 +519,7 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
             ):
                 _invalid(code, path, "provider name or role is unsupported")
             parsed_providers.append(
-                Provider(
+                SystemSupport(
                     name,
                     tuple(role for role in ("source", "destination") if role in roles),
                 )

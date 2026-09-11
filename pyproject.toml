@@ -66,6 +66,7 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 known-first-party = [
   "sanka",
   "sanka_cli",
+  "sanka_data",
   "sanka_connector",
   "sanka_connector_clickhouse",
   "sanka_connector_csv",

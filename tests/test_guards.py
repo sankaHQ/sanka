@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
-from scripts import check_public_naming
+import pytest
+
+from scripts import check_connector_sdk_sync, check_extension_terminology, check_public_naming
 from scripts.check_license_headers import expected_license
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,64 +63,63 @@ def test_base_cli_import_registers_mcp_without_loading_extra() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_connector_sdk_sync_accepts_identical_python_trees(tmp_path: Path) -> None:
-    canonical = tmp_path / "canonical"
-    embedded = tmp_path / "packages" / "sanka-cli" / "src" / "sanka_connector"
-    canonical.mkdir()
-    embedded.mkdir(parents=True)
-    for root in (canonical, embedded):
-        (root / "__init__.py").write_text("# SPDX-License-Identifier: Apache-2.0\n")
-        (root / "py.typed").touch()
-    env = os.environ | {"SANKA_CONNECTOR_SDK_SOURCE": str(canonical)}
-
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_connector_sdk_sync.py")],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_connector_sdk_sync_make_target_uses_recorded_snapshot() -> None:
-    env = os.environ.copy()
-    env.pop("SANKA_CONNECTOR_SDK_SOURCE", None)
-
-    result = subprocess.run(
-        ["make", "connector-sdk-sync"],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 def test_connector_sdk_sync_reports_byte_drift(tmp_path: Path) -> None:
     canonical = tmp_path / "canonical"
-    embedded = tmp_path / "packages" / "sanka-cli" / "src" / "sanka_connector"
+    embedded = tmp_path / "embedded"
     canonical.mkdir()
-    embedded.mkdir(parents=True)
+    embedded.mkdir()
     (canonical / "schema.py").write_text("canonical\n")
     (embedded / "schema.py").write_text("embedded\n")
-    env = os.environ | {"SANKA_CONNECTOR_SDK_SOURCE": str(canonical)}
+    assert check_connector_sdk_sync.compare_python_trees(canonical, embedded) == ["schema.py"]
 
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_connector_sdk_sync.py")],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+
+def test_sdk_provenance_uses_pinned_git_objects_and_checks_both_namespaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "upstream"
+    source = repository / check_connector_sdk_sync.UPSTREAM_SDK_PATH
+    embedded = tmp_path / "embedded"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    for namespace in check_connector_sdk_sync.SDK_NAMESPACES:
+        for root in (source, embedded):
+            (root / namespace).mkdir(parents=True)
+            (root / namespace / "__init__.py").write_text("# SPDX-License-Identifier: Apache-2.0\n")
+            (root / namespace / "py.typed").touch()
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=SDK test",
+            "-c",
+            "user.email=sdk-test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "SDK fixture",
+        ],
+        check=True,
     )
-
-    assert result.returncode == 1
-    assert "embedded connector SDK drift: schema.py" in result.stderr
+    revision = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    monkeypatch.setattr(check_connector_sdk_sync, "EXTENSIONS_REVISION", revision)
+    files = check_connector_sdk_sync.upstream_files(repository, revision)
+    monkeypatch.setattr(
+        check_connector_sdk_sync, "EMBEDDED_SHA256", check_connector_sdk_sync._digest(files)
+    )
+    # Mutable working-tree content must not substitute for the pinned commit.
+    (source / "sanka_data/__init__.py").write_text("uncommitted change\n")
+    check_connector_sdk_sync.verify(repository, embedded)
+    (embedded / "sanka_data/__init__.py").write_text("different facade\n")
+    with pytest.raises(SystemExit, match=r"sanka_data/__init__\.py"):
+        check_connector_sdk_sync.verify(repository, embedded)
+    with pytest.raises(subprocess.CalledProcessError):
+        check_connector_sdk_sync.upstream_files(repository, "0" * 40)
 
 
 def _run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -199,3 +199,25 @@ def test_public_naming_finds_mixed_case_retired_names(
 def test_dependency_licenses_pass_on_workspace() -> None:
     result = _run("check_dependency_licenses.py")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["from sanka_connector import Inventory\n", "class SourceConnector: pass\n"],
+)
+def test_terminology_rejects_new_legacy_sdk_usage(tmp_path: Path, source: str) -> None:
+    target = tmp_path / "packages/sanka-cli/src/sanka/runtime/new_feature.py"
+    target.parent.mkdir(parents=True)
+    target.write_text(source)
+    errors = check_extension_terminology.check(tmp_path)
+    assert len(errors) == 1
+    assert "new_feature.py:1" in errors[0]
+
+
+def test_terminology_keeps_explicit_sdk_compatibility_boundary(tmp_path: Path) -> None:
+    root = tmp_path / "packages/sanka-cli/src"
+    for namespace in ("sanka_connector", "sanka_data", "sanka/connector"):
+        target = root / namespace / "compat.py"
+        target.parent.mkdir(parents=True)
+        target.write_text("from sanka_connector import SourceConnector\n")
+    assert check_extension_terminology.check(tmp_path) == []

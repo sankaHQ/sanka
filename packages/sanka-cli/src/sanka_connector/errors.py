@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Structured error taxonomy for Sanka connectors.
+"""Structured error taxonomy for Sanka systems.
 
-Connectors raise :class:`ConnectorError` subclasses instead of leaking raw
+System readers and writers raise :class:`SystemAccessError` subclasses instead of leaking raw
 provider exceptions. The engine keys retry policy off ``category`` and
 ``retryable``, and surfaces ``remediation`` to operators and AI agents.
 """
@@ -33,8 +33,8 @@ _RETRYABLE_BY_DEFAULT = frozenset(
 )
 
 
-class ConnectorError(Exception):
-    """Base class for all connector failures.
+class SystemAccessError(Exception):
+    """Base class for all system access failures.
 
     ``retryable`` defaults from the category (rate-limit / transient / timeout
     retry; everything else does not) and can be overridden per instance.
@@ -63,49 +63,55 @@ class ConnectorError(Exception):
         self.details: dict[str, Any] = details or {}
 
 
-class AuthenticationError(ConnectorError):
+class AuthenticationError(SystemAccessError):
     category = ErrorCategory.AUTHENTICATION
 
 
-class PermissionDeniedError(ConnectorError):
+class PermissionDeniedError(SystemAccessError):
     category = ErrorCategory.PERMISSION
 
 
-class RateLimitError(ConnectorError):
+class RateLimitError(SystemAccessError):
     category = ErrorCategory.RATE_LIMIT
 
 
-class TransientProviderError(ConnectorError):
+class TransientSystemError(SystemAccessError):
     category = ErrorCategory.TRANSIENT
 
 
-class ProviderTimeoutError(ConnectorError):
+class SystemTimeoutError(SystemAccessError):
     category = ErrorCategory.TIMEOUT
 
 
-class NotFoundError(ConnectorError):
+class NotFoundError(SystemAccessError):
     category = ErrorCategory.NOT_FOUND
 
 
-class ConflictError(ConnectorError):
+class ConflictError(SystemAccessError):
     category = ErrorCategory.CONFLICT
 
 
-class ValidationFailedError(ConnectorError):
+class ValidationFailedError(SystemAccessError):
     category = ErrorCategory.VALIDATION
 
 
-class SchemaMismatchError(ConnectorError):
+class SchemaMismatchError(SystemAccessError):
     category = ErrorCategory.SCHEMA_MISMATCH
 
 
-class UnsupportedFeatureError(ConnectorError):
+class UnsupportedFeatureError(SystemAccessError):
     category = ErrorCategory.UNSUPPORTED
 
 
-class DataError(ConnectorError):
+class DataError(SystemAccessError):
     category = ErrorCategory.DATA
 
 
-class ConfigurationError(ConnectorError):
+class ConfigurationError(SystemAccessError):
     category = ErrorCategory.CONFIGURATION
+
+
+# Published compatibility names; both spellings identify the same classes.
+ConnectorError = SystemAccessError
+ProviderTimeoutError = SystemTimeoutError
+TransientProviderError = TransientSystemError

@@ -12,8 +12,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from sanka_connector.errors import DataError
-
 ConflictPolicy = Literal["create", "skip_existing", "update_existing"]
 InvalidEmailPolicy = Literal["block", "leave_empty"]
 WriteStatus = Literal["created", "updated", "skipped"]
@@ -59,32 +57,10 @@ class WriteOptions:
 def require_identity_values(
     properties: Mapping[str, Any], identity_fields: list[str] | None
 ) -> list[tuple[str, Any]]:
-    """Return one complete, non-NULL reviewed identity tuple.
+    """Compatibility entry point for the canonical identity validation helper."""
+    from sanka_data.records import require_identity_values as validate_identity
 
-    A destination must never weaken a composite identity to whichever fields
-    happen to be present in one untrusted record.  An empty identity remains a
-    supported create-only route; once fields are declared, every field is
-    required exactly once and must carry a non-NULL value.
-    """
-
-    if not identity_fields:
-        return []
-    fields = [str(field) for field in identity_fields]
-    if any(not field.strip() for field in fields):
-        raise DataError("identity field names must not be empty")
-    if len(set(fields)) != len(fields):
-        raise DataError("identity field names must be unique")
-    missing = [field for field in fields if field not in properties]
-    if missing:
-        raise DataError(
-            "record is missing required identity field(s): " + ", ".join(sorted(missing))
-        )
-    null_fields = [field for field in fields if properties[field] is None]
-    if null_fields:
-        raise DataError(
-            "record has NULL required identity field(s): " + ", ".join(sorted(null_fields))
-        )
-    return [(field, properties[field]) for field in fields]
+    return validate_identity(properties, identity_fields)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

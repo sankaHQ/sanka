@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Sanka Connector SDK — Apache-2.0 migration connector interfaces.
+"""Sanka Data Extension SDK — Apache-2.0 system access interfaces.
 
-Connectors implement the base protocols (:class:`SourceConnector`,
-:class:`DestinationConnector`) plus any optional capability protocols, and
+Data extensions implement the base protocols (:class:`SystemReader`,
+:class:`SystemWriter`) plus any optional capability protocols, and
 must not import the AGPL-licensed runtime (``sanka.runtime``); CI enforces
-that boundary so a connector is never a derivative work of the runtime.
+that boundary so an extension is never a derivative work of the runtime.
 """
 
 from sanka_connector.__about__ import __version__
@@ -17,22 +17,20 @@ from sanka_connector.errors import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
-    ConnectorError,
     DataError,
     ErrorCategory,
     NotFoundError,
     PermissionDeniedError,
-    ProviderTimeoutError,
     RateLimitError,
     SchemaMismatchError,
-    TransientProviderError,
+    SystemAccessError,
+    SystemTimeoutError,
+    TransientSystemError,
     UnsupportedFeatureError,
     ValidationFailedError,
 )
 from sanka_connector.protocols import (
-    DestinationConnector,
     Limits,
-    SourceConnector,
     SupportsBatchRelationshipWrites,
     SupportsBatchWrites,
     SupportsBoundedCounts,
@@ -48,6 +46,8 @@ from sanka_connector.protocols import (
     SupportsRetryMetrics,
     SupportsSchemaProvisioning,
     SupportsSnapshotBounds,
+    SystemReader,
+    SystemWriter,
 )
 from sanka_connector.provisioning import (
     CustomObjectDefinition,
@@ -73,13 +73,13 @@ from sanka_connector.records import (
     WriteResult,
     require_identity_values,
 )
-from sanka_connector.registration import ENTRY_POINT_GROUP, ConnectorRegistration
+from sanka_connector.registration import ENTRY_POINT_GROUP, DataExtensionRegistration
 from sanka_connector.schema import (
     FieldSchema,
     Inventory,
     ObjectSchema,
-    ProviderIdentity,
     SourceObject,
+    SystemIdentity,
 )
 
 __all__ = [
@@ -91,14 +91,12 @@ __all__ = [
     "ConfigurationError",
     "ConflictError",
     "ConflictPolicy",
-    "ConnectorError",
-    "ConnectorRegistration",
     "CredentialProvider",
     "Credentials",
     "CustomObjectDefinition",
     "CustomObjectProperty",
     "DataError",
-    "DestinationConnector",
+    "DataExtensionRegistration",
     "ErrorCategory",
     "FieldSchema",
     "InvalidEmailPolicy",
@@ -112,15 +110,12 @@ __all__ = [
     "PipelineStage",
     "PropertyDefinition",
     "PropertyResult",
-    "ProviderIdentity",
-    "ProviderTimeoutError",
     "RateLimitError",
     "RecordPage",
     "RelationshipWrite",
     "RelationshipWriteResult",
     "ResourceResult",
     "SchemaMismatchError",
-    "SourceConnector",
     "SourceFilter",
     "SourceObject",
     "SupportsBatchRelationshipWrites",
@@ -139,11 +134,35 @@ __all__ = [
     "SupportsRetryMetrics",
     "SupportsSchemaProvisioning",
     "SupportsSnapshotBounds",
-    "TransientProviderError",
+    "SystemAccessError",
+    "SystemIdentity",
+    "SystemReader",
+    "SystemTimeoutError",
+    "SystemWriter",
+    "TransientSystemError",
     "UnsupportedFeatureError",
     "ValidationFailedError",
     "WriteOptions",
     "WriteResult",
     "__version__",
     "require_identity_values",
+]
+
+# Published compatibility names; both spellings identify the same classes.
+SourceConnector = SystemReader
+DestinationConnector = SystemWriter
+ConnectorRegistration = DataExtensionRegistration
+ConnectorError = SystemAccessError
+ProviderIdentity = SystemIdentity
+ProviderTimeoutError = SystemTimeoutError
+TransientProviderError = TransientSystemError
+
+__all__ += [
+    "ConnectorError",
+    "ConnectorRegistration",
+    "DestinationConnector",
+    "ProviderIdentity",
+    "ProviderTimeoutError",
+    "SourceConnector",
+    "TransientProviderError",
 ]

@@ -60,7 +60,7 @@ def api(monkeypatch) -> FakeApi:
 def _init(runner: CliRunner, directory: Path, *, slug: str = "enrich", runtime: str = "node"):
     result = runner.invoke(
         cli,
-        ["code", "init", "--slug", slug, "--runtime", runtime, "--dir", str(directory)],
+        ["functions", "init", "--slug", slug, "--runtime", runtime, "--dir", str(directory)],
     )
     assert result.exit_code == 0, result.output
     return result
@@ -90,7 +90,9 @@ class TestInit:
     ) -> None:
         _init(runner, tmp_path)
 
-        result = runner.invoke(cli, ["code", "init", "--slug", "other", "--dir", str(tmp_path)])
+        result = runner.invoke(
+            cli, ["functions", "init", "--slug", "other", "--dir", str(tmp_path)]
+        )
 
         assert result.exit_code != 0
         assert json.loads((tmp_path / "sanka.json").read_text())["slug"] == "enrich"
@@ -111,7 +113,7 @@ class TestPush:
         _init(runner, tmp_path)
         expected = build_bundle(tmp_path)
 
-        result = runner.invoke(cli, ["code", "push", "--dir", str(tmp_path)])
+        result = runner.invoke(cli, ["functions", "push", "--dir", str(tmp_path)])
 
         assert result.exit_code == 0, result.output
         body = api.body_for("POST", "/v2/public/code/functions/enrich/versions")
@@ -124,7 +126,7 @@ class TestPush:
     ) -> None:
         _init(runner, tmp_path)
 
-        runner.invoke(cli, ["code", "push", "--dir", str(tmp_path), "--activate"])
+        runner.invoke(cli, ["functions", "push", "--dir", str(tmp_path), "--activate"])
 
         body = api.body_for("POST", "/v2/public/code/functions/enrich/versions")
         assert body["activate"] is True
@@ -134,7 +136,7 @@ class TestPush:
     ) -> None:
         _init(runner, tmp_path)
 
-        runner.invoke(cli, ["code", "push", "--dir", str(tmp_path), "-m", "add tier logic"])
+        runner.invoke(cli, ["functions", "push", "--dir", str(tmp_path), "-m", "add tier logic"])
 
         body = api.body_for("POST", "/v2/public/code/functions/enrich/versions")
         assert body["change_summary"] == "add tier logic"
@@ -144,7 +146,7 @@ class TestPush:
 
         result = runner.invoke(
             cli,
-            ["--output", "json", "code", "push", "--dir", str(tmp_path), "--dry-run"],
+            ["--output", "json", "functions", "push", "--dir", str(tmp_path), "--dry-run"],
         )
 
         assert result.exit_code == 0, result.output
@@ -154,10 +156,10 @@ class TestPush:
     def test_missing_manifest_is_a_clean_error(
         self, runner: CliRunner, api: FakeApi, tmp_path: Path
     ) -> None:
-        result = runner.invoke(cli, ["code", "push", "--dir", str(tmp_path)])
+        result = runner.invoke(cli, ["functions", "push", "--dir", str(tmp_path)])
 
         assert result.exit_code != 0
-        assert "sanka code init" in result.output
+        assert "sanka functions init" in result.output
         assert api.calls == []
 
 
@@ -188,7 +190,7 @@ class TestPullAndDiff:
         self._register_bundle(api, tmp_path)
         out = tmp_path / "out"
 
-        result = runner.invoke(cli, ["code", "pull", "enrich", "--dir", str(out)])
+        result = runner.invoke(cli, ["functions", "pull", "enrich", "--dir", str(out)])
 
         assert result.exit_code == 0, result.output
         assert (out / "index.js").exists()
@@ -199,7 +201,7 @@ class TestPullAndDiff:
     ) -> None:
         self._register_bundle(api, tmp_path)
 
-        runner.invoke(cli, ["code", "pull", "enrich", "--dir", str(tmp_path / "out")])
+        runner.invoke(cli, ["functions", "pull", "enrich", "--dir", str(tmp_path / "out")])
 
         assert "GET /v2/public/code/functions/enrich/versions/3/bundle" in api.paths()
 
@@ -209,7 +211,7 @@ class TestPullAndDiff:
         digest = self._register_bundle(api, tmp_path)
 
         result = runner.invoke(
-            cli, ["--output", "json", "code", "diff", "--dir", str(tmp_path / "src")]
+            cli, ["--output", "json", "functions", "diff", "--dir", str(tmp_path / "src")]
         )
 
         assert result.exit_code == 0, result.output
@@ -225,7 +227,7 @@ class TestPullAndDiff:
         (tmp_path / "src" / "index.js").write_text("export const main = () => ({changed:1});")
 
         result = runner.invoke(
-            cli, ["--output", "json", "code", "diff", "--dir", str(tmp_path / "src")]
+            cli, ["--output", "json", "functions", "diff", "--dir", str(tmp_path / "src")]
         )
 
         assert result.exit_code == 1
@@ -241,7 +243,7 @@ class TestPullAndDiff:
             {"X-Sanka-Content-Sha256": "0" * 64},
         )
 
-        result = runner.invoke(cli, ["code", "pull", "enrich", "--dir", str(tmp_path / "out")])
+        result = runner.invoke(cli, ["functions", "pull", "enrich", "--dir", str(tmp_path / "out")])
 
         assert result.exit_code != 0
         assert "does not match" in result.output
@@ -249,7 +251,7 @@ class TestPullAndDiff:
 
 class TestAliases:
     def test_deploy_moves_the_named_alias(self, runner: CliRunner, api: FakeApi) -> None:
-        result = runner.invoke(cli, ["code", "deploy", "enrich", "--version", "4"])
+        result = runner.invoke(cli, ["functions", "deploy", "enrich", "--version", "4"])
 
         assert result.exit_code == 0, result.output
         assert api.body_for("PUT", "/v2/public/code/functions/enrich/aliases/live") == {
@@ -263,7 +265,7 @@ class TestAliases:
             "data": {"versions": [{"version": 7}, {"version": 6}]}
         }
 
-        result = runner.invoke(cli, ["code", "rollback", "enrich"])
+        result = runner.invoke(cli, ["functions", "rollback", "enrich"])
 
         assert result.exit_code == 0, result.output
         assert api.body_for("PUT", "/v2/public/code/functions/enrich/aliases/live") == {
@@ -277,7 +279,7 @@ class TestAliases:
             "data": {"versions": [{"version": 1}]}
         }
 
-        result = runner.invoke(cli, ["code", "rollback", "enrich"])
+        result = runner.invoke(cli, ["functions", "rollback", "enrich"])
 
         assert result.exit_code != 0
         assert "no earlier version" in result.output
@@ -285,19 +287,19 @@ class TestAliases:
 
 class TestSourceLock:
     def test_lock_sets_git_ownership(self, runner: CliRunner, api: FakeApi) -> None:
-        runner.invoke(cli, ["code", "lock", "enrich"])
+        runner.invoke(cli, ["functions", "lock", "enrich"])
 
         assert api.body_for("PATCH", "/v2/public/code/functions/enrich") == {"source_mode": "git"}
 
     def test_unlock_requires_confirmation(self, runner: CliRunner, api: FakeApi) -> None:
         """Handing code ownership back to the UI should not be a single keystroke."""
-        result = runner.invoke(cli, ["code", "unlock", "enrich"], input="n\n")
+        result = runner.invoke(cli, ["functions", "unlock", "enrich"], input="n\n")
 
         assert result.exit_code != 0
         assert api.calls == []
 
     def test_unlock_proceeds_when_confirmed(self, runner: CliRunner, api: FakeApi) -> None:
-        result = runner.invoke(cli, ["code", "unlock", "enrich"], input="y\n")
+        result = runner.invoke(cli, ["functions", "unlock", "enrich"], input="y\n")
 
         assert result.exit_code == 0, result.output
         assert api.body_for("PATCH", "/v2/public/code/functions/enrich") == {"source_mode": "ui"}
@@ -306,7 +308,7 @@ class TestSourceLock:
 class TestSecrets:
     def test_set_prompts_without_echoing(self, runner: CliRunner, api: FakeApi) -> None:
         result = runner.invoke(
-            cli, ["code", "secrets", "set", "enrich", "API_KEY"], input="s3cret\n"
+            cli, ["functions", "secrets", "set", "enrich", "API_KEY"], input="s3cret\n"
         )
 
         assert result.exit_code == 0, result.output
@@ -315,7 +317,7 @@ class TestSecrets:
         assert body == {"name": "API_KEY", "value": "s3cret"}
 
     def test_rm_deletes(self, runner: CliRunner, api: FakeApi) -> None:
-        result = runner.invoke(cli, ["code", "secrets", "rm", "enrich", "API_KEY"])
+        result = runner.invoke(cli, ["functions", "secrets", "rm", "enrich", "API_KEY"])
 
         assert result.exit_code == 0, result.output
         assert "DELETE /v2/public/code/functions/enrich/secrets/API_KEY" in api.paths()
@@ -328,9 +330,26 @@ class TestCreate:
         """Creating from a repo means the repo owns the code."""
         _init(runner, tmp_path)
 
-        runner.invoke(cli, ["code", "create", "--dir", str(tmp_path)])
+        runner.invoke(cli, ["functions", "create", "--dir", str(tmp_path)])
 
         body = api.body_for("POST", "/v2/public/code/functions")
         assert body["source_mode"] == "git"
         assert body["slug"] == "enrich"
         assert body["runtime"] == "node22"
+
+
+def test_legacy_code_commands_preserve_json_and_function_semantics(
+    runner: CliRunner,
+    api: FakeApi,
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(cli, ["code", "init", "--slug", "legacy", "--dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "sanka functions" in result.stderr
+    result = runner.invoke(
+        cli,
+        ["--output", "json", "code", "push", "--dir", str(tmp_path), "--dry-run"],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["uploaded"] is False
+    assert api.calls == []

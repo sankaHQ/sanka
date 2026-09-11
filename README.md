@@ -3,8 +3,18 @@
 Sanka is a migration runtime with a finish line: inspect the source, review an
 immutable plan, apply that exact plan, and verify the result. The
 `sanka-cli` distribution contains the hosted command dispatcher, local
-migration engine, extension manager, connector host, and optional MCP
+migration engine, extension manager, data-extension host, and optional MCP
 integration behind one `sanka` executable.
+
+Sanka migrates systems and their data. Sanka Flow migrates and operates workflows.
+Sanka Code migrates applications and code. This repository owns their shared CLI
+and OSS runtime; repository and executable names do not define product boundaries.
+
+Extensions are installable capability packages. Systems are the configured databases,
+files, or SaaS accounts used in a migration. Moving PostgreSQL records belongs to
+Sanka; adapting an application's SQL/ORM belongs to Sanka Code. A project may need
+both. Installing an extension never implies successful system authentication.
+See [the naming contract](docs/public-naming.md) and [compatibility map](docs/naming-compatibility.md).
 
 Python 3.12 or newer is required.
 
@@ -56,7 +66,7 @@ sanka extension add sanka/sqlite
 
 Sanka verifies each manifest, URL, SHA-256 digest, runtime constraint, and
 wheel identity before installing it in an isolated environment. PyPI is not a
-connector fallback. Project pins live in `.sanka/extensions.lock`; marketplace
+data-extension fallback. Project pins live in `.sanka/extensions.lock`; marketplace
 snapshots and verified artifacts live under `~/.sanka/extensions` or
 `$SANKA_HOME/extensions`.
 
@@ -113,7 +123,7 @@ Authentication is selected after command routing:
 |---|---|---|
 | `scan`, `plan`, `validate`, `apply`, `test`, `verify`, `status`, `migrate`, `connect`, `extension` | local runtime or verified extension | never |
 | `plan`, `apply`, or `verify` with an explicit cloud selector | hosted migration API | required |
-| `auth`, resources, workflows, AI, Custom Code | hosted Sanka API | required where the command already requires it |
+| `auth`, resources, workflows, AI, `functions` (custom functions) | hosted Sanka API | required where the command already requires it |
 | research and assessment | public hosted API | not required |
 | `mcp` | local stdio server | public tools remain credential-free |
 
@@ -125,24 +135,34 @@ clients. They invoke `sanka <command> ... --json`; they do not install the CLI,
 reimplement migration behavior, or silently switch local commands to the
 hosted API.
 
-## Extensions and connectors
+## Extensions and systems
 
 The official component IDs are:
 
 | ID | Kind | Role |
 |---|---|---|
-| `sanka/drf-to-fastapi` | migration | DRF application to FastAPI |
-| `sanka/markdown` | connector | source |
-| `sanka/csv` | connector | source |
-| `sanka/sqlite` | connector | source and destination |
-| `sanka/postgres` | connector | source and destination |
-| `sanka/clickhouse` | connector | destination |
+| `sanka/drf-to-fastapi` | Code | DRF application to FastAPI |
+| `sanka/drf-to-flask` | Code | DRF application to Flask |
+| `sanka/markdown` | Data | source |
+| `sanka/csv` | Data | source |
+| `sanka/sqlite` | Data | source and destination |
+| `sanka/postgres` | Data | source and destination |
+| `sanka/clickhouse` | Data | destination |
 
-Migration extensions run through `sanka-extension/v1`. Connector wheels keep
+Code extensions run through `sanka-extension/v1`. Data extension wheels keep
 the typed `sanka.connectors` interface but load only inside a verified child
 environment; the main CLI process talks to one persistent host over
 `sanka-connector/v1`. Hosted providers such as HubSpot, Salesforce, and
 SendGrid remain in Sanka's managed service and are not local extensions.
+
+Custom functions use `sanka functions init|push|pull|diff|deploy|rollback`.
+The old `sanka code` group remains a compatibility alias with its existing behavior;
+Sanka Code application migrations use `scan`, `plan`, `apply`, `test`, and `verify`.
+
+The global `--base-url` override applies to anonymous research and assessment too:
+`sanka --base-url https://staging.example research eol --json`. It takes precedence
+over `SANKA_MIGRATE_API_BASE`; the global option accepts an API origin/path prefix,
+while that compatibility environment variable names the full migration-service URL.
 
 ## Python API
 
@@ -156,8 +176,8 @@ from sanka import Sanka
 
 async def main() -> None:
     with Sanka() as sanka:
-        source = sanka.connect("markdown", "./content")
-        target = sanka.connect("sqlite", "content.db")
+        source = sanka.configure_system("markdown", "./content")
+        target = sanka.configure_system("sqlite", "content.db")
         migration = sanka.migrate(source=source, target=target)
         plan = await migration.plan()
         await migration.apply(plan_hash=plan.plan_hash)
@@ -199,11 +219,11 @@ texts plus `NOTICE`:
 | Source zone | License |
 |---|---|
 | `packages/sanka-cli/src/sanka_cli` | Apache-2.0 |
-| `packages/sanka-cli/src/sanka_connector` | Apache-2.0 |
+| `packages/sanka-cli/src/sanka_data`, `packages/sanka-cli/src/sanka_connector` | Apache-2.0 |
 | `packages/sanka-cli/src/sanka` | AGPL-3.0-only |
 | `scripts`, `tests`, and `docs` | Apache-2.0 |
 
-The canonical Apache Connector SDK and provider sources remain in
+The canonical Apache Data Extension SDK and provider sources remain in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions). See
 [LICENSE](LICENSE), [architecture](docs/ARCHITECTURE.md), and
 [dependency review](docs/dependency-licenses.md).
@@ -216,9 +236,7 @@ make check
 make build-release
 ```
 
-`make check` expects the canonical Connector SDK at the sibling
-`../extensions/packages/sanka-connector-sdk/src/sanka_connector`; override
-`SANKA_CONNECTOR_SDK_SOURCE` only for another exact reviewed checkout. No local
-server or full migration is required for repository checks. See
-[releasing](docs/releasing.md) for the tag, OIDC, retirement, and rollback
-gates.
+`make check` expects the canonical Data Extension SDK at the sibling
+the immutable `extensions` commit recorded in `scripts/check_connector_sdk_sync.py`.
+The check validates both the canonical facade and compatibility implementation;
+`--upstream-repo` can point to an existing clone containing the pinned commit.

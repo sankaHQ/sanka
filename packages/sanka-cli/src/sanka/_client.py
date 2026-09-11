@@ -12,36 +12,76 @@ from typing import Any
 from sanka.runtime.engine import InspectionResult, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
 from sanka.runtime.planner import MigrationPlan
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import DataExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_connector import CredentialProvider
+from sanka_data import CredentialProvider
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Connection:
-    """A selected connector and its non-secret endpoint configuration.
+@dataclass(frozen=True, slots=True, kw_only=True, init=False)
+class SystemConfig:
+    """A named system endpoint and independent, non-secret configuration.
 
-    Creating a connection is write-free. It verifies that the provider is
-    installed and returns a descriptor that can be passed directly to
-    :meth:`Sanka.migrate`. Authentication and reachability are evaluated by the
-    migration lifecycle, never while selecting the provider.
+    Creating this descriptor never authenticates a system. Secret values stay
+    in environment variables or a managed credential store.
     """
 
-    provider: str
+    system_type: str
     roles: tuple[str, ...]
-    connection: str | None = None
+    endpoint_reference: str | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        *,
+        system_type: str | None = None,
+        roles: tuple[str, ...],
+        endpoint_reference: str | None = None,
+        options: Mapping[str, Any] | None = None,
+        provider: str | None = None,
+        connection: str | None = None,
+    ) -> None:
+        # Old Connection keyword arguments remain accepted without silently
+        # choosing one endpoint when a caller supplies conflicting identities.
+        if system_type is not None and provider is not None and system_type != provider:
+            raise ValueError("system_type and compatibility provider disagree")
+        if (
+            endpoint_reference is not None
+            and connection is not None
+            and endpoint_reference != connection
+        ):
+            raise ValueError("endpoint_reference and compatibility connection disagree")
+        selected_type = system_type if system_type is not None else provider
+        if selected_type is None or not selected_type.strip():
+            raise ValueError("system_type is required")
+        object.__setattr__(self, "system_type", selected_type)
+        object.__setattr__(self, "roles", roles)
+        object.__setattr__(
+            self,
+            "endpoint_reference",
+            endpoint_reference if endpoint_reference is not None else connection,
+        )
+        object.__setattr__(self, "options", dict(options or {}))
+
+    @property
+    def provider(self) -> str:
+        """Compatibility spelling for system_type."""
+        return self.system_type
+
+    @property
+    def connection(self) -> str | None:
+        """Compatibility spelling for endpoint_reference."""
+        return self.endpoint_reference
 
     def endpoint(self) -> EndpointSpec:
         return EndpointSpec(
-            type=self.provider,
-            connection=self.connection,
+            type=self.system_type,
+            connection=self.endpoint_reference,
             options=dict(self.options),
         )
 
 
-EndpointInput = str | Path | EndpointSpec | Connection
+EndpointInput = str | Path | EndpointSpec | SystemConfig
 
 
 class Migration:
@@ -106,7 +146,7 @@ class Sanka:
         credential_provider: CredentialProvider | None = None,
     ) -> None:
         self._store = SqliteStateStore(state)
-        self._registry = ConnectorRegistry.discover()
+        self._registry = DataExtensionRegistry.discover()
         self._engine = MigrationEngine(
             store=self._store,
             registry=self._registry,
@@ -116,31 +156,39 @@ class Sanka:
         )
         self._closed = False
 
+    def configure_system(
+        self,
+        system_type: str,
+        endpoint_reference: str | Path | None = None,
+        *,
+        options: Mapping[str, Any] | None = None,
+    ) -> SystemConfig:
+        """Configure a system supported by an installed data extension.
+
+        The endpoint reference is a path, URL, or named system reference.
+        Authentication and reachability are checked by the migration lifecycle.
+        """
+        self._ensure_open()
+        normalized = system_type.strip().lower()
+        if normalized == "postgresql":
+            normalized = "postgres"
+        roles = self._registry.roles(normalized)
+        return SystemConfig(
+            system_type=normalized,
+            roles=roles,
+            endpoint_reference=None if endpoint_reference is None else str(endpoint_reference),
+            options=options,
+        )
+
     def connect(
         self,
         provider: str,
         connection: str | Path | None = None,
         *,
         options: Mapping[str, Any] | None = None,
-    ) -> Connection:
-        """Select an installed migration connector.
-
-        ``connection`` is a path, URL, or named connection reference. Secret
-        values must stay in environment variables or a managed credential
-        store; the resulting descriptor may be persisted in a migration spec.
-        """
-        self._ensure_open()
-        normalized = provider.strip().lower()
-        if normalized == "postgresql":
-            normalized = "postgres"
-        roles = self._registry.roles(normalized)
-        connection_value = None if connection is None else str(connection)
-        return Connection(
-            provider=normalized,
-            roles=roles,
-            connection=connection_value,
-            options=dict(options or {}),
-        )
+    ) -> SystemConfig:
+        """Compatibility method for configure_system; does not authenticate."""
+        return self.configure_system(provider, connection, options=options)
 
     def migrate(
         self,
@@ -194,7 +242,7 @@ class Sanka:
 
 
 def _endpoint(value: EndpointInput, *, role: str) -> EndpointSpec:
-    if isinstance(value, Connection):
+    if isinstance(value, SystemConfig):
         return value.endpoint()
     if isinstance(value, EndpointSpec):
         return value
@@ -218,6 +266,10 @@ def _endpoint(value: EndpointInput, *, role: str) -> EndpointSpec:
         return EndpointSpec(type="sqlite", connection=str(path))
 
     raise SpecError(
-        f"cannot infer the {role} connector from {raw!r}; pass an EndpointSpec, "
+        f"cannot infer the {role} system type from {raw!r}; pass an EndpointSpec, "
         "a URL-style endpoint, or a supported local path"
     )
+
+
+# Compatibility import for clients using the original descriptor name.
+Connection = SystemConfig

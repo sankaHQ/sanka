@@ -17,7 +17,7 @@ from sanka.runtime.mapping import (
     relationship_source_ids,
     source_field_keys,
 )
-from sanka_connector import SourceFilter
+from sanka_data import SourceFilter
 
 
 @pytest.mark.parametrize(

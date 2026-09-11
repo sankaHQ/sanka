@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Sanka connector SPI: base protocols plus optional capability protocols.
+"""The Sanka system access interfaces: base protocols plus optional capability protocols.
 
-Base protocols carry the minimum a connector must implement. Everything else
+Base protocols carry the minimum a system reader or writer must implement. Everything else
 is an optional capability protocol the runtime discovers with ``isinstance``
-(all protocols here are ``runtime_checkable``) — never with ``getattr``. A
-connector advertises a capability by implementing the protocol; the runtime
+(all protocols here are ``runtime_checkable``) — never with ``getattr``. An
+extension advertises a capability by implementing the protocol; the runtime
 degrades gracefully when one is absent.
 
 PRD-verb mapping: ``inspect`` → :class:`SupportsIdentityInspection`,
@@ -39,11 +39,11 @@ from sanka_connector.records import (
     WriteOptions,
     WriteResult,
 )
-from sanka_connector.schema import Inventory, ProviderIdentity, SourceObject
+from sanka_connector.schema import Inventory, SourceObject, SystemIdentity
 
 
 @runtime_checkable
-class SourceConnector(Protocol):
+class SystemReader(Protocol):
     """Minimum contract for reading a system out."""
 
     provider: str
@@ -74,7 +74,7 @@ class SourceConnector(Protocol):
 
 
 @runtime_checkable
-class DestinationConnector(Protocol):
+class SystemWriter(Protocol):
     """Minimum contract for writing a system in."""
 
     provider: str
@@ -116,12 +116,12 @@ class SupportsIdentityInspection(Protocol):
     """Verify and read back the identity behind a connection (safety tenet:
     runs are pinned to a verified identity before any mutation)."""
 
-    async def inspect(self, credentials: Credentials) -> ProviderIdentity: ...
+    async def inspect(self, credentials: Credentials) -> SystemIdentity: ...
 
 
 @runtime_checkable
 class SupportsConfigValidation(Protocol):
-    """Self-check connector configuration/reachability without mutating."""
+    """Self-check system configuration/reachability without mutating."""
 
     async def validate(self, credentials: Credentials) -> list[str]: ...
 
@@ -204,9 +204,9 @@ class SupportsSnapshotBounds(Protocol):
     it — the basis of exact-scope, resumable execution.
 
     The union of :class:`SupportsHighWaterMark`, :class:`SupportsBoundedReads`
-    and :class:`SupportsBoundedCounts`: a connector implementing all three
+    and :class:`SupportsBoundedCounts`: an implementation supporting all three
     methods satisfies the refinements and this bundle alike. Runtimes may
-    probe per method via the refinements; connectors that can only offer a
+    probe per method via the refinements; implementations that can only offer a
     subset implement just the matching refinements."""
 
     async def high_water_mark(
@@ -309,9 +309,9 @@ class SupportsSchemaProvisioning(Protocol):
     ``confirm=False`` must be a pure dry run.
 
     The union of :class:`SupportsPropertyProvisioning` and
-    :class:`SupportsResourceProvisioning`: a connector implementing both
+    :class:`SupportsResourceProvisioning`: an implementation supporting both
     methods satisfies the refinements and this bundle alike. Runtimes may
-    probe per method via the refinements; connectors that can only offer one
+    probe per method via the refinements; implementations that can only offer one
     side implement just the matching refinement."""
 
     async def reconcile_properties(
@@ -337,3 +337,8 @@ class SupportsRetryMetrics(Protocol):
     """Either side: expose transport retry/throttle counters for run reports."""
 
     def retry_metrics(self) -> dict[str, Any]: ...
+
+
+# Published compatibility names; both spellings identify the same classes.
+SourceConnector = SystemReader
+DestinationConnector = SystemWriter

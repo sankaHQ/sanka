@@ -2828,3 +2828,117 @@ def test_late_environment_filesystem_failure_is_one_clean_cli_json_error(
     assert payload["schema_version"] == "sanka-cli/v1"
     assert payload["command"] == "extension"
     assert payload["data"]["error"]["code"] == "SANKA_EXTENSION_IO"
+
+
+def _two_data_extensions(root: Path) -> tuple[Path, dict[str, bytes]]:
+    source, wheels = _connector_marketplace(root)
+    manifest = json.loads((source / "example-connector.json").read_text())
+    manifest["id"] = "other/data-tools"
+    (source / "other.json").write_text(json.dumps(manifest))
+    catalog = json.loads((source / "marketplace.json").read_text())
+    catalog["extensions"].append({"id": "other/data-tools", "manifest": "other.json"})
+    (source / "marketplace.json").write_text(json.dumps(catalog))
+    return source, wheels
+
+
+def test_conflicting_system_claim_fails_before_download_or_state_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, wheels = _two_data_extensions(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, wheels)
+    original = store.add_extension("example/connector")
+    prior_lock = store._project_lock_path.read_bytes()
+    prior_installations = store._installation_path.read_bytes()
+    monkeypatch.setattr(store, "_cache_wheel", lambda _wheel: pytest.fail("download attempted"))
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("other/data-tools")
+
+    assert raised.value.code == "SANKA_EXTENSION_SYSTEM_CONFLICT"
+    assert raised.value.details == {
+        "extension_id": "other/data-tools",
+        "conflicting_extension_id": "example/connector",
+        "system_types": ["example"],
+    }
+    assert store._project_lock_path.read_bytes() == prior_lock
+    assert store._installation_path.read_bytes() == prior_installations
+    assert store.resolve_locked(original.id) == original
+
+
+def test_readding_disabled_extension_checks_system_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    source, wheels = _two_data_extensions(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, wheels)
+    original = store.add_extension("example/connector")
+    store._write_lock({original.id: replace(original, enabled=False)})
+    store.add_extension("other/data-tools")
+    monkeypatch.setattr(store, "_cache_wheel", lambda _wheel: pytest.fail("download attempted"))
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension(original.id)
+
+    assert raised.value.code == "SANKA_EXTENSION_SYSTEM_CONFLICT"
+    assert store._load_lock()[original.id].enabled is False
+
+
+@pytest.mark.parametrize("system_type", ["hubspot", "salesforce", "sendgrid"])
+def test_reserved_hosted_system_claim_fails_before_download(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    system_type: str,
+) -> None:
+    source, _wheels = _connector_marketplace(tmp_path / "source")
+    path = source / "example-connector.json"
+    manifest = json.loads(path.read_text())
+    manifest["providers"][0]["name"] = system_type
+    manifest["distribution"]["entry_point"] = system_type
+    path.write_text(json.dumps(manifest))
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    monkeypatch.setattr(store, "_cache_wheel", lambda _wheel: pytest.fail("download attempted"))
+
+    with pytest.raises(ExtensionError) as raised:
+        store.add_extension("example/connector")
+
+    assert raised.value.code == "SANKA_EXTENSION_SYSTEM_RESERVED"
+    assert raised.value.details["system_types"] == [system_type]
+    assert store._load_lock() == {}
+
+
+def test_system_metadata_uses_manifest_distribution_for_third_party_extension(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sanka.runtime.registry import DataExtensionRegistry
+
+    source, wheels = _connector_marketplace(tmp_path / "source")
+    project = tmp_path / "project"
+    store = ExtensionStore(project, user_root=tmp_path / "home")
+    store.add_marketplace(source, name="fixtures", trust=True)
+    _responses(monkeypatch, wheels)
+    store.add_extension("example/connector")
+    registry = DataExtensionRegistry(
+        {},
+        resolver=store.resolve_data_extension,
+        providers=store.supported_systems(),
+        owner=store,
+    )
+    try:
+        assert registry.roles("example") == ("source",)
+        assert registry.extension_metadata("example") == {
+            "extension_id": "example/connector",
+            "extension_version": "0.1.0",
+            "package": "example-connector",
+            "package_version": "0.1.0",
+        }
+    finally:
+        registry.close()

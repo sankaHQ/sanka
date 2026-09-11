@@ -31,7 +31,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.tags import parse_tag, sys_tags
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
-from sanka.runtime.connector_client import ConnectorHostClient, build_remote_connector
+from sanka.runtime.connector_client import DataExtensionHostClient, build_remote_data_extension
 from sanka.runtime.extensions.discovery import (
     IDENTIFIER,
     STATUS_ORDER,
@@ -46,13 +46,13 @@ from sanka.runtime.extensions.model import (
     ExtensionError,
     Fingerprint,
     Manifest,
-    Provider,
     Recommendation,
+    SystemSupport,
     Wheel,
 )
 from sanka.runtime.hashing import content_hash
 from sanka_cli import __version__
-from sanka_connector import ENTRY_POINT_GROUP, ConnectorRegistration
+from sanka_data import ENTRY_POINT_GROUP, DataExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
@@ -366,7 +366,7 @@ class ExtensionRecord:
     marketplace_identity: str
     manifest_digest: str
     kind: str
-    providers: tuple[Provider, ...]
+    providers: tuple[SystemSupport, ...]
     targets: tuple[str, ...]
     status: tuple[str, ...]
     wheels: tuple[Wheel, ...]
@@ -399,7 +399,7 @@ class LockEntry:
     configuration_digest: str
     kind: str = "migration"
     entry_point: str | None = None
-    providers: tuple[Provider, ...] = ()
+    providers: tuple[SystemSupport, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {
@@ -927,7 +927,7 @@ class ExtensionStore:
         self._installation_path = self.user_root / "installations.json"
         self._disabled_path = self.user_root / "disabled.json"
         self._project_lock_path = self.project_root / ".sanka" / "extensions.lock"
-        self._connector_clients: dict[str, ConnectorHostClient] = {}
+        self._connector_clients: dict[str, DataExtensionHostClient] = {}
 
     def close(self) -> None:
         for client in self._connector_clients.values():
@@ -1853,7 +1853,7 @@ class ExtensionStore:
                     path=str(path),
                 )
             providers = tuple(
-                Provider(
+                SystemSupport(
                     provider["name"],
                     tuple(role for role in ("source", "destination") if role in provider["roles"]),
                 )
@@ -2594,7 +2594,7 @@ class ExtensionStore:
     def _wheel_connector_entry_points(
         self,
         wheels: tuple[tuple[Path, str], ...],
-        providers: tuple[Provider, ...],
+        providers: tuple[SystemSupport, ...],
     ) -> dict[str, str]:
         connector_entries: dict[str, str] = {}
         scripts: list[str] = []
@@ -2735,7 +2735,7 @@ class ExtensionStore:
         executable: str | None,
         wheels: tuple[tuple[Path, str], ...],
         *,
-        providers: tuple[Provider, ...] = (),
+        providers: tuple[SystemSupport, ...] = (),
     ) -> None:
         entry_point = self._wheel_entry_point(wheels, executable) if executable else None
         if executable is None:
@@ -2811,7 +2811,7 @@ class ExtensionStore:
         wheels: tuple[tuple[Path, str], ...],
         *,
         expected_digest: str | None = None,
-        providers: tuple[Provider, ...] = (),
+        providers: tuple[SystemSupport, ...] = (),
     ) -> Path:
         root = self._confined(
             self.user_root,
@@ -3036,6 +3036,7 @@ class ExtensionStore:
                 )
             installations = self._load_installations()
             disabled = self._load_disabled()
+            self._validate_system_claims(manifest, self._load_lock(), disabled)
             selected_wheels = self._select_compatible_wheels(manifest)
             cached = tuple(self._cache_wheel(wheel) for wheel in selected_wheels)
             requirements = {}
@@ -3434,7 +3435,79 @@ class ExtensionStore:
     def _connector_site_packages(environment: Path) -> Path:
         return environment / ExtensionStore._site_packages_relative()
 
-    def connector_providers(self) -> tuple[str, ...]:
+    @staticmethod
+    def _validate_system_claims(
+        manifest: Manifest,
+        entries: Mapping[str, LockEntry],
+        disabled: set[str],
+    ) -> None:
+        """Validate activation before downloading wheels or changing installed state.
+
+        Adding an existing disabled extension also re-enables it, so both paths
+        pass through this check while holding the installation and project locks.
+        """
+        if manifest.kind != "connector":
+            return
+        from sanka.runtime.registry import HOSTED_SYSTEM_PROVIDERS
+
+        requested = {system.name for system in manifest.providers}
+        reserved = sorted(requested.intersection(HOSTED_SYSTEM_PROVIDERS))
+        if reserved:
+            _error(
+                "SANKA_EXTENSION_SYSTEM_RESERVED",
+                "These system types run through the hosted System Migration API",
+                extension_id=manifest.id,
+                system_types=reserved,
+            )
+        for entry in sorted(entries.values(), key=lambda item: item.id):
+            if (
+                entry.id == manifest.id
+                or entry.kind != "connector"
+                or not entry.enabled
+                or entry.id in disabled
+            ):
+                continue
+            overlap = sorted(requested.intersection(system.name for system in entry.providers))
+            if overlap:
+                _error(
+                    "SANKA_EXTENSION_SYSTEM_CONFLICT",
+                    "A system type already has an enabled data extension; remove it first",
+                    extension_id=manifest.id,
+                    conflicting_extension_id=entry.id,
+                    system_types=overlap,
+                )
+
+    def _system_lock(self, system_type: str) -> LockEntry:
+        disabled = self._load_disabled()
+        selected = [
+            entry
+            for entry in self._load_lock().values()
+            if entry.kind == "connector"
+            and entry.enabled
+            and entry.id not in disabled
+            and any(item.name == system_type for item in entry.providers)
+        ]
+        if len(selected) != 1:
+            code = "SANKA_EXTENSION_REQUIRED" if not selected else "SANKA_EXTENSION_IDENTITY"
+            _error(
+                code,
+                "System type must resolve to one enabled data extension",
+                system_type=system_type,
+                extension_ids=sorted(entry.id for entry in selected),
+            )
+        return selected[0]
+
+    def system_extension_metadata(self, system_type: str) -> dict[str, str]:
+        entry = self.resolve_locked(self._system_lock(system_type).id)
+        manifest = self._manifest_for_lock(entry)
+        return {
+            "extension_id": entry.id,
+            "extension_version": entry.version,
+            "package": manifest.distribution,
+            "package_version": manifest.distribution_version,
+        }
+
+    def supported_systems(self) -> tuple[str, ...]:
         disabled = self._load_disabled()
         return tuple(
             sorted(
@@ -3448,22 +3521,8 @@ class ExtensionStore:
         )
 
     @_store_operation
-    def resolve_connector(self, provider: str) -> ConnectorRegistration:
-        selected = [
-            entry
-            for entry in self._load_lock().values()
-            if entry.kind == "connector"
-            and entry.enabled
-            and any(item.name == provider for item in entry.providers)
-        ]
-        if len(selected) != 1:
-            code = "SANKA_EXTENSION_REQUIRED" if not selected else "SANKA_EXTENSION_IDENTITY"
-            _error(
-                code,
-                "Connector provider must resolve to one enabled project lock",
-                provider=provider,
-            )
-        entry = self.resolve_locked(selected[0].id)
+    def resolve_data_extension(self, provider: str) -> DataExtensionRegistration:
+        entry = self.resolve_locked(self._system_lock(provider).id)
         manifest = self._manifest_for_lock(entry)
         declared = next(item for item in manifest.providers if item.name == provider)
         environment = self._confined(
@@ -3480,7 +3539,7 @@ class ExtensionStore:
         )
         client = self._connector_clients.get(entry.artifact_digest)
         if client is None:
-            client = ConnectorHostClient(sys.executable, environment=site_packages)
+            client = DataExtensionHostClient(sys.executable, environment=site_packages)
             self._connector_clients[entry.artifact_digest] = client
         description = client.request(provider, "describe", {})
         if (
@@ -3496,20 +3555,24 @@ class ExtensionStore:
                 provider=provider,
             )
         source = (
-            build_remote_connector(client, provider, "source", description=description)
+            build_remote_data_extension(client, provider, "source", description=description)
             if "source" in declared.roles
             else None
         )
         destination = (
-            build_remote_connector(client, provider, "destination", description=description)
+            build_remote_data_extension(client, provider, "destination", description=description)
             if "destination" in declared.roles
             else None
         )
-        return ConnectorRegistration(
+        return DataExtensionRegistration(
             name=provider,
             source=cast(Any, source),
             destination=cast(Any, destination),
         )
+
+    # Compatibility method names for existing runtime consumers.
+    connector_providers = supported_systems
+    resolve_connector = resolve_data_extension
 
 
 __all__ = [

@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from sanka.runtime.mapping.record_mapping import mapping_group_key
 from sanka.runtime.private_sqlite import connect_private_sqlite
-from sanka_connector.records import BatchWriteStatus
+from sanka_data.records import BatchWriteStatus
 
 if TYPE_CHECKING:
     from sanka.runtime.execution.local import SqliteExecutionState

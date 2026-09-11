@@ -55,7 +55,7 @@ from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
 from sanka.runtime.extensions.runner import ExtensionResult
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.planner import MigrationPlan
-from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
+from sanka.runtime.registry import DataExtensionRegistry, UnknownSystemError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import SqliteStateStore
 
@@ -83,12 +83,13 @@ class _CliArgumentParser(argparse.ArgumentParser):
         super().error(message)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, api_base: str | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     json_errors = "--json" in arguments or "--compact-dsl" in arguments
     parser = _build_parser(json_errors=json_errors)
     try:
         args = parser.parse_args(arguments)
+        args.api_base = api_base
     except CliUsageError as error:
         command = arguments[0] if arguments and arguments[0] in SDK_COMMANDS else "sanka"
         return _print_cli_error(
@@ -121,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (
         SpecError,
-        UnknownConnectorError,
+        UnknownSystemError,
         ExecutionError,
         FileNotFoundError,
     ) as error:
@@ -400,7 +401,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
 
     test = commands.add_parser(
         "test",
-        help="generate and run unit tests for the created FastAPI app",
+        help="generate and run tests for the converted application",
         description=(
             "Prepare the generated uv or pip environment, write generated-app tests, and run "
             "them. This proves generated scope, not source parity."
@@ -550,9 +551,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
 
     connect = commands.add_parser(
         "connect",
-        help="select an installed connector and show its supported migration roles",
+        help="inspect installed data extension support; does not authenticate a system",
     )
-    connect.add_argument("provider", help="local provider slug, e.g. markdown or postgres")
+    connect.add_argument("provider", help="system type, e.g. markdown or postgres")
     connect.add_argument("--json", action="store_true", help="print provider details as JSON")
     connect.set_defaults(handler=_cmd_connect)
 
@@ -668,13 +669,20 @@ def _research_output_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="print the API data payload as JSON")
 
 
-def _research_client() -> SankaMigrateApiClient:
+def _research_client(api_base: str | None = None) -> SankaMigrateApiClient:
+    # The shared CLI option names an API origin (optionally with a path prefix).
+    # The older SANKA_MIGRATE_API_BASE setting continues to name the full service root.
+    if api_base:
+        base = api_base.rstrip("/")
+        if not base.endswith("/v2/migrate"):
+            base += "/v2/migrate"
+        return SankaMigrateApiClient(base_url=base)
     return SankaMigrateApiClient()
 
 
 def _engine(state_path: str) -> MigrationEngine:
     return MigrationEngine(
-        store=SqliteStateStore(state_path), registry=ConnectorRegistry.discover()
+        store=SqliteStateStore(state_path), registry=DataExtensionRegistry.discover()
     )
 
 
@@ -696,7 +704,9 @@ def _extension_result(
             [
                 (
                     str(record.get("id", "")),
-                    str(record.get("kind", "")),
+                    {"connector": "Data", "migration": "Code"}.get(
+                        str(record.get("kind", "")), str(record.get("kind", ""))
+                    ),
                     str(record.get("version", "")),
                     ", ".join(map(str, record.get("status", []))),
                     str(record.get("marketplace", "")),
@@ -791,22 +801,29 @@ async def _cmd_extension_marketplace_remove(args: argparse.Namespace) -> int:
 
 
 async def _cmd_connect(args: argparse.Namespace) -> int:
-    registry = ConnectorRegistry.discover()
-    provider = str(args.provider).strip().lower()
-    if provider == "postgresql":
-        provider = "postgres"
-    roles = list(registry.roles(provider))
-    payload = {
-        "provider": provider,
-        "roles": roles,
-        "installed": True,
-        "package": f"sanka-connector-{provider}",
-    }
+    registry = DataExtensionRegistry.discover()
+    system_type = str(args.provider).strip().lower()
+    if system_type == "postgresql":
+        system_type = "postgres"
+    try:
+        roles = list(registry.roles(system_type))
+        payload = {
+            "provider": system_type,  # Compatibility JSON key.
+            "system_type": system_type,
+            "roles": roles,
+            "installed": True,
+            "connection_status": "not_checked",
+            **registry.extension_metadata(system_type),
+        }
+    finally:
+        registry.close()
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(f"{provider}: ready ({', '.join(roles)})")
-        print(f"provided by installed package sanka-connector-{provider}")
+        print(f"{system_type}: extension installed ({', '.join(roles)})")
+        if payload.get("package"):
+            print(f"extension {payload['extension_id']}; package {payload['package']}")
+        print("System authentication and reachability have not been checked.")
     return 0
 
 
@@ -1149,7 +1166,7 @@ async def _cmd_migrate(args: argparse.Namespace) -> int:
 
 async def _cmd_research_eol(args: argparse.Namespace) -> int:
     data = await asyncio.to_thread(
-        _research_client().research_eol,
+        _research_client(getattr(args, "api_base", None)).research_eol,
         product=args.product,
         category=args.category,
         event_type=args.type,
@@ -1162,7 +1179,7 @@ async def _cmd_research_eol(args: argparse.Namespace) -> int:
 
 async def _cmd_research_tco(args: argparse.Namespace) -> int:
     data = await asyncio.to_thread(
-        _research_client().research_tco,
+        _research_client(getattr(args, "api_base", None)).research_tco,
         product=args.product,
         category=args.category,
         locale=args.locale,
@@ -1177,7 +1194,7 @@ async def _cmd_research_compare(args: argparse.Namespace) -> int:
             "--platforms accepts at most 10 comma-separated values.",
         )
     data = await asyncio.to_thread(
-        _research_client().research_compare,
+        _research_client(getattr(args, "api_base", None)).research_compare,
         category=args.category,
         platforms=args.platforms,
         locale=args.locale,
@@ -1209,7 +1226,7 @@ async def _cmd_assess(args: argparse.Namespace) -> int:
     if elapsed_ms < 2000:
         await asyncio.sleep((2000 - elapsed_ms) / 1000)
     data = await asyncio.to_thread(
-        _research_client().assess,
+        _research_client(getattr(args, "api_base", None)).assess,
         {
             "source": args.source,
             "destination": args.destination or "",

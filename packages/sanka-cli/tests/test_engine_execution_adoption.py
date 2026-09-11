@@ -20,15 +20,14 @@ from sanka.runtime.execution import ExecutionSnapshot, JournalEntry, exact_candi
 from sanka.runtime.mapping.model import MigrationMappingField
 from sanka.runtime.mapping.record_mapping import mapping_group_key
 from sanka.runtime.planner import MigrationPlan, RoutePlan
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import DataExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_connector import (
+from sanka_data import (
     BatchWriteInput,
     BatchWriteResult,
-    ConnectorError,
-    ConnectorRegistration,
     Credentials,
+    DataExtensionRegistration,
     ErrorCategory,
     FieldSchema,
     Inventory,
@@ -39,6 +38,7 @@ from sanka_connector import (
     RelationshipWriteResult,
     SourceFilter,
     SourceObject,
+    SystemAccessError,
     WriteOptions,
     WriteResult,
 )
@@ -115,7 +115,7 @@ class MemorySource:
     ) -> RecordPage:
         self.read_requests.append((object_type, cursor))
         if self.fail_at_cursor is not None and cursor == self.fail_at_cursor:
-            raise ConnectorError(
+            raise SystemAccessError(
                 "simulated source outage",
                 category=ErrorCategory.TRANSIENT,
                 retryable=False,
@@ -292,10 +292,10 @@ def _engine(
     *,
     batch_size: int = 100,
 ) -> MigrationEngine:
-    registry = ConnectorRegistry(
+    registry = DataExtensionRegistry(
         {
-            "memsrc": ConnectorRegistration(name="memsrc", source=source),
-            "memdst": ConnectorRegistration(name="memdst", destination=destination),
+            "memsrc": DataExtensionRegistration(name="memsrc", source=source),
+            "memdst": DataExtensionRegistration(name="memdst", destination=destination),
         }
     )
     return MigrationEngine(

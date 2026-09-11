@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 RESTRICTED_ZONES = {
+    "packages/sanka-cli/src/sanka_data": "Data Extension SDK cannot import the AGPL runtime",
     "packages/sanka-cli/src/sanka_cli/mcp": ("MCP integration cannot import the AGPL runtime"),
     "packages/sanka-cli/src/sanka_connector": ("Connector SDK cannot import the AGPL runtime"),
 }

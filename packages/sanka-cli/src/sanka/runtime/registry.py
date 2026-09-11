@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Connector lookup through verified extension-store subprocess hosts."""
+"""Data extension lookup through verified extension-store subprocess hosts."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_connector import ConnectorRegistration
-from sanka_connector.protocols import DestinationConnector, SourceConnector
+from sanka_data import DataExtensionRegistration
+from sanka_data.protocols import SystemReader, SystemWriter
 
 HOSTED_SYSTEM_PROVIDERS = {
     "hubspot": "HubSpot",
@@ -18,16 +18,16 @@ HOSTED_SYSTEM_PROVIDERS = {
 }
 
 
-class UnknownConnectorError(ValueError):
-    """No installed local connector exposes the requested type."""
+class UnknownSystemError(ValueError):
+    """No installed local data extension exposes the requested type."""
 
 
-class ConnectorRegistry:
+class DataExtensionRegistry:
     def __init__(
         self,
-        registrations: dict[str, ConnectorRegistration],
+        registrations: dict[str, DataExtensionRegistration],
         *,
-        resolver: Callable[[str], ConnectorRegistration] | None = None,
+        resolver: Callable[[str], DataExtensionRegistration] | None = None,
         providers: tuple[str, ...] = (),
         owner: Any | None = None,
     ) -> None:
@@ -48,10 +48,10 @@ class ConnectorRegistry:
     @classmethod
     def discover(
         cls,
-        resolver: Callable[[str], ConnectorRegistration] | None = None,
+        resolver: Callable[[str], DataExtensionRegistration] | None = None,
         *,
         providers: tuple[str, ...] = (),
-    ) -> ConnectorRegistry:
+    ) -> DataExtensionRegistry:
         if resolver is not None:
             return cls({}, resolver=resolver, providers=providers)
         from sanka.runtime.extensions.store import ExtensionStore
@@ -59,8 +59,8 @@ class ConnectorRegistry:
         store = ExtensionStore(Path.cwd())
         return cls(
             {},
-            resolver=store.resolve_connector,
-            providers=store.connector_providers(),
+            resolver=store.resolve_data_extension,
+            providers=store.supported_systems(),
             owner=store,
         )
 
@@ -82,25 +82,31 @@ class ConnectorRegistry:
             roles.append("destination")
         return tuple(roles)
 
-    def source(self, type_name: str) -> SourceConnector:
+    def extension_metadata(self, type_name: str) -> dict[str, str]:
+        """Return locked package identity when discovery is backed by an extension store."""
+        if self._owner is None:
+            return {}
+        return dict(self._owner.system_extension_metadata(type_name.strip().lower()))
+
+    def source(self, type_name: str) -> SystemReader:
         registration = self._get(type_name)
         if registration.source is None:
-            raise UnknownConnectorError(f"connector {type_name!r} has no source role")
+            raise UnknownSystemError(f"system type {type_name!r} has no source role")
         return registration.source
 
-    def destination(self, type_name: str) -> DestinationConnector:
+    def destination(self, type_name: str) -> SystemWriter:
         registration = self._get(type_name)
         if registration.destination is None:
-            raise UnknownConnectorError(f"connector {type_name!r} has no destination role")
+            raise UnknownSystemError(f"system type {type_name!r} has no destination role")
         return registration.destination
 
-    def _get(self, type_name: str) -> ConnectorRegistration:
+    def _get(self, type_name: str) -> DataExtensionRegistration:
         normalized = type_name.strip().lower()
         if normalized in HOSTED_SYSTEM_PROVIDERS:
             provider = HOSTED_SYSTEM_PROVIDERS[normalized]
-            raise UnknownConnectorError(
+            raise UnknownSystemError(
                 f"{provider} system migrations run through Sanka's hosted System "
-                "Migration API, not a local connector; use the Sanka web app or hosted API"
+                "Migration API, not a local data extension; use the Sanka web app or hosted API"
             )
         registration = self._registrations.get(normalized)
         if registration is not None:
@@ -115,12 +121,17 @@ class ConnectorRegistry:
                 if registration.name.strip().lower() != normalized:
                     raise ExtensionError(
                         "SANKA_EXTENSION_IDENTITY",
-                        "Connector registration differs from the locked provider",
+                        "Data extension registration differs from the locked provider",
                     )
                 self._registrations[normalized] = registration
                 return registration
         available = ", ".join(self.names()) or "none"
-        raise UnknownConnectorError(
-            f"no installed connector for type {type_name!r} (available: {available}); "
+        raise UnknownSystemError(
+            f"no installed data extension for system type {type_name!r} (available: {available}); "
             f"run `sanka extension add sanka/{normalized}`"
         )
+
+
+# Compatibility imports for existing clients.
+ConnectorRegistry = DataExtensionRegistry
+UnknownConnectorError = UnknownSystemError

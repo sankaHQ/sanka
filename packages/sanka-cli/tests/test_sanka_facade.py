@@ -13,7 +13,7 @@ import sanka_cli
 import sanka_cli.mcp
 from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
 from sanka.runtime.extensions.store import ExtensionStore
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import DataExtensionRegistry
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
@@ -67,15 +67,15 @@ def test_sanka_connect_selects_an_installed_provider(tmp_path: Path) -> None:
 def test_sanka_connect_rejects_an_unknown_provider(tmp_path: Path) -> None:
     with (
         Sanka(state=tmp_path / "state.db") as client,
-        pytest.raises(sanka.UnknownConnectorError, match="not-a-provider"),
+        pytest.raises(sanka.UnknownSystemError, match="not-a-provider"),
     ):
         client.connect("not-a-provider")
 
 
-def test_sanka_connect_routes_system_providers_to_the_hosted_api(tmp_path: Path) -> None:
+def test_sanka_connect_rejects_hosted_systems_without_cloud_dispatch(tmp_path: Path) -> None:
     with (
         Sanka(state=tmp_path / "state.db") as client,
-        pytest.raises(sanka.UnknownConnectorError, match="hosted System Migration API"),
+        pytest.raises(sanka.UnknownSystemError, match="hosted System Migration API"),
     ):
         client.connect("hubspot")
 
@@ -167,9 +167,9 @@ def test_sanka_context_closes_owned_connector_store_once(
     host = Host()
     store = Store(tmp_path / "project", user_root=tmp_path / "user")
     store._connector_clients["artifact"] = host  # type: ignore[assignment]
-    registry = ConnectorRegistry({}, owner=store)
+    registry = DataExtensionRegistry({}, owner=store)
     monkeypatch.setattr(
-        ConnectorRegistry,
+        DataExtensionRegistry,
         "discover",
         classmethod(lambda _cls: registry),
     )
@@ -183,3 +183,28 @@ def test_sanka_context_closes_owned_connector_store_once(
     client.close()
     assert store.close_calls == 1
     assert host.close_calls == 1
+
+
+def test_configured_systems_keep_independent_endpoints_and_options(tmp_path: Path) -> None:
+    options = {"schema": "public"}
+    with Sanka(state=tmp_path / "state.db") as client:
+        production = client.configure_system("postgres", "production-db", options=options)
+        staging = client.configure_system("postgres", "staging-db", options={"schema": "test"})
+        legacy = client.connect(provider="postgres", connection="production-db", options=options)
+    options["schema"] = "changed-after-configuration"
+    assert isinstance(production, sanka.SystemConfig)
+    assert production == legacy
+    assert production.endpoint_reference == "production-db"
+    assert staging.endpoint_reference == "staging-db"
+    assert production.endpoint().options == {"schema": "public"}
+    assert staging.endpoint().options == {"schema": "test"}
+
+
+def test_compatibility_system_keywords_cannot_override_a_different_endpoint() -> None:
+    with pytest.raises(ValueError, match="disagree"):
+        sanka.SystemConfig(
+            system_type="postgres",
+            roles=("source",),
+            endpoint_reference="production-db",
+            connection="staging-db",
+        )

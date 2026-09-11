@@ -62,7 +62,7 @@ from sanka.runtime.execution.routes import (
 )
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.record_mapping import destination_properties, relationship_source_ids
-from sanka_connector import Credentials, SourceConnector
+from sanka_data import Credentials, SystemReader
 
 DEFAULT_VALIDATION_SAMPLE_SIZE = 10
 """Records sampled per route — the production dry-run ``maxRecords`` default."""
@@ -162,7 +162,7 @@ def validation_reason(rejection: Mapping[str, Any]) -> dict[str, Any]:
 async def validate_routes(
     *,
     routes: Sequence[ExecutionRoute],
-    source: SourceConnector,
+    source: SystemReader,
     source_credentials: Credentials,
     sample_size: int = DEFAULT_VALIDATION_SAMPLE_SIZE,
     full: bool = False,

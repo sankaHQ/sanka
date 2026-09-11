@@ -23,7 +23,7 @@ from sanka.runtime.execution import (
     frozen_route_totals,
 )
 from sanka.runtime.mapping import MigrationMappingField, mapping_groups, mapping_route_manifest
-from sanka_connector import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_data import Credentials, RecordPage, SourceFilter, SourceObject
 
 _CREDENTIALS = Credentials(provider="fake")
 
@@ -57,7 +57,7 @@ def _filtered_account_fields() -> list[MigrationMappingField]:
 
 
 class FakeSource:
-    """Minimum SourceConnector; capability subclasses add scope methods."""
+    """Minimum SystemReader; capability subclasses add scope methods."""
 
     provider = "fake-source"
     binding_kind = "api_token"

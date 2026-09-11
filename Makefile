@@ -27,6 +27,7 @@ headers:
 
 naming:
 	$(UV) run python scripts/check_public_naming.py
+	$(UV) run python scripts/check_extension_terminology.py
 
 licenses:
 	$(UV) run python scripts/check_dependency_licenses.py

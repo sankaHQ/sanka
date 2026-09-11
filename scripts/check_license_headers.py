@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 LICENSE_ZONES: list[tuple[str, str]] = [
+    ("packages/sanka-cli/src/sanka_data", "Apache-2.0"),
     ("packages/sanka-cli/src/sanka_cli", "Apache-2.0"),
     ("packages/sanka-cli/src/sanka_connector", "Apache-2.0"),
     ("packages/sanka-cli/src/sanka", "AGPL-3.0-only"),

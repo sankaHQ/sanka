@@ -46,3 +46,12 @@ Work in the reported target location and establish native boot early. Use `--ben
 Use task-selected types and connection references in `sanka.yaml`. Plan, then `sanka validate --json` without destination writes, apply the reviewed hash, and verify. Inspect failures before retrying writes.
 
 Review mappings, readiness, limitations, output, and exact hash before apply. Honor existing authorization for isolated generation. Data transfers and production writes require explicit authorization for the reviewed operation; re-review changed plans and seek approval for expanded effects. Install only required trusted extensions. Never expose credentials in arguments, logs, artifacts, or reports.
+
+## Products, extensions, and systems
+
+The shared CLI serves Sanka system/data migrations, Sanka Flow workflow operations,
+and Sanka Code application migrations. Extensions add Data or Code capabilities;
+systems identify configured database/account endpoints. Installation does not
+authenticate a system. PostgreSQL record transfer is data migration; application
+SQL/ORM conversion is code migration. Use `sanka functions` for custom functions;
+`sanka code` is only the compatibility alias for those existing operations.

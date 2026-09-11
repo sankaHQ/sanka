@@ -1,14 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Fail when the embedded Connector SDK drifts from its canonical snapshot."""
+"""Verify the embedded Data Extension SDK against an immutable upstream commit."""
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
+import re
+import subprocess
+import tempfile
 from pathlib import Path
 
-EMBEDDED_SHA256 = "728ea85636d191d3bd2a13bfeee48cc8e60d89ea6c5e39e887ef6a40f55e19c9"
-EXTENSIONS_REVISION = "0852273fbddd614c03486b3d834f69b10331ecab"
+EMBEDDED_SHA256 = "c28783f095bcf9e23086d0517d33d33c64a4c4c7a51a5d9af1abecc68d5107f1"
+EXTENSIONS_REVISION = "d40692bf89339cd77fb330e1854460b221ac86cc"
+SDK_NAMESPACES = ("sanka_connector", "sanka_data")
+UPSTREAM_SDK_PATH = "packages/sanka-connector-sdk/src"
 
 
 def _python_tree(root: Path) -> dict[Path, bytes]:
@@ -29,9 +35,9 @@ def compare_python_trees(canonical: Path, embedded: Path) -> list[str]:
     ]
 
 
-def python_tree_sha256(root: Path) -> str:
+def _digest(files: dict[Path, bytes]) -> str:
     digest = hashlib.sha256()
-    for path, contents in sorted(_python_tree(root).items()):
+    for path, contents in sorted(files.items()):
         digest.update(path.as_posix().encode())
         digest.update(b"\0")
         digest.update(contents)
@@ -39,18 +45,106 @@ def python_tree_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
+def python_tree_sha256(root: Path) -> str:
+    return _digest(_python_tree(root))
+
+
+def _sdk_files(root: Path) -> dict[Path, bytes]:
+    return {
+        Path(namespace) / name: contents
+        for namespace in SDK_NAMESPACES
+        for name, contents in _python_tree(root / namespace).items()
+    }
+
+
+def upstream_files(repository: Path, revision: str) -> dict[Path, bytes]:
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("SDK source revision must be a full immutable commit ID")
+    commit = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", f"{revision}^{{commit}}"],
+        text=True,
+    ).strip()
+    if commit != revision:
+        raise ValueError("SDK source revision is not the selected commit")
+    prefix = UPSTREAM_SDK_PATH + "/"
+    records = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "ls-tree",
+            "-r",
+            "-z",
+            revision,
+            "--",
+            *(prefix + namespace for namespace in SDK_NAMESPACES),
+        ]
+    )
+    result = {}
+    for record in records.split(b"\0"):
+        if not record:
+            continue
+        metadata, raw_path = record.split(b"\t", 1)
+        mode, kind, object_id = metadata.decode().split()
+        path = Path(raw_path.decode().removeprefix(prefix))
+        if path.suffix != ".py" and path.name != "py.typed":
+            continue
+        if mode not in {"100644", "100755"} or kind != "blob":
+            raise ValueError(f"SDK source must contain regular files: {path}")
+        result[path] = subprocess.check_output(
+            ["git", "-C", str(repository), "cat-file", "blob", object_id],
+        )
+    if any(not any(path.parts[0] == name for path in result) for name in SDK_NAMESPACES):
+        raise ValueError("Pinned SDK revision is missing a required namespace")
+    return result
+
+
+def verify(repository: Path, embedded: Path) -> None:
+    expected = upstream_files(repository, EXTENSIONS_REVISION)
+    actual = _sdk_files(embedded)
+    mismatches = [
+        str(path)
+        for path in sorted(expected.keys() | actual.keys())
+        if expected.get(path) != actual.get(path)
+    ]
+    if mismatches or _digest(expected) != EMBEDDED_SHA256:
+        raise SystemExit("Embedded SDK source/provenance mismatch: " + ", ".join(mismatches))
+
+
 def main() -> int:
-    embedded = Path("packages/sanka-cli/src/sanka_connector").resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--upstream-repo", type=Path)
+    args = parser.parse_args()
+    embedded = Path(__file__).resolve().parents[1] / "packages/sanka-cli/src"
+    if _digest(_sdk_files(embedded)) != EMBEDDED_SHA256:
+        raise SystemExit("Embedded SDK digest drift; synchronize both namespaces from upstream")
     source = os.environ.get("SANKA_CONNECTOR_SDK_SOURCE")
     if source:
-        mismatches = compare_python_trees(Path(source).resolve(), embedded)
+        # Preserve the old explicit tree check, in addition to commit verification.
+        mismatches = compare_python_trees(Path(source).resolve(), embedded / "sanka_connector")
         if mismatches:
-            raise SystemExit("embedded connector SDK drift: " + ", ".join(mismatches))
-    elif python_tree_sha256(embedded) != EMBEDDED_SHA256:
-        raise SystemExit(
-            "embedded connector SDK snapshot drift; sync from extensions revision "
-            + EXTENSIONS_REVISION
-        )
+            raise SystemExit("Embedded compatibility SDK drift: " + ", ".join(mismatches))
+    if args.upstream_repo:
+        verify(args.upstream_repo.resolve(), embedded)
+    else:
+        with tempfile.TemporaryDirectory(prefix="sanka-sdk-provenance-") as temporary:
+            repository = Path(temporary)
+            subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "fetch",
+                    "--quiet",
+                    "--depth=1",
+                    "https://github.com/sankaHQ/extensions.git",
+                    EXTENSIONS_REVISION,
+                ],
+                check=True,
+            )
+            verify(repository, embedded)
+    print(f"Data Extension SDK source verified: {EXTENSIONS_REVISION}")
     return 0
 
 

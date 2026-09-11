@@ -120,7 +120,12 @@ def main() -> int:
         .get("wheel", {})
         .get("packages", [])
     )
-    expected_wheel_packages = {"src/sanka", "src/sanka_cli", "src/sanka_connector"}
+    expected_wheel_packages = {
+        "src/sanka",
+        "src/sanka_cli",
+        "src/sanka_data",
+        "src/sanka_connector",
+    }
     if set(wheel_packages) != expected_wheel_packages:
         errors.append(f"wheel packages must be exactly: {sorted(expected_wheel_packages)}")
     if project.get("entry-points", {}).get("sanka.connectors", {}):
@@ -130,6 +135,7 @@ def main() -> int:
         "packages/sanka-cli/src/sanka",
         "packages/sanka-cli/src/sanka_cli",
         "packages/sanka-cli/src/sanka_cli/mcp",
+        "packages/sanka-cli/src/sanka_data",
         "packages/sanka-cli/src/sanka_connector",
     ):
         if not (ROOT / relative).is_dir():

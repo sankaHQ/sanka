@@ -9,10 +9,10 @@ No Contributor License Agreement is required. A contribution is licensed under
 the license already applicable to the files it modifies:
 
 - `sanka` runtime contributions are AGPL-3.0-only;
-- `sanka_cli`, `sanka_connector`, test, script, and documentation contributions
+- `sanka_cli`, `sanka_data`, `sanka_connector`, test, script, and documentation contributions
   are Apache-2.0.
 
-Connector SDK and provider contributions belong in
+Data Extension SDK and provider contributions belong in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions),
 where they are Apache-2.0.
 
@@ -30,7 +30,7 @@ header in every source file:
 
 | Zone | License | Import rule |
 |---|---|---|
-| `packages/sanka-cli/src/sanka_cli/`, `packages/sanka-cli/src/sanka_connector/`, `scripts/`, `tests/`, and `docs/` | Apache-2.0 | Connector SDK and MCP integration must not import the AGPL runtime; no zone may import proprietary hosted code |
+| `packages/sanka-cli/src/sanka_cli/`, `packages/sanka-cli/src/sanka_data/`, `packages/sanka-cli/src/sanka_connector/`, `scripts/`, `tests/`, and `docs/` | Apache-2.0 | Data Extension SDK and MCP integration must not import the AGPL runtime; no zone may import proprietary hosted code |
 | `packages/sanka-cli/src/sanka/` | AGPL-3.0-only | local migration runtime |
 
 CI enforces these boundaries and file headers with

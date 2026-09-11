@@ -47,7 +47,7 @@ class PipelineStage:
     """One reviewed stage of a pipeline to ensure exists.
 
     ``probability`` is the reviewed win likelihood in ``[0, 1]``; ``None``
-    lets the connector pick a provider-appropriate default.
+    lets the writer pick a provider-appropriate default.
     """
 
     key: str
@@ -93,7 +93,7 @@ class CustomObjectDefinition:
     """A custom object schema to ensure exists.
 
     ``properties`` lists the reviewed properties to create with the schema;
-    an empty list lets the connector create a minimal schema (the primary
+    an empty list lets the writer create a minimal schema (the primary
     display property alone) and provision the rest separately.
     """
 

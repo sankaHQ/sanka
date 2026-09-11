@@ -17,7 +17,7 @@ from sanka.runtime.mapping.model import (
     MappingKind,
     MigrationMappingField,
 )
-from sanka_connector import FieldSchema, Inventory
+from sanka_data import FieldSchema, Inventory
 
 _TOKEN_RE = re.compile(r"[^a-z0-9]+")
 
