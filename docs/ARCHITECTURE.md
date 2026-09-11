@@ -1,5 +1,11 @@
 # Sanka architecture
 
+The OSS CLI/runtime is shared by Sanka, Sanka Flow and Sanka Code. Extensions own
+the SDK and reusable system, business and code capabilities. Private cloud
+authentication, workspace services and hosted SaaS implementations remain in
+`sanka-api`; screens remain in `sanka-react`. The embedded Flow definition contract
+does not yet provide a Flow execution path; see [Flow runtime ownership](flow.md).
+
 This repository owns one `sanka-cli` distribution and one `sanka` executable.
 The Sanka Extension SDK and independently installed extensions
 live in [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions).

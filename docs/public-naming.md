@@ -5,7 +5,7 @@ Use the same nouns in the product, CLI, developer documentation, and code.
 | Product | Responsibility |
 | --- | --- |
 | Sanka | System migrations: moving data between systems |
-| Sanka Flow | Workflow migrations and operation of the resulting workflows |
+| Sanka Flow | Reconstruction of business configurations and operation of their workflows |
 | Sanka Code | Application and code migrations |
 
 The `sanka` repository owns the shared OSS CLI/runtime. The executable is an interface to product capabilities, not an additional product. Migration-domain names may include “Migrate” when they describe operations rather than retired packages.
@@ -32,7 +32,7 @@ Moving PostgreSQL records is a Sanka data migration. Adapting the application's 
 | Register system read/write roles | `ExtensionRegistration` |
 | System read/write protocols | `SystemReader` / `SystemWriter` |
 | Manifest's supported system declaration | `SystemSupport` |
-| Sanka Extension SDK imports | `sanka_extensions.systems` / `sanka_extensions.code` |
+| Sanka Extension SDK imports | `sanka_extensions.systems` / `sanka_extensions.flow` / `sanka_extensions.code` |
 | Hosted dispatcher | `sanka_cli` |
 | Extension repository / IDs | `sankaHQ/extensions` / `sanka/<component>` |
 | Spec / local state | `sanka.yaml` / `.sanka/migrate/` |
@@ -54,3 +54,8 @@ sanka extension add sanka/postgres
 A third-party extension may serve several system types from an unrelated distribution name. Display locked manifest metadata. Reject overlapping enabled system claims before downloading/installing or re-enabling an extension, and keep runtime resolution fail-closed.
 
 The [compatibility inventory](naming-compatibility.md) records retained import paths, distribution names, schemas, protocols, API paths, and command aliases with removal conditions. These are transition contracts, not canonical terminology for new abstractions. Preserve the separate typed contracts for system access and code conversion.
+
+`flow.create(type="crm")` creates an unresolved business definition. It does not
+apply a configuration or activate automations. `Blueprint` describes a resolved
+artifact inside Flow; use `sanka_extensions.flow`, not the unshipped
+`sanka_extensions.blueprints` proposal. See [Flow status and ownership](flow.md).

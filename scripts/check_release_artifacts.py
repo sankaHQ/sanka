@@ -188,6 +188,8 @@ def main() -> int:
                 "sanka_extensions/py.typed",
                 "sanka_extensions/systems/__init__.py",
                 "sanka_extensions/code/__init__.py",
+                "sanka_extensions/flow/__init__.py",
+                "sanka_extensions/flow/definition.py",
                 "sanka_extension_sdk/contract.py",
                 "sanka_connector/__init__.py",
                 "sanka_connector/py.typed",

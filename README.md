@@ -6,7 +6,8 @@ immutable plan, apply that exact plan, and verify the result. The
 migration engine, extension manager, extension host, and optional MCP
 integration behind one `sanka` executable.
 
-Sanka migrates systems and their data. Sanka Flow migrates and operates workflows.
+Sanka migrates systems and their data. Sanka Flow reconstructs business
+configurations and operates their workflows.
 Sanka Code migrates applications and code. This repository owns their shared CLI
 and OSS runtime; repository and executable names do not define product boundaries.
 
@@ -15,6 +16,12 @@ files, or SaaS accounts used in a migration. Moving PostgreSQL records belongs t
 Sanka; adapting an application's SQL/ORM belongs to Sanka Code. A project may need
 both. Installing an extension never implies successful system authentication.
 See [the naming contract](docs/public-naming.md) and [compatibility map](docs/naming-compatibility.md).
+
+The shared Extension SDK includes `sanka_extensions.systems`,
+`sanka_extensions.flow` and `sanka_extensions.code`. Flow currently provides
+declarative requests such as `flow.create(type="crm")`; this CLI does not yet
+resolve or execute them. Its required change-preservation and verified-activation
+behavior is described in [Flow runtime ownership](docs/flow.md).
 
 Python 3.12 or newer is required.
 
