@@ -2830,7 +2830,7 @@ def test_late_environment_filesystem_failure_is_one_clean_cli_json_error(
     assert payload["data"]["error"]["code"] == "SANKA_EXTENSION_IO"
 
 
-def _two_data_extensions(root: Path) -> tuple[Path, dict[str, bytes]]:
+def _two_extensions(root: Path) -> tuple[Path, dict[str, bytes]]:
     source, wheels = _connector_marketplace(root)
     manifest = json.loads((source / "example-connector.json").read_text())
     manifest["id"] = "other/data-tools"
@@ -2845,7 +2845,7 @@ def test_conflicting_system_claim_fails_before_download_or_state_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source, wheels = _two_data_extensions(tmp_path / "source")
+    source, wheels = _two_extensions(tmp_path / "source")
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, wheels)
@@ -2874,7 +2874,7 @@ def test_readding_disabled_extension_checks_system_conflict(
 ) -> None:
     from dataclasses import replace
 
-    source, wheels = _two_data_extensions(tmp_path / "source")
+    source, wheels = _two_extensions(tmp_path / "source")
     store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, wheels)
@@ -2918,7 +2918,7 @@ def test_system_metadata_uses_manifest_distribution_for_third_party_extension(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from sanka.runtime.registry import DataExtensionRegistry
+    from sanka.runtime.registry import ExtensionRegistry
 
     source, wheels = _connector_marketplace(tmp_path / "source")
     project = tmp_path / "project"
@@ -2926,9 +2926,9 @@ def test_system_metadata_uses_manifest_distribution_for_third_party_extension(
     store.add_marketplace(source, name="fixtures", trust=True)
     _responses(monkeypatch, wheels)
     store.add_extension("example/connector")
-    registry = DataExtensionRegistry(
+    registry = ExtensionRegistry(
         {},
-        resolver=store.resolve_data_extension,
+        resolver=store.resolve_extension,
         providers=store.supported_systems(),
         owner=store,
     )

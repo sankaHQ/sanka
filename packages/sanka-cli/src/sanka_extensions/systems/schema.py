@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Canonical data-extension interfaces over the shared compatibility implementation."""
+"""Canonical extension interfaces over the shared compatibility implementation."""
 
 from sanka_connector.schema import (
     FieldSchema as FieldSchema,

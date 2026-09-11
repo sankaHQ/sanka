@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Data extension lookup through verified extension-store subprocess hosts."""
+"""Extension lookup through verified extension-store subprocess hosts."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_data import DataExtensionRegistration
-from sanka_data.protocols import SystemReader, SystemWriter
+from sanka_extensions.systems import ExtensionRegistration
+from sanka_extensions.systems.protocols import SystemReader, SystemWriter
 
 HOSTED_SYSTEM_PROVIDERS = {
     "hubspot": "HubSpot",
@@ -19,15 +19,15 @@ HOSTED_SYSTEM_PROVIDERS = {
 
 
 class UnknownSystemError(ValueError):
-    """No installed local data extension exposes the requested type."""
+    """No installed local extension exposes the requested type."""
 
 
-class DataExtensionRegistry:
+class ExtensionRegistry:
     def __init__(
         self,
-        registrations: dict[str, DataExtensionRegistration],
+        registrations: dict[str, ExtensionRegistration],
         *,
-        resolver: Callable[[str], DataExtensionRegistration] | None = None,
+        resolver: Callable[[str], ExtensionRegistration] | None = None,
         providers: tuple[str, ...] = (),
         owner: Any | None = None,
     ) -> None:
@@ -48,10 +48,10 @@ class DataExtensionRegistry:
     @classmethod
     def discover(
         cls,
-        resolver: Callable[[str], DataExtensionRegistration] | None = None,
+        resolver: Callable[[str], ExtensionRegistration] | None = None,
         *,
         providers: tuple[str, ...] = (),
-    ) -> DataExtensionRegistry:
+    ) -> ExtensionRegistry:
         if resolver is not None:
             return cls({}, resolver=resolver, providers=providers)
         from sanka.runtime.extensions.store import ExtensionStore
@@ -59,7 +59,7 @@ class DataExtensionRegistry:
         store = ExtensionStore(Path.cwd())
         return cls(
             {},
-            resolver=store.resolve_data_extension,
+            resolver=store.resolve_extension,
             providers=store.supported_systems(),
             owner=store,
         )
@@ -100,13 +100,13 @@ class DataExtensionRegistry:
             raise UnknownSystemError(f"system type {type_name!r} has no destination role")
         return registration.destination
 
-    def _get(self, type_name: str) -> DataExtensionRegistration:
+    def _get(self, type_name: str) -> ExtensionRegistration:
         normalized = type_name.strip().lower()
         if normalized in HOSTED_SYSTEM_PROVIDERS:
             provider = HOSTED_SYSTEM_PROVIDERS[normalized]
             raise UnknownSystemError(
                 f"{provider} system migrations run through Sanka's hosted System "
-                "Migration API, not a local data extension; use the Sanka web app or hosted API"
+                "Migration API, not a local extension; use the Sanka web app or hosted API"
             )
         registration = self._registrations.get(normalized)
         if registration is not None:
@@ -121,17 +121,17 @@ class DataExtensionRegistry:
                 if registration.name.strip().lower() != normalized:
                     raise ExtensionError(
                         "SANKA_EXTENSION_IDENTITY",
-                        "Data extension registration differs from the locked provider",
+                        "Extension registration differs from the locked provider",
                     )
                 self._registrations[normalized] = registration
                 return registration
         available = ", ".join(self.names()) or "none"
         raise UnknownSystemError(
-            f"no installed data extension for system type {type_name!r} (available: {available}); "
+            f"no installed extension for system type {type_name!r} (available: {available}); "
             f"run `sanka extension add sanka/{normalized}`"
         )
 
 
 # Compatibility imports for existing clients.
-ConnectorRegistry = DataExtensionRegistry
+ConnectorRegistry = ExtensionRegistry
 UnknownConnectorError = UnknownSystemError

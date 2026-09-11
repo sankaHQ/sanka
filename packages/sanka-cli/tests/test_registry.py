@@ -7,9 +7,9 @@ import pytest
 
 from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions import store as extension_store
-from sanka.runtime.registry import DataExtensionRegistry, UnknownSystemError
-from sanka_data import DataExtensionRegistration
-from sanka_data.protocols import SystemReader
+from sanka.runtime.registry import ExtensionRegistry, UnknownSystemError
+from sanka_extensions.systems import ExtensionRegistration
+from sanka_extensions.systems.protocols import SystemReader
 
 SOURCE = cast(SystemReader, object())
 
@@ -17,11 +17,11 @@ SOURCE = cast(SystemReader, object())
 def test_discovery_resolves_marketplace_connector_lazily_through_store() -> None:
     calls: list[str] = []
 
-    def resolve(provider: str) -> DataExtensionRegistration:
+    def resolve(provider: str) -> ExtensionRegistration:
         calls.append(provider)
-        return DataExtensionRegistration(name=provider, source=SOURCE)
+        return ExtensionRegistration(name=provider, source=SOURCE)
 
-    registry = DataExtensionRegistry.discover(resolve, providers=("markdown",))
+    registry = ExtensionRegistry.discover(resolve, providers=("markdown",))
 
     assert registry.names() == ["markdown"]
     assert calls == []
@@ -34,7 +34,7 @@ def test_discovery_resolves_marketplace_connector_lazily_through_store() -> None
 def test_default_discovery_uses_extension_store_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registration = DataExtensionRegistration(name="markdown", source=SOURCE)
+    registration = ExtensionRegistration(name="markdown", source=SOURCE)
 
     class Store:
         def __init__(self, _root: object) -> None:
@@ -43,7 +43,7 @@ def test_default_discovery_uses_extension_store_resolver(
         def supported_systems(self) -> tuple[str, ...]:
             return ("markdown",)
 
-        def resolve_data_extension(self, provider: str) -> DataExtensionRegistration:
+        def resolve_extension(self, provider: str) -> ExtensionRegistration:
             assert provider == "markdown"
             return registration
 
@@ -51,25 +51,25 @@ def test_default_discovery_uses_extension_store_resolver(
             self.closed = True
 
     monkeypatch.setattr(extension_store, "ExtensionStore", Store)
-    registry = DataExtensionRegistry.discover()
+    registry = ExtensionRegistry.discover()
 
     assert registry.source("markdown") is SOURCE
     registry.close()
 
 
 def test_missing_store_connector_is_an_unknown_connector() -> None:
-    def missing(_provider: str) -> DataExtensionRegistration:
+    def missing(_provider: str) -> ExtensionRegistration:
         raise ExtensionError("SANKA_EXTENSION_REQUIRED", "not locked")
 
-    registry = DataExtensionRegistry.discover(missing, providers=("sqlite",))
+    registry = ExtensionRegistry.discover(missing, providers=("sqlite",))
 
-    with pytest.raises(UnknownSystemError, match="no installed data extension"):
+    with pytest.raises(UnknownSystemError, match="no installed extension"):
         registry.source("sqlite")
 
 
 def test_explicit_registration_cannot_enable_a_hosted_system_provider() -> None:
-    registry = DataExtensionRegistry(
-        {"salesforce": DataExtensionRegistration(name="salesforce", source=SOURCE)}
+    registry = ExtensionRegistry(
+        {"salesforce": ExtensionRegistration(name="salesforce", source=SOURCE)}
     )
 
     assert registry.names() == []
@@ -78,10 +78,10 @@ def test_explicit_registration_cannot_enable_a_hosted_system_provider() -> None:
 
 
 def test_hosted_system_provider_never_reaches_store_resolver() -> None:
-    def poisoned(_provider: str) -> DataExtensionRegistration:
+    def poisoned(_provider: str) -> ExtensionRegistration:
         raise AssertionError("hosted provider must not reach local connector store")
 
-    registry = DataExtensionRegistry.discover(poisoned, providers=("hubspot",))
+    registry = ExtensionRegistry.discover(poisoned, providers=("hubspot",))
 
     assert registry.names() == []
     with pytest.raises(UnknownSystemError, match="hosted System Migration API"):

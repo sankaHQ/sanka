@@ -78,11 +78,12 @@ def test_sdk_provenance_uses_pinned_git_objects_and_checks_both_namespaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repository = tmp_path / "upstream"
-    source = repository / check_connector_sdk_sync.UPSTREAM_SDK_PATH
+    source = repository / check_connector_sdk_sync.SDK_SOURCES["sanka_extensions"]
     embedded = tmp_path / "embedded"
     subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
     for namespace in check_connector_sdk_sync.SDK_NAMESPACES:
-        for root in (source, embedded):
+        upstream = repository / check_connector_sdk_sync.SDK_SOURCES[namespace]
+        for root in (upstream, embedded):
             (root / namespace).mkdir(parents=True)
             (root / namespace / "__init__.py").write_text("# SPDX-License-Identifier: Apache-2.0\n")
             (root / namespace / "py.typed").touch()
@@ -113,10 +114,10 @@ def test_sdk_provenance_uses_pinned_git_objects_and_checks_both_namespaces(
         check_connector_sdk_sync, "EMBEDDED_SHA256", check_connector_sdk_sync._digest(files)
     )
     # Mutable working-tree content must not substitute for the pinned commit.
-    (source / "sanka_data/__init__.py").write_text("uncommitted change\n")
+    (source / "sanka_extensions/__init__.py").write_text("uncommitted change\n")
     check_connector_sdk_sync.verify(repository, embedded)
-    (embedded / "sanka_data/__init__.py").write_text("different facade\n")
-    with pytest.raises(SystemExit, match=r"sanka_data/__init__\.py"):
+    (embedded / "sanka_extensions/__init__.py").write_text("different facade\n")
+    with pytest.raises(SystemExit, match=r"sanka_extensions/__init__\.py"):
         check_connector_sdk_sync.verify(repository, embedded)
     with pytest.raises(subprocess.CalledProcessError):
         check_connector_sdk_sync.upstream_files(repository, "0" * 40)
@@ -216,7 +217,7 @@ def test_terminology_rejects_new_legacy_sdk_usage(tmp_path: Path, source: str) -
 
 def test_terminology_keeps_explicit_sdk_compatibility_boundary(tmp_path: Path) -> None:
     root = tmp_path / "packages/sanka-cli/src"
-    for namespace in ("sanka_connector", "sanka_data", "sanka/connector"):
+    for namespace in ("sanka_connector", "sanka_extensions", "sanka/connector"):
         target = root / namespace / "compat.py"
         target.parent.mkdir(parents=True)
         target.write_text("from sanka_connector import SourceConnector\n")

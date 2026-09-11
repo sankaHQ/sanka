@@ -12,7 +12,7 @@ The `sanka` repository owns the shared OSS CLI/runtime. The executable is an int
 
 ## Resources and responsibilities
 
-- **Extension:** an independently versioned capability package, installed by extension ID. Use Data and Code when capability categories are needed.
+- **Extension:** an independently versioned capability package, installed by extension ID. Describe its system-access or code-conversion capabilities when needed.
 - **System:** a database, file source, SaaS service, or configured account/endpoint being used in a data migration. Each configured system retains independent endpoint and credential references.
 - **Migration:** a planned, executed, and verified move of data, workflows, or code.
 
@@ -28,11 +28,11 @@ Moving PostgreSQL records is a Sanka data migration. Adapting the application's 
 | Python distribution / executable | `sanka-cli` / `sanka` |
 | Python facade | `from sanka import Sanka, SystemConfig` |
 | Configure a system | `Sanka.configure_system(...)` |
-| Resolve installed data support | `DataExtensionRegistry` |
-| Register system read/write roles | `DataExtensionRegistration` |
+| Resolve installed data support | `ExtensionRegistry` |
+| Register system read/write roles | `ExtensionRegistration` |
 | System read/write protocols | `SystemReader` / `SystemWriter` |
 | Manifest's supported system declaration | `SystemSupport` |
-| Data Extension SDK imports | `sanka_data` |
+| Sanka Extension SDK imports | `sanka_extensions.systems` / `sanka_extensions.code` |
 | Hosted dispatcher | `sanka_cli` |
 | Extension repository / IDs | `sankaHQ/extensions` / `sanka/<component>` |
 | Spec / local state | `sanka.yaml` / `.sanka/migrate/` |
@@ -53,4 +53,4 @@ sanka extension add sanka/postgres
 
 A third-party extension may serve several system types from an unrelated distribution name. Display locked manifest metadata. Reject overlapping enabled system claims before downloading/installing or re-enabling an extension, and keep runtime resolution fail-closed.
 
-The [compatibility inventory](naming-compatibility.md) records retained import paths, distribution names, schemas, protocols, API paths, and command aliases with removal conditions. These are transition contracts, not canonical terminology for new abstractions. Preserve the typed Data and Code execution boundaries.
+The [compatibility inventory](naming-compatibility.md) records retained import paths, distribution names, schemas, protocols, API paths, and command aliases with removal conditions. These are transition contracts, not canonical terminology for new abstractions. Preserve the separate typed contracts for system access and code conversion.

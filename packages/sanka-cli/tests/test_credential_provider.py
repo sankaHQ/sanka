@@ -6,12 +6,12 @@ from typing import Any
 import pytest
 
 from sanka.runtime.engine import ExecutionError, MigrationEngine
-from sanka.runtime.registry import DataExtensionRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
-from sanka_data import (
+from sanka_extensions.systems import (
     Credentials,
-    DataExtensionRegistration,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -154,10 +154,10 @@ async def test_engine_resolves_named_connections_without_persisting_secrets(tmp_
     store = SqliteStateStore(tmp_path / "state.db")
     engine = MigrationEngine(
         store=store,
-        registry=DataExtensionRegistry(
+        registry=ExtensionRegistry(
             {
-                "source": DataExtensionRegistration(name="source", source=source),
-                "destination": DataExtensionRegistration(
+                "source": ExtensionRegistration(name="source", source=source),
+                "destination": ExtensionRegistration(
                     name="destination",
                     destination=destination,
                 ),
@@ -199,9 +199,7 @@ async def test_engine_rejects_named_connection_provider_mismatch(tmp_path: Any) 
     source = Source()
     engine = MigrationEngine(
         store=SqliteStateStore(tmp_path / "state.db"),
-        registry=DataExtensionRegistry(
-            {"source": DataExtensionRegistration(name="source", source=source)}
-        ),
+        registry=ExtensionRegistry({"source": ExtensionRegistration(name="source", source=source)}),
         credential_provider=provider,
     )
     run_id = engine.create(

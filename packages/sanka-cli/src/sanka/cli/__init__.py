@@ -55,7 +55,7 @@ from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
 from sanka.runtime.extensions.runner import ExtensionResult
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.planner import MigrationPlan
-from sanka.runtime.registry import DataExtensionRegistry, UnknownSystemError
+from sanka.runtime.registry import ExtensionRegistry, UnknownSystemError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import SqliteStateStore
 
@@ -551,7 +551,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
 
     connect = commands.add_parser(
         "connect",
-        help="inspect installed data extension support; does not authenticate a system",
+        help="inspect installed extension support; does not authenticate a system",
     )
     connect.add_argument("provider", help="system type, e.g. markdown or postgres")
     connect.add_argument("--json", action="store_true", help="print provider details as JSON")
@@ -682,7 +682,7 @@ def _research_client(api_base: str | None = None) -> SankaMigrateApiClient:
 
 def _engine(state_path: str) -> MigrationEngine:
     return MigrationEngine(
-        store=SqliteStateStore(state_path), registry=DataExtensionRegistry.discover()
+        store=SqliteStateStore(state_path), registry=ExtensionRegistry.discover()
     )
 
 
@@ -704,7 +704,7 @@ def _extension_result(
             [
                 (
                     str(record.get("id", "")),
-                    {"connector": "Data", "migration": "Code"}.get(
+                    {"connector": "System access", "migration": "Code conversion"}.get(
                         str(record.get("kind", "")), str(record.get("kind", ""))
                     ),
                     str(record.get("version", "")),
@@ -801,7 +801,7 @@ async def _cmd_extension_marketplace_remove(args: argparse.Namespace) -> int:
 
 
 async def _cmd_connect(args: argparse.Namespace) -> int:
-    registry = DataExtensionRegistry.discover()
+    registry = ExtensionRegistry.discover()
     system_type = str(args.provider).strip().lower()
     if system_type == "postgresql":
         system_type = "postgres"

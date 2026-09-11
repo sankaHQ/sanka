@@ -8,13 +8,12 @@ behavior changes, and follow the repository's license boundaries.
 No Contributor License Agreement is required. A contribution is licensed under
 the license already applicable to the files it modifies:
 
-- `sanka` runtime contributions are AGPL-3.0-only;
-- `sanka_cli`, `sanka_data`, `sanka_connector`, test, script, and documentation contributions
-  are Apache-2.0.
+- Migration runtime contributions and runtime tests are AGPL-3.0-only.
+- CLI, Extension SDK, repository tooling and its tests, and documentation contributions are Apache-2.0.
 
-Data Extension SDK and provider contributions belong in
-[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions),
-where they are Apache-2.0.
+Extension SDK and extension implementations belong in
+[`sankaHQ/extensions`](https://github.com/sankaHQ/extensions).
+Use `sanka_extensions.systems` for system access and `sanka_extensions.code` for code migration.
 
 By submitting a contribution, you confirm that you have the right to submit it
 under that license. Accepting a contribution does not give Sanka a separate
@@ -30,8 +29,11 @@ header in every source file:
 
 | Zone | License | Import rule |
 |---|---|---|
-| `packages/sanka-cli/src/sanka_cli/`, `packages/sanka-cli/src/sanka_data/`, `packages/sanka-cli/src/sanka_connector/`, `scripts/`, `tests/`, and `docs/` | Apache-2.0 | Data Extension SDK and MCP integration must not import the AGPL runtime; no zone may import proprietary hosted code |
-| `packages/sanka-cli/src/sanka/` | AGPL-3.0-only | local migration runtime |
+| CLI (`src/sanka_cli/`), Extension SDK (`src/sanka_extensions/`), repository tooling and its tests, and documentation | Apache-2.0 | The SDK and MCP integration must not import the AGPL runtime |
+| Migration runtime (`src/sanka/`) and runtime tests (`tests/`) | AGPL-3.0-only | No proprietary hosted code |
+
+Source paths are relative to `packages/sanka-cli/`. The embedded SDK's published
+compatibility modules retain Apache-2.0; see [the compatibility inventory](docs/naming-compatibility.md).
 
 CI enforces these boundaries and file headers with
 `scripts/check_import_boundaries.py` and `scripts/check_license_headers.py`.

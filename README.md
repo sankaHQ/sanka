@@ -3,7 +3,7 @@
 Sanka is a migration runtime with a finish line: inspect the source, review an
 immutable plan, apply that exact plan, and verify the result. The
 `sanka-cli` distribution contains the hosted command dispatcher, local
-migration engine, extension manager, data-extension host, and optional MCP
+migration engine, extension manager, extension host, and optional MCP
 integration behind one `sanka` executable.
 
 Sanka migrates systems and their data. Sanka Flow migrates and operates workflows.
@@ -66,7 +66,7 @@ sanka extension add sanka/sqlite
 
 Sanka verifies each manifest, URL, SHA-256 digest, runtime constraint, and
 wheel identity before installing it in an isolated environment. PyPI is not a
-data-extension fallback. Project pins live in `.sanka/extensions.lock`; marketplace
+extension fallback. Project pins live in `.sanka/extensions.lock`; marketplace
 snapshots and verified artifacts live under `~/.sanka/extensions` or
 `$SANKA_HOME/extensions`.
 
@@ -149,7 +149,7 @@ The official component IDs are:
 | `sanka/postgres` | Data | source and destination |
 | `sanka/clickhouse` | Data | destination |
 
-Code extensions run through `sanka-extension/v1`. Data extension wheels keep
+Code extensions run through `sanka-extension/v1`. Extension wheels keep
 the typed `sanka.connectors` interface but load only inside a verified child
 environment; the main CLI process talks to one persistent host over
 `sanka-connector/v1`. Hosted providers such as HubSpot, Salesforce, and
@@ -219,11 +219,11 @@ texts plus `NOTICE`:
 | Source zone | License |
 |---|---|
 | `packages/sanka-cli/src/sanka_cli` | Apache-2.0 |
-| `packages/sanka-cli/src/sanka_data`, `packages/sanka-cli/src/sanka_connector` | Apache-2.0 |
+| `packages/sanka-cli/src/sanka_extensions` (including the SDK compatibility modules) | Apache-2.0 |
 | `packages/sanka-cli/src/sanka` | AGPL-3.0-only |
 | `scripts`, `tests`, and `docs` | Apache-2.0 |
 
-The canonical Apache Data Extension SDK and provider sources remain in
+The canonical Apache Sanka Extension SDK and provider sources remain in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions). See
 [LICENSE](LICENSE), [architecture](docs/ARCHITECTURE.md), and
 [dependency review](docs/dependency-licenses.md).
@@ -236,7 +236,7 @@ make check
 make build-release
 ```
 
-`make check` expects the canonical Data Extension SDK at the sibling
+`make check` verifies the Sanka Extension SDK against
 the immutable `extensions` commit recorded in `scripts/check_connector_sdk_sync.py`.
 The check validates both the canonical facade and compatibility implementation;
 `--upstream-repo` can point to an existing clone containing the pinned commit.

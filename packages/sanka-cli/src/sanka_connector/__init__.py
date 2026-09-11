@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Sanka Data Extension SDK — Apache-2.0 system access interfaces.
+"""Sanka Extension SDK — Apache-2.0 system access interfaces.
 
-Data extensions implement the base protocols (:class:`SystemReader`,
+Extensions implement the base protocols (:class:`SystemReader`,
 :class:`SystemWriter`) plus any optional capability protocols, and
 must not import the AGPL-licensed runtime (``sanka.runtime``); CI enforces
 that boundary so an extension is never a derivative work of the runtime.
@@ -73,7 +73,7 @@ from sanka_connector.records import (
     WriteResult,
     require_identity_values,
 )
-from sanka_connector.registration import ENTRY_POINT_GROUP, DataExtensionRegistration
+from sanka_connector.registration import ENTRY_POINT_GROUP, ExtensionRegistration
 from sanka_connector.schema import (
     FieldSchema,
     Inventory,
@@ -96,8 +96,8 @@ __all__ = [
     "CustomObjectDefinition",
     "CustomObjectProperty",
     "DataError",
-    "DataExtensionRegistration",
     "ErrorCategory",
+    "ExtensionRegistration",
     "FieldSchema",
     "InvalidEmailPolicy",
     "Inventory",
@@ -151,7 +151,7 @@ __all__ = [
 # Published compatibility names; both spellings identify the same classes.
 SourceConnector = SystemReader
 DestinationConnector = SystemWriter
-ConnectorRegistration = DataExtensionRegistration
+ConnectorRegistration = ExtensionRegistration
 ConnectorError = SystemAccessError
 ProviderIdentity = SystemIdentity
 ProviderTimeoutError = SystemTimeoutError

@@ -19,7 +19,7 @@ MIGRATION_COMMANDS: dict[str, str] = {
     "verify": "verify the target against the source and ledger",
     "status": "show run status and ledger counts",
     "migrate": "plan + apply + verify in one go",
-    "connect": "inspect installed data extension support; does not authenticate a system",
+    "connect": "inspect installed extension support; does not authenticate a system",
     "research": "query cited Sanka lifecycle, cost, and comparison research",
     "assess": "submit a free migration assessment",
     "extension": "manage data and code extensions",

@@ -31,7 +31,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.tags import parse_tag, sys_tags
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
-from sanka.runtime.connector_client import DataExtensionHostClient, build_remote_data_extension
+from sanka.runtime.connector_client import ExtensionHostClient, build_remote_extension
 from sanka.runtime.extensions.discovery import (
     IDENTIFIER,
     STATUS_ORDER,
@@ -52,7 +52,7 @@ from sanka.runtime.extensions.model import (
 )
 from sanka.runtime.hashing import content_hash
 from sanka_cli import __version__
-from sanka_data import ENTRY_POINT_GROUP, DataExtensionRegistration
+from sanka_extensions.systems import ENTRY_POINT_GROUP, ExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
@@ -927,7 +927,7 @@ class ExtensionStore:
         self._installation_path = self.user_root / "installations.json"
         self._disabled_path = self.user_root / "disabled.json"
         self._project_lock_path = self.project_root / ".sanka" / "extensions.lock"
-        self._connector_clients: dict[str, DataExtensionHostClient] = {}
+        self._connector_clients: dict[str, ExtensionHostClient] = {}
 
     def close(self) -> None:
         for client in self._connector_clients.values():
@@ -3471,7 +3471,7 @@ class ExtensionStore:
             if overlap:
                 _error(
                     "SANKA_EXTENSION_SYSTEM_CONFLICT",
-                    "A system type already has an enabled data extension; remove it first",
+                    "A system type already has an enabled extension; remove it first",
                     extension_id=manifest.id,
                     conflicting_extension_id=entry.id,
                     system_types=overlap,
@@ -3491,7 +3491,7 @@ class ExtensionStore:
             code = "SANKA_EXTENSION_REQUIRED" if not selected else "SANKA_EXTENSION_IDENTITY"
             _error(
                 code,
-                "System type must resolve to one enabled data extension",
+                "System type must resolve to one enabled extension",
                 system_type=system_type,
                 extension_ids=sorted(entry.id for entry in selected),
             )
@@ -3521,7 +3521,7 @@ class ExtensionStore:
         )
 
     @_store_operation
-    def resolve_data_extension(self, provider: str) -> DataExtensionRegistration:
+    def resolve_extension(self, provider: str) -> ExtensionRegistration:
         entry = self.resolve_locked(self._system_lock(provider).id)
         manifest = self._manifest_for_lock(entry)
         declared = next(item for item in manifest.providers if item.name == provider)
@@ -3539,7 +3539,7 @@ class ExtensionStore:
         )
         client = self._connector_clients.get(entry.artifact_digest)
         if client is None:
-            client = DataExtensionHostClient(sys.executable, environment=site_packages)
+            client = ExtensionHostClient(sys.executable, environment=site_packages)
             self._connector_clients[entry.artifact_digest] = client
         description = client.request(provider, "describe", {})
         if (
@@ -3555,16 +3555,16 @@ class ExtensionStore:
                 provider=provider,
             )
         source = (
-            build_remote_data_extension(client, provider, "source", description=description)
+            build_remote_extension(client, provider, "source", description=description)
             if "source" in declared.roles
             else None
         )
         destination = (
-            build_remote_data_extension(client, provider, "destination", description=description)
+            build_remote_extension(client, provider, "destination", description=description)
             if "destination" in declared.roles
             else None
         )
-        return DataExtensionRegistration(
+        return ExtensionRegistration(
             name=provider,
             source=cast(Any, source),
             destination=cast(Any, destination),
@@ -3572,7 +3572,7 @@ class ExtensionStore:
 
     # Compatibility method names for existing runtime consumers.
     connector_providers = supported_systems
-    resolve_connector = resolve_data_extension
+    resolve_connector = resolve_extension
 
 
 __all__ = [

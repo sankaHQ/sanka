@@ -32,11 +32,11 @@ from sanka.runtime.execution import (
     validation_rejects_truncated_warning,
 )
 from sanka.runtime.mapping import MappingError, MigrationMappingField, mapping_groups
-from sanka.runtime.registry import DataExtensionRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
-from sanka_data import Credentials, RecordPage, SourceFilter, SourceObject
-from sanka_data.protocols import SystemReader, SystemWriter
+from sanka_extensions.systems import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_extensions.systems.protocols import SystemReader, SystemWriter
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
@@ -604,10 +604,10 @@ async def test_routes_validate_independently_with_route_keyed_rejects() -> None:
 # -- engine surface -----------------------------------------------------------
 
 
-class PoisonedRegistry(DataExtensionRegistry):
+class PoisonedRegistry(ExtensionRegistry):
     """A registry whose destination role must never be resolved."""
 
-    def __init__(self, inner: DataExtensionRegistry) -> None:
+    def __init__(self, inner: ExtensionRegistry) -> None:
         self._inner = inner
 
     def names(self) -> list[str]:
@@ -638,7 +638,7 @@ async def test_engine_validate_never_resolves_the_destination(tmp_path: Path) ->
     _write_markdown_content(content)
     store_path = tmp_path / "state" / "state.db"
     engine = MigrationEngine(
-        store=SqliteStateStore(store_path), registry=DataExtensionRegistry.discover()
+        store=SqliteStateStore(store_path), registry=ExtensionRegistry.discover()
     )
     run_id = engine.create(_markdown_spec(content, db))
     await engine.plan(run_id)
@@ -646,7 +646,7 @@ async def test_engine_validate_never_resolves_the_destination(tmp_path: Path) ->
 
     validating_engine = MigrationEngine(
         store=SqliteStateStore(store_path),
-        registry=PoisonedRegistry(DataExtensionRegistry.discover()),
+        registry=PoisonedRegistry(ExtensionRegistry.discover()),
     )
     payload = await validating_engine.validate(run_id)
 
@@ -664,7 +664,7 @@ async def test_engine_validate_requires_a_plan(tmp_path: Path) -> None:
     content, db = tmp_path / "content", tmp_path / "out.db"
     _write_markdown_content(content)
     engine = MigrationEngine(
-        store=SqliteStateStore(tmp_path / "state.db"), registry=DataExtensionRegistry.discover()
+        store=SqliteStateStore(tmp_path / "state.db"), registry=ExtensionRegistry.discover()
     )
     run_id = engine.create(_markdown_spec(content, db))
 
@@ -676,7 +676,7 @@ async def test_engine_validate_wraps_execution_faults(tmp_path: Path) -> None:
     content, db = tmp_path / "content", tmp_path / "out.db"
     _write_markdown_content(content)
     engine = MigrationEngine(
-        store=SqliteStateStore(tmp_path / "state.db"), registry=DataExtensionRegistry.discover()
+        store=SqliteStateStore(tmp_path / "state.db"), registry=ExtensionRegistry.discover()
     )
     run_id = engine.create(_markdown_spec(content, db))
     await engine.plan(run_id)

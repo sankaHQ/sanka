@@ -15,7 +15,7 @@ from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-from sanka_data import (
+from sanka_extensions.systems import (
     ENTRY_POINT_GROUP,
     BatchRelationshipWriteResult,
     BatchWriteInput,
@@ -23,7 +23,7 @@ from sanka_data import (
     Credentials,
     CustomObjectDefinition,
     CustomObjectProperty,
-    DataExtensionRegistration,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     Limits,
@@ -306,10 +306,10 @@ def _site_packages(value: str) -> Path:
     return candidate
 
 
-def load_registrations(site_packages: Path) -> dict[str, DataExtensionRegistration]:
+def load_registrations(site_packages: Path) -> dict[str, ExtensionRegistration]:
     """Load registrations only from distributions in the verified environment."""
     sys.path.insert(0, str(site_packages))
-    registrations: dict[str, DataExtensionRegistration] = {}
+    registrations: dict[str, ExtensionRegistration] = {}
     for distribution in distributions(path=[str(site_packages)]):
         for entry in distribution.entry_points:
             if entry.group != ENTRY_POINT_GROUP:
@@ -323,7 +323,7 @@ def load_registrations(site_packages: Path) -> dict[str, DataExtensionRegistrati
                     "SANKA_CONNECTOR_LOAD", "connector registration could not be loaded"
                 ) from error
             if (
-                not isinstance(registration, DataExtensionRegistration)
+                not isinstance(registration, ExtensionRegistration)
                 or registration.name != entry.name
             ):
                 _fail("SANKA_CONNECTOR_PROVIDER", "connector registration identity is invalid")
@@ -331,7 +331,7 @@ def load_registrations(site_packages: Path) -> dict[str, DataExtensionRegistrati
     return registrations
 
 
-def _describe(registration: DataExtensionRegistration) -> dict[str, Any]:
+def _describe(registration: ExtensionRegistration) -> dict[str, Any]:
     roles: list[str] = []
     capabilities: dict[str, list[str]] = {}
     binding_kinds: dict[str, str] = {}
@@ -353,7 +353,7 @@ def _describe(registration: DataExtensionRegistration) -> dict[str, Any]:
 
 
 def invoke_registration(
-    registration: DataExtensionRegistration,
+    registration: ExtensionRegistration,
     operation: str,
     payload: dict[str, Any],
 ) -> Any:
@@ -392,7 +392,7 @@ def invoke_registration(
 
 
 def handle(
-    request: dict[str, Any], registrations: dict[str, DataExtensionRegistration]
+    request: dict[str, Any], registrations: dict[str, ExtensionRegistration]
 ) -> dict[str, Any]:
     if set(request) != {"protocol_version", "id", "provider", "operation", "payload"}:
         _fail("SANKA_CONNECTOR_PROTOCOL", "connector request fields are invalid")

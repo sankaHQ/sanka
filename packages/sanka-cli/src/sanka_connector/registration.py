@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""How a data extension plugs into the Sanka runtime.
+"""How an extension plugs into the Sanka runtime.
 
 Each provider distribution exposes its
-:class:`DataExtensionRegistration` through the ``sanka.connectors`` entry-point
+:class:`ExtensionRegistration` through the ``sanka.connectors`` entry-point
 group::
 
     [project.entry-points."sanka.connectors"]
@@ -24,8 +24,8 @@ ENTRY_POINT_GROUP = "sanka.connectors"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class DataExtensionRegistration:
-    """A data extension's advertised system roles. Either side may be ``None``."""
+class ExtensionRegistration:
+    """An extension's advertised system roles. Either side may be ``None``."""
 
     name: str
     source: SystemReader | None = None
@@ -33,12 +33,10 @@ class DataExtensionRegistration:
 
     def __post_init__(self) -> None:
         if not self.name.strip():
-            raise ValueError("DataExtensionRegistration.name is required")
+            raise ValueError("ExtensionRegistration.name is required")
         if self.source is None and self.destination is None:
-            raise ValueError(
-                f"data extension {self.name!r} registers neither source nor destination"
-            )
+            raise ValueError(f"extension {self.name!r} registers neither source nor destination")
 
 
 # Published compatibility names; both spellings identify the same classes.
-ConnectorRegistration = DataExtensionRegistration
+ConnectorRegistration = ExtensionRegistration

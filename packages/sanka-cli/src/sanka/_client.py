@@ -12,10 +12,10 @@ from typing import Any
 from sanka.runtime.engine import InspectionResult, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
 from sanka.runtime.planner import MigrationPlan
-from sanka.runtime.registry import DataExtensionRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_data import CredentialProvider
+from sanka_extensions.systems import CredentialProvider
 
 
 @dataclass(frozen=True, slots=True, kw_only=True, init=False)
@@ -146,7 +146,7 @@ class Sanka:
         credential_provider: CredentialProvider | None = None,
     ) -> None:
         self._store = SqliteStateStore(state)
-        self._registry = DataExtensionRegistry.discover()
+        self._registry = ExtensionRegistry.discover()
         self._engine = MigrationEngine(
             store=self._store,
             registry=self._registry,
@@ -163,7 +163,7 @@ class Sanka:
         *,
         options: Mapping[str, Any] | None = None,
     ) -> SystemConfig:
-        """Configure a system supported by an installed data extension.
+        """Configure a system supported by an installed extension.
 
         The endpoint reference is a path, URL, or named system reference.
         Authentication and reachability are checked by the migration lifecycle.

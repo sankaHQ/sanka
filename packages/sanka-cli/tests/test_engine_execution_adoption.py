@@ -20,15 +20,15 @@ from sanka.runtime.execution import ExecutionSnapshot, JournalEntry, exact_candi
 from sanka.runtime.mapping.model import MigrationMappingField
 from sanka.runtime.mapping.record_mapping import mapping_group_key
 from sanka.runtime.planner import MigrationPlan, RoutePlan
-from sanka.runtime.registry import DataExtensionRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_data import (
+from sanka_extensions.systems import (
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
-    DataExtensionRegistration,
     ErrorCategory,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -292,10 +292,10 @@ def _engine(
     *,
     batch_size: int = 100,
 ) -> MigrationEngine:
-    registry = DataExtensionRegistry(
+    registry = ExtensionRegistry(
         {
-            "memsrc": DataExtensionRegistration(name="memsrc", source=source),
-            "memdst": DataExtensionRegistration(name="memdst", destination=destination),
+            "memsrc": ExtensionRegistration(name="memsrc", source=source),
+            "memdst": ExtensionRegistration(name="memdst", destination=destination),
         }
     )
     return MigrationEngine(

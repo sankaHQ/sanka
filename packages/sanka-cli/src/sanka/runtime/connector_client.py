@@ -23,7 +23,7 @@ from sanka.runtime.connector_host import (
     encode_value,
 )
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_data import (
+from sanka_extensions.systems import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
@@ -60,7 +60,7 @@ def _minimal_environment() -> dict[str, str]:
     return environment
 
 
-class DataExtensionHostClient:
+class ExtensionHostClient:
     """One locked request stream to one verified connector environment."""
 
     def __init__(
@@ -293,7 +293,7 @@ class DataExtensionHostClient:
             self._stdout = queue.Queue()
             self._stderr = queue.Queue()
 
-    def __enter__(self) -> DataExtensionHostClient:
+    def __enter__(self) -> ExtensionHostClient:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -303,7 +303,7 @@ class DataExtensionHostClient:
 class _RemoteConnector:
     def __init__(
         self,
-        client: DataExtensionHostClient,
+        client: ExtensionHostClient,
         provider: str,
         role: str,
         binding_kind: str,
@@ -685,8 +685,8 @@ def _valid_description(description: Any, role: str) -> bool:
     return True
 
 
-def build_remote_data_extension(
-    client: DataExtensionHostClient,
+def build_remote_extension(
+    client: ExtensionHostClient,
     provider: str,
     role: str,
     *,
@@ -707,8 +707,8 @@ def build_remote_data_extension(
     )
 
 
-__all__ = ["DataExtensionHostClient", "build_remote_data_extension"]
+__all__ = ["ExtensionHostClient", "build_remote_extension"]
 
 # Compatibility imports for existing clients.
-ConnectorHostClient = DataExtensionHostClient
-build_remote_connector = build_remote_data_extension
+ConnectorHostClient = ExtensionHostClient
+build_remote_connector = build_remote_extension

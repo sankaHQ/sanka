@@ -16,8 +16,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from sanka_data import SourceFilter
-from sanka_data.records import RelationshipMode
+from sanka_extensions.systems import SourceFilter
+from sanka_extensions.systems.records import RelationshipMode
 
 AssociationCategory = Literal["HUBSPOT_DEFINED", "USER_DEFINED", "INTEGRATOR_DEFINED"]
 MappingKind = Literal["scalar", "owner", "relationship", "reference"]

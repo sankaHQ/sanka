@@ -2,11 +2,11 @@
 """Scope freeze: per-route high-water marks, frozen totals, route resolution.
 
 Faithful port of the production scope mechanics: the queue-time high-water
-mark freeze probes :class:`~sanka_data.SupportsHighWaterMark` and
+mark freeze probes :class:`~sanka_extensions.systems.SupportsHighWaterMark` and
 freezes a mark for **every** reviewed route (not only the selected ones); the
-claim-time total count probes :class:`~sanka_data.SupportsRecordCounts`
+claim-time total count probes :class:`~sanka_extensions.systems.SupportsRecordCounts`
 and counts **selected** routes only, bounded by the frozen marks through
-:class:`~sanka_data.SupportsBoundedCounts`. A route whose frozen mark is
+:class:`~sanka_extensions.systems.SupportsBoundedCounts`. A route whose frozen mark is
 ``None`` (the source held no records at freeze time) counts as ``0`` and is
 completed without a read. Sources that cannot count report ``None`` totals —
 unknown, never zero.
@@ -46,7 +46,7 @@ from sanka.runtime.mapping.record_mapping import (
     mapping_group_key,
     mapping_route_manifest,
 )
-from sanka_data import (
+from sanka_extensions.systems import (
     Credentials,
     SupportsBoundedCounts,
     SupportsHighWaterMark,

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Canonical data-extension interfaces over the shared compatibility implementation."""
+"""Canonical extension interfaces over the shared compatibility implementation."""
 
 from sanka_connector import (
     ENTRY_POINT_GROUP as ENTRY_POINT_GROUP,
@@ -29,7 +29,7 @@ from sanka_connector import (
     ConnectorError as SystemAccessError,
 )
 from sanka_connector import (
-    ConnectorRegistration as DataExtensionRegistration,
+    ConnectorRegistration as ExtensionRegistration,
 )
 from sanka_connector import (
     CredentialProvider as CredentialProvider,
@@ -187,7 +187,7 @@ from sanka_connector import (
 from sanka_connector import (
     __version__ as __version__,
 )
-from sanka_data.records import require_identity_values as require_identity_values
+from sanka_extensions.systems.records import require_identity_values as require_identity_values
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -203,8 +203,8 @@ __all__ = [
     "CustomObjectDefinition",
     "CustomObjectProperty",
     "DataError",
-    "DataExtensionRegistration",
     "ErrorCategory",
+    "ExtensionRegistration",
     "FieldSchema",
     "InvalidEmailPolicy",
     "Inventory",

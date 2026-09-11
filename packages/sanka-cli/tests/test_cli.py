@@ -323,7 +323,7 @@ def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) 
 def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["connect", "not-a-provider"]) == 1
     error = capsys.readouterr().err
-    assert "no installed data extension" in error
+    assert "no installed extension" in error
     assert "sanka extension add sanka/not-a-provider" in error
 
 

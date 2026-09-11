@@ -8,6 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_TYPES = {
+    "DataExtensionRegistration",
+    "DataExtensionRegistry",
+    "DataExtensionHostClient",
     "ConnectorRegistry",
     "ConnectorRegistration",
     "SourceConnector",
@@ -27,7 +30,7 @@ def check(root: Path) -> list[str]:
     source_root = root / "packages/sanka-cli/src"
     for source in sorted(source_root.rglob("*.py")):
         relative = source.relative_to(source_root)
-        if relative.parts[0] in {"sanka_connector", "sanka_data"}:
+        if relative.parts[0] in {"sanka_connector", "sanka_extensions", "sanka_extension_sdk"}:
             continue  # One shared SDK compatibility implementation and canonical facade.
         if relative.parts[:2] == ("sanka", "connector"):
             continue  # Published historical SDK alias modules.
@@ -40,7 +43,7 @@ def check(root: Path) -> list[str]:
                 and node.module
                 and (node.module == "sanka_connector" or node.module.startswith("sanka_connector."))
             ):
-                errors.append(f"{relative}:{node.lineno}: use the sanka_data SDK interface")
+                errors.append(f"{relative}:{node.lineno}: use the sanka_extensions SDK interface")
     return errors
 
 

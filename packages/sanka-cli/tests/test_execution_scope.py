@@ -23,7 +23,7 @@ from sanka.runtime.execution import (
     frozen_route_totals,
 )
 from sanka.runtime.mapping import MigrationMappingField, mapping_groups, mapping_route_manifest
-from sanka_data import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_extensions.systems import Credentials, RecordPage, SourceFilter, SourceObject
 
 _CREDENTIALS = Credentials(provider="fake")
 

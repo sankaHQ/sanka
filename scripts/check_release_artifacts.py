@@ -184,8 +184,11 @@ def main() -> int:
                 "sanka_cli/commands/skill.py",
                 "sanka_cli/main.py",
                 "sanka_cli/skills/sanka-cli/SKILL.md",
-                "sanka_data/__init__.py",
-                "sanka_data/py.typed",
+                "sanka_extensions/__init__.py",
+                "sanka_extensions/py.typed",
+                "sanka_extensions/systems/__init__.py",
+                "sanka_extensions/code/__init__.py",
+                "sanka_extension_sdk/contract.py",
                 "sanka_connector/__init__.py",
                 "sanka_connector/py.typed",
             }

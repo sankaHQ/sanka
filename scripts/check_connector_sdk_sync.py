@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Verify the embedded Data Extension SDK against an immutable upstream commit."""
+"""Verify the embedded Sanka Extension SDK against an immutable upstream commit."""
 
 from __future__ import annotations
 
@@ -11,10 +11,14 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-EMBEDDED_SHA256 = "c28783f095bcf9e23086d0517d33d33c64a4c4c7a51a5d9af1abecc68d5107f1"
-EXTENSIONS_REVISION = "d40692bf89339cd77fb330e1854460b221ac86cc"
-SDK_NAMESPACES = ("sanka_connector", "sanka_data")
-UPSTREAM_SDK_PATH = "packages/sanka-connector-sdk/src"
+EMBEDDED_SHA256 = "45a97208156099663517ea787e2a3641330019d7ec3d7ee12e516eb46156fad5"
+EXTENSIONS_REVISION = "f36dc3474fe35f52e65bf24eebb90197c8755c73"
+SDK_SOURCES = {
+    "sanka_connector": "packages/sanka-connector-sdk/src",
+    "sanka_extensions": "packages/sanka-extension-sdk/src",
+    "sanka_extension_sdk": "packages/sanka-extension-sdk/src",
+}
+SDK_NAMESPACES = tuple(SDK_SOURCES)
 
 
 def _python_tree(root: Path) -> dict[Path, bytes]:
@@ -66,7 +70,6 @@ def upstream_files(repository: Path, revision: str) -> dict[Path, bytes]:
     ).strip()
     if commit != revision:
         raise ValueError("SDK source revision is not the selected commit")
-    prefix = UPSTREAM_SDK_PATH + "/"
     records = subprocess.check_output(
         [
             "git",
@@ -77,7 +80,7 @@ def upstream_files(repository: Path, revision: str) -> dict[Path, bytes]:
             "-z",
             revision,
             "--",
-            *(prefix + namespace for namespace in SDK_NAMESPACES),
+            *(f"{prefix}/{namespace}" for namespace, prefix in SDK_SOURCES.items()),
         ]
     )
     result = {}
@@ -86,7 +89,13 @@ def upstream_files(repository: Path, revision: str) -> dict[Path, bytes]:
             continue
         metadata, raw_path = record.split(b"\t", 1)
         mode, kind, object_id = metadata.decode().split()
-        path = Path(raw_path.decode().removeprefix(prefix))
+        upstream_path = raw_path.decode()
+        namespace = next(
+            name
+            for name, prefix in SDK_SOURCES.items()
+            if upstream_path.startswith(f"{prefix}/{name}/")
+        )
+        path = Path(upstream_path.removeprefix(SDK_SOURCES[namespace] + "/"))
         if path.suffix != ".py" and path.name != "py.typed":
             continue
         if mode not in {"100644", "100755"} or kind != "blob":
@@ -117,7 +126,7 @@ def main() -> int:
     args = parser.parse_args()
     embedded = Path(__file__).resolve().parents[1] / "packages/sanka-cli/src"
     if _digest(_sdk_files(embedded)) != EMBEDDED_SHA256:
-        raise SystemExit("Embedded SDK digest drift; synchronize both namespaces from upstream")
+        raise SystemExit("Embedded SDK digest drift; synchronize the SDK modules from upstream")
     source = os.environ.get("SANKA_CONNECTOR_SDK_SOURCE")
     if source:
         # Preserve the old explicit tree check, in addition to commit verification.
@@ -144,7 +153,7 @@ def main() -> int:
                 check=True,
             )
             verify(repository, embedded)
-    print(f"Data Extension SDK source verified: {EXTENSIONS_REVISION}")
+    print(f"Sanka Extension SDK source verified: {EXTENSIONS_REVISION}")
     return 0
 
 

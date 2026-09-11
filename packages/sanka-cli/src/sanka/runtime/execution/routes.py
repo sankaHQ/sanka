@@ -63,7 +63,7 @@ from sanka.runtime.mapping.record_mapping import (
     relationship_source_ids,
     source_field_keys,
 )
-from sanka_data import (
+from sanka_extensions.systems import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
@@ -80,7 +80,7 @@ from sanka_data import (
     WriteOptions,
     WriteResult,
 )
-from sanka_data.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
+from sanka_extensions.systems.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
 
 if TYPE_CHECKING:
     from sanka.runtime.execution.scope import ExactIdScope
@@ -122,7 +122,7 @@ EXACT_SCOPE_COVERAGE_WARNING = (
 class WritePolicies:
     """Reviewed write behavior applied uniformly across one batch.
 
-    Per-route :class:`~sanka_data.WriteOptions` derive from these plus
+    Per-route :class:`~sanka_extensions.systems.WriteOptions` derive from these plus
     each route's identity fields; the owner policies feed the owner-mapping
     phase.
     """

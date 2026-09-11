@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import pytest
 
 from sanka.runtime.engine import MigrationEngine
-from sanka.runtime.registry import DataExtensionRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
 
@@ -61,7 +61,7 @@ async def test_flagship_postgres_to_clickhouse(tmp_path: Path) -> None:
         )
         engine = MigrationEngine(
             store=SqliteStateStore(tmp_path / "state.db"),
-            registry=DataExtensionRegistry.discover(),
+            registry=ExtensionRegistry.discover(),
             batch_size=16,  # force multiple pages/checkpoints
         )
         run_id = engine.create(spec)

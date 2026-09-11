@@ -13,7 +13,7 @@ import sanka_cli
 import sanka_cli.mcp
 from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
 from sanka.runtime.extensions.store import ExtensionStore
-from sanka.runtime.registry import DataExtensionRegistry
+from sanka.runtime.registry import ExtensionRegistry
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
@@ -167,9 +167,9 @@ def test_sanka_context_closes_owned_connector_store_once(
     host = Host()
     store = Store(tmp_path / "project", user_root=tmp_path / "user")
     store._connector_clients["artifact"] = host  # type: ignore[assignment]
-    registry = DataExtensionRegistry({}, owner=store)
+    registry = ExtensionRegistry({}, owner=store)
     monkeypatch.setattr(
-        DataExtensionRegistry,
+        ExtensionRegistry,
         "discover",
         classmethod(lambda _cls: registry),
     )

@@ -86,7 +86,7 @@ release tag.
 ## Retirement and rollback
 
 After every clean-install and downstream gate passes, yank—never delete—the
-historical CLI, MCP, Data Extension SDK, and first-party data extension PyPI releases.
+historical CLI, MCP, Sanka Extension SDK, and first-party extension PyPI releases.
 Yank reasons name `sanka-cli`, `sanka-cli[mcp]`, or the matching GitHub
 marketplace component. Archive the old CLI repository only after removing its
 publisher.
