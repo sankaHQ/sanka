@@ -29,7 +29,13 @@ def test_runtime_boundary_rejects_target_dependencies_and_framework_members() ->
 
 
 @pytest.mark.parametrize(
-    "omitted", [None, "sanka_extensions/flow/__init__.py", "sanka_extensions/flow/definition.py"]
+    "omitted",
+    [
+        None,
+        "sanka_extensions/flow/__init__.py",
+        "sanka_extensions/flow/definition.py",
+        "sanka/runtime/extensions/stage.py",
+    ],
 )
 def test_unified_release_artifact_contains_three_license_zones(
     tmp_path: Path, monkeypatch, omitted: str | None
@@ -42,6 +48,7 @@ def test_unified_release_artifact_contains_three_license_zones(
         "sanka/_client.py": b"",
         "sanka/connector/__init__.py": b"",
         "sanka/runtime/__init__.py": b"",
+        "sanka/runtime/extensions/stage.py": b"",
         "sanka_cli/__init__.py": b"",
         "sanka_cli/commands/skill.py": b"",
         "sanka_cli/main.py": b"",

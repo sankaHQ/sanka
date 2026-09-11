@@ -180,6 +180,7 @@ def main() -> int:
                 "sanka/_client.py",
                 "sanka/connector/__init__.py",
                 "sanka/runtime/__init__.py",
+                "sanka/runtime/extensions/stage.py",
                 "sanka_cli/__init__.py",
                 "sanka_cli/commands/skill.py",
                 "sanka_cli/main.py",

@@ -60,6 +60,11 @@ locks, logs, or protocol errors.
 Hosted providers such as HubSpot, Salesforce, and SendGrid remain in Sanka's
 managed service and are not local marketplace components.
 
+Code stage validation is shared independently of its execution adapter. The local
+runner delegates to `ExtensionStageRunner`; hosted worker adoption is a separate
+step. See [the Code runtime boundary](code-runtime.md) for the adapter contract and
+current integration status.
+
 ## Hosted-product boundary
 
 Proprietary control-plane code, customer data, credentials, production
