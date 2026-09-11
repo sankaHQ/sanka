@@ -80,7 +80,7 @@ def test_stage_runs_without_a_local_extension_store(tmp_path: Path) -> None:
 def test_invalid_binding_or_request_never_reaches_adapter(tmp_path: Path, invalid: str) -> None:
     selected = binding()
     payload = request(tmp_path)
-    roots = (tmp_path,)
+    roots: tuple[Path, ...] = (tmp_path,)
     if invalid == "identity":
         payload["extension"]["version"] = "2.0.0"
     elif invalid == "disabled":
