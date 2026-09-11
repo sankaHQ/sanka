@@ -39,6 +39,8 @@ def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, m
         "sanka_cli/commands/skill.py": b"",
         "sanka_cli/main.py": b"",
         "sanka_cli/skills/sanka-cli/SKILL.md": b"",
+        "sanka_data/__init__.py": b"",
+        "sanka_data/py.typed": b"",
         "sanka_connector/__init__.py": b"",
         "sanka_connector/py.typed": b"",
         "sanka_cli-0.2.4.dist-info/METADATA": (
