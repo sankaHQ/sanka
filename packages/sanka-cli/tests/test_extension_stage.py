@@ -148,7 +148,10 @@ def test_stage_keeps_validated_request_when_caller_mutates_it(tmp_path: Path) ->
     )
 
 
-@pytest.mark.parametrize("invalid", ["non-string-key", "non-finite", "cycle", "request-id"])
+@pytest.mark.parametrize(
+    "invalid",
+    ["non-string-key", "non-finite", "cycle", "request-id", "configuration", "fingerprint"],
+)
 def test_invalid_json_request_never_reaches_adapter(tmp_path: Path, invalid: str) -> None:
     payload = request(tmp_path)
     if invalid == "non-string-key":
@@ -157,8 +160,10 @@ def test_invalid_json_request_never_reaches_adapter(tmp_path: Path, invalid: str
         payload["configuration"] = {"value": float("nan")}
     elif invalid == "cycle":
         payload["configuration"]["self"] = payload
-    else:
+    elif invalid == "request-id":
         payload["request_id"] = ""
+    else:
+        payload[invalid] = ["must remain an object"]
 
     def execute(content: bytes) -> tuple[int, bytes, bytes]:
         pytest.fail("Malformed request reached adapter")

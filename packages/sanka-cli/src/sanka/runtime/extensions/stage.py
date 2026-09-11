@@ -142,8 +142,9 @@ class ExtensionStageRunner:
             path = Path(_string(payload[field], field))
             if not path.is_absolute():
                 _error("SANKA_EXTENSION_PATH", f"{field} must be absolute")
-        _json_value(payload["fingerprint"], "fingerprint")
-        _json_value(payload["configuration"], "configuration")
+        for field in ("fingerprint", "configuration"):
+            if not isinstance(_json_value(payload[field], field), dict):
+                _error("SANKA_EXTENSION_PROTOCOL", f"{field} must be an object")
         _string_array(payload["prior_artifacts"], "prior_artifacts")
         reviewed = payload["reviewed_plan_hash"]
         if reviewed is not None:
