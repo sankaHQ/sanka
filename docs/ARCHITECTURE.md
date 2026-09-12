@@ -14,7 +14,7 @@ live in [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions).
 
 | Source zone | License | Responsibility |
 |---|---|---|
-| `packages/sanka-cli/src/sanka_cli` | Apache-2.0 | top-level dispatcher, hosted commands, authentication, output, optional MCP integration |
+| `packages/sanka-cli/src/sanka_cli` | Apache-2.0 | top-level dispatcher, hosted commands, authentication, output |
 | `packages/sanka-cli/src/sanka_extensions` (including the SDK compatibility modules) | Apache-2.0 | synchronized Sanka Extension SDK used by the local engine |
 | `packages/sanka-cli/src/sanka` | AGPL-3.0-only | migration runtime, planner, execution, verification, extension manager, extension host |
 
@@ -23,7 +23,7 @@ and `NOTICE`, and exposes exactly `sanka = sanka_cli.main:main`.
 `scripts/check_license_headers.py` enforces the source zones.
 `scripts/check_connector_sdk_sync.py` byte-compares the embedded Sanka Extension SDK
 with the exact reviewed extensions checkout. `scripts/check_import_boundaries.py`
-prevents the embedded SDK and MCP integration from importing the AGPL runtime.
+prevents the embedded SDK from importing the AGPL runtime.
 
 ## Command boundary
 

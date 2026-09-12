@@ -3,8 +3,8 @@
 Sanka is a migration runtime with a finish line: inspect the source, review an
 immutable plan, apply that exact plan, and verify the result. The
 `sanka-cli` distribution contains the hosted command dispatcher, local
-migration engine, extension manager, extension host, and optional MCP
-integration behind one `sanka` executable.
+migration engine, extension manager, and extension host behind one `sanka`
+executable. MCP clients connect to the separate hosted Sanka MCP service.
 
 Sanka handles data migrations, including schemas, relationships and attachments.
 Sanka Flow handles workflow migrations: automations, triggers, actions and conditions.
