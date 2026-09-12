@@ -9,13 +9,6 @@ updates:
       time: "09:00"
       timezone: Asia/Tokyo
     open-pull-requests-limit: 5
-    ignore:
-      # MCP 2.x changes the FastMCP import and annotation contracts. Handle
-      # that migration as a reviewed compatibility change instead of a
-      # routine dependency refresh.
-      - dependency-name: mcp
-        update-types:
-          - version-update:semver-major
     groups:
       python-runtime:
         dependency-type: production

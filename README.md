@@ -3,8 +3,8 @@
 Sanka is a migration runtime with a finish line: inspect the source, review an
 immutable plan, apply that exact plan, and verify the result. The
 `sanka-cli` distribution contains the hosted command dispatcher, local
-migration engine, extension manager, extension host, and optional MCP
-integration behind one `sanka` executable.
+migration engine, extension manager, and extension host behind one `sanka`
+executable. MCP clients connect to the separate hosted Sanka MCP service.
 
 Sanka handles data migrations, including schemas, relationships and attachments.
 Sanka Flow handles workflow migrations: automations, triggers, actions and conditions.
@@ -37,12 +37,8 @@ uv tool install sanka-cli
 sanka --help
 ```
 
-Install the optional stdio MCP dependencies only when needed:
-
-```bash
-uv tool install 'sanka-cli[mcp]'
-sanka mcp
-```
+For AI agents using MCP, connect to the hosted Sanka MCP server at
+`https://mcp.sanka.com/mcp`. No local MCP package is required.
 
 Install Sanka's AI skill into Claude Code or Codex. Without `--scope`, the CLI
 prompts for a project or global installation; automation should pass the scope
@@ -133,7 +129,6 @@ Authentication is selected after command routing:
 | `plan`, `apply`, or `verify` with an explicit cloud selector | hosted migration API | required |
 | `auth`, resources, workflows, AI, `functions` (custom functions) | hosted Sanka API | required where the command already requires it |
 | research and assessment | public hosted API | not required |
-| `mcp` | local stdio server | public tools remain credential-free |
 
 Missing hosted credentials do not block local help, inspection, planning,
 extension management, testing, or verification.
@@ -200,24 +195,26 @@ asyncio.run(main())
 `Sanka.configure_endpoint` is write-free; `Sanka.connect` remains a compatibility alias. `Sanka.migrate` creates or resumes a lifecycle
 handle; destination writes remain behind `apply`.
 
-## MCP
+## Hosted MCP
 
-After installing the extra, configure an MCP client to run:
+Configure an MCP client with the hosted server:
 
 ```json
 {
   "mcpServers": {
-    "sanka": {
-      "command": "sanka",
-      "args": ["mcp"]
-    }
+    "sanka": { "url": "https://mcp.sanka.com/mcp" }
   }
 }
 ```
 
-The server exposes `sanka_research_eol`, `sanka_research_tco`,
-`sanka_research_compare`, and `sanka_assess`. It does not plan or execute a
-migration.
+Connect your Sanka account when prompted. Hosted operations follow their
+normal permissions and usage pricing.
+
+The local research MCP server and the `mcp` installation extra were removed
+in `sanka-cli` 0.2.9. Replace any `command: "sanka", args: ["mcp"]`
+configuration with the hosted URL above. The old command exits with a
+retirement message; it does not start a server or make a network request.
+Local migration commands and SDK adapters continue to use the CLI.
 
 ## Licensing
 

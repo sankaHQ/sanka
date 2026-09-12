@@ -104,13 +104,10 @@ def main() -> int:
     if project.get("scripts", {}) != expected_scripts:
         errors.append(f"console scripts must be exactly: {expected_scripts}")
 
-    mcp_dependencies = {
-        _requirement_name(str(value))
-        for value in project.get("optional-dependencies", {}).get("mcp", [])
-    }
-    expected_mcp_dependencies = {"mcp", "pydantic", "pydantic-settings"}
-    if mcp_dependencies != expected_mcp_dependencies:
-        errors.append(f"the mcp extra must contain exactly: {sorted(expected_mcp_dependencies)}")
+    if "mcp" in project.get("optional-dependencies", {}):
+        errors.append("the retired local MCP extra must not be published")
+    if (ROOT / "packages/sanka-cli/src/sanka_cli/mcp").exists():
+        errors.append("the retired local MCP server must not be bundled")
 
     wheel_packages = (
         project_document.get("tool", {})
@@ -135,7 +132,6 @@ def main() -> int:
     for relative in (
         "packages/sanka-cli/src/sanka",
         "packages/sanka-cli/src/sanka_cli",
-        "packages/sanka-cli/src/sanka_cli/mcp",
         "packages/sanka-cli/src/sanka_extensions",
         "packages/sanka-cli/src/sanka_connector",
         "packages/sanka-cli/src/sanka_extension_sdk",

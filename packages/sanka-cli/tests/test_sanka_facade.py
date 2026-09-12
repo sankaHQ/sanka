@@ -10,7 +10,6 @@ import pytest
 import sanka
 import sanka.runtime
 import sanka_cli
-import sanka_cli.mcp
 from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.registry import ExtensionRegistry
@@ -33,9 +32,8 @@ def test_public_facade_version_matches_unified_distribution() -> None:
         sanka.__version__
         == sanka.runtime.__version__
         == sanka_cli.__version__
-        == sanka_cli.mcp.__version__
         == distribution_version("sanka-cli")
-        == "0.2.8"
+        == "0.2.9"
     )
 
 

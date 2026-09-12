@@ -3,8 +3,8 @@
 `sanka-cli` is Sanka's single Python distribution. It installs one `sanka`
 executable and contains:
 
-- the Apache-2.0 hosted command dispatcher, authentication, output, and
-  optional MCP integration under `sanka_cli`;
+- the Apache-2.0 hosted command dispatcher, authentication, and output
+  under `sanka_cli`;
 - the embedded Apache-2.0 Sanka Extension SDK through `sanka_extensions`; and
 - the AGPL-3.0-only local migration runtime under `sanka`.
 
@@ -17,12 +17,8 @@ uv tool install sanka-cli
 sanka --help
 ```
 
-For the stdio MCP server:
-
-```bash
-uv tool install 'sanka-cli[mcp]'
-sanka mcp
-```
+For AI agents using MCP, connect to the hosted Sanka MCP server at
+`https://mcp.sanka.com/mcp`. No local MCP package is required.
 
 Install the bundled `sanka-cli` skill into an AI coding harness:
 
@@ -125,11 +121,26 @@ The Python and Node `sanka-sdk` migration adapters invoke
 execution for local commands, require an API token, auto-install this package,
 or replace its framework detection and safety defaults.
 
-## MCP tools
+## Hosted MCP
 
-`sanka mcp` exposes `sanka_research_eol`, `sanka_research_tco`,
-`sanka_research_compare`, and `sanka_assess`. Public research and assessment
-remain credential-free; the MCP server does not execute migrations.
+Configure an MCP client with the hosted server:
+
+```json
+{
+  "mcpServers": {
+    "sanka": { "url": "https://mcp.sanka.com/mcp" }
+  }
+}
+```
+
+Connect your Sanka account when prompted. Hosted operations follow their
+normal permissions and usage pricing.
+
+The local research MCP server and the `mcp` installation extra were removed
+in `sanka-cli` 0.2.9. Replace any `command: "sanka", args: ["mcp"]`
+configuration with the hosted URL above. The old command exits with a
+retirement message; it does not start a server or make a network request.
+Local migration commands and SDK adapters continue to use the CLI.
 
 ## License
 

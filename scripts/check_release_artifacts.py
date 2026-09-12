@@ -19,6 +19,7 @@ EXPECTED_LICENSES = {
 REPOSITORY_URL = "https://github.com/sankaHQ/sanka"
 FORBIDDEN_RUNTIME_DEPENDENCIES = frozenset(
     {
+        "mcp",
         "aiosqlite",
         "asyncpg",
         "django",
@@ -90,6 +91,8 @@ def _runtime_boundary_errors(requirement_names: set[str], wheel_members: set[str
     ]
     if any(name.startswith("sanka/runtime/frameworks/") for name in wheel_members):
         errors.append("sanka-cli: wheel must not ship sanka/runtime/frameworks/")
+    if any(name.startswith("sanka_cli/mcp/") for name in wheel_members):
+        errors.append("sanka-cli: wheel must not ship the retired local MCP server")
     return errors
 
 

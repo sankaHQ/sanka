@@ -39,7 +39,7 @@ Moving PostgreSQL records is a Sanka data migration. Adapting the application's 
 | CLI JSON protocol | `sanka-cli/v1` |
 | Custom function commands | `sanka functions` |
 | Code migration commands | `sanka scan`, `plan`, `apply`, `test`, `verify` |
-| MCP | `sanka mcp` |
+| Hosted MCP | `https://mcp.sanka.com/mcp` |
 
 `Sanka.configure_endpoint` creates a write-free `DataEndpoint`. It does not verify authentication. `Sanka.migrate` creates or resumes a local lifecycle; destination writes require `apply` and the reviewed plan hash. Old `SystemConfig` / `Connection` imports, constructor keywords, `Sanka.configure_system` and `Sanka.connect` remain compatible.
 

@@ -12,6 +12,13 @@ import pytest
 from scripts.check_release_artifacts import _runtime_boundary_errors, main
 
 
+def test_release_rejects_local_mcp_dependencies_and_server_files() -> None:
+    errors = _runtime_boundary_errors({"mcp"}, {"sanka_cli/mcp/server.py"})
+
+    assert any("dependency mcp" in error for error in errors)
+    assert any("retired local MCP server" in error for error in errors)
+
+
 def test_runtime_boundary_rejects_target_dependencies_and_framework_members() -> None:
     errors = _runtime_boundary_errors(
         {"pyyaml", "sanka-connector-sdk", "fastapi", "asyncpg"},

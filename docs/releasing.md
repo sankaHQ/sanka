@@ -7,18 +7,18 @@ SHA-256 hashes, and publishes through job-scoped OIDC.
 
 ## Candidate and prerequisite
 
-The current candidate is `sanka-cli==0.2.7`, tagged `v0.2.7`. Its source
+The current candidate is `sanka-cli==0.2.9`, tagged `v0.2.9`. Its source
 authority is the reviewed, merged `sankaHQ/sanka` commit; PyPI becomes the
 artifact authority only after publication and clean-install verification.
-This release includes the merged compact scan/plan output improvement: successful
-responses retain decisions and diagnostics while linking repeated descriptive metadata
-to persisted artifacts. Full JSON output remains unchanged. Version `0.2.6` remains
-immutable. The harness and extension guidance changes are released separately.
+This release removes the local research MCP implementation and installation
+extra. Existing `sanka mcp` configurations receive a retirement message that
+points to `https://mcp.sanka.com/mcp`; they do not start a server. The local
+migration runtime, SDK adapters, and hosted command routes are preserved.
+Published version `0.2.8` remains immutable.
 
-Publish and verify the reviewed `extensions-v0.1.0a15` GitHub marketplace release
-first. Its immutable wheels provide the shared DRF replay and Flask verifier
-used by the updated CLI Skill. CI and the CLI build use the locked workspace;
-they do not require a private cross-repository SDK checkout.
+Use the already published `extensions-v0.1.0a17` marketplace release. This
+candidate changes no SDK or extension implementation and needs no new
+Extensions publication. CI and the CLI build use the locked workspace.
 
 ## Local, write-free preparation
 
@@ -28,14 +28,14 @@ With exact sibling `sanka` and `extensions` checkouts:
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.2.7 tag
+uv run python scripts/check_release_tag.py v0.2.9 tag
 ```
 
 `make build-release` clears `dist/`, builds only:
 
 ```text
-sanka_cli-0.2.7-py3-none-any.whl
-sanka_cli-0.2.7.tar.gz
+sanka_cli-0.2.9-py3-none-any.whl
+sanka_cli-0.2.9.tar.gz
 ```
 
 It checks package metadata, dependencies, entry points, licenses, imports, and
@@ -59,24 +59,25 @@ local environment files, or repository history.
 
 ## Publication gate
 
-1. Publish and verify `extensions-v0.1.0a15` and its manifest wheel hashes.
+1. Verify the existing `extensions-v0.1.0a17` release and its manifest wheel hashes.
 2. Merge the reviewed Sanka change through `sanka-pr-flow` and verify required
    CI on the exact final head.
-3. Create and push `v0.2.7` only with explicit authorization. Do not move or
-   reuse an existing release tag or the published `0.2.6` package version.
+3. Create and push `v0.2.9` only with explicit authorization. Do not move or
+   reuse an existing release tag or the published `0.2.8` package version.
 4. Verify local `release/SOURCE_COMMIT` and `release/SHA256SUMS` against the
    approved tag.
-5. Dispatch **Publish sanka-cli** at `v0.2.7` with confirmation
-   `publish-v0.2.7`.
+5. Dispatch **Publish sanka-cli** at `v0.2.9` with confirmation
+   `publish-v0.2.9`.
 6. The build job runs the full checks, builds once, stages once, and uploads
    one workflow artifact. It has no OIDC permission.
 7. The `pypi` job receives only `id-token: write`, downloads the named
    artifact, verifies its source commit and hashes, and invokes the PyPI action
    once.
-8. Install `sanka-cli==0.2.7` and `sanka-cli[mcp]` in fresh environments;
-   verify CLI help, local tokenless behavior, hosted authentication failure,
-   extension installation from GitHub, one data migration, MCP tool
-   names, and both SDK adapters.
+8. Install `sanka-cli==0.2.9` in a fresh environment. Verify CLI help,
+   local tokenless behavior, hosted authentication failure, GitHub extension
+   installation, and both SDK adapters. Confirm the wheel has no local MCP
+   server, `mcp` extra, or MCP dependency. Confirm `sanka mcp` exits nonzero
+   with the hosted URL on stderr and no stdout protocol output.
 9. Publish and verify SDK/Homebrew/docs follow-ups in their approved order.
 10. Only then retire legacy projects and the old publishing identity.
 
@@ -85,11 +86,11 @@ release tag.
 
 ## Retirement and rollback
 
-After every clean-install and downstream gate passes, yank—never delete—the
-historical CLI, MCP, Sanka Extension SDK, and first-party extension PyPI releases.
-Yank reasons name `sanka-cli`, `sanka-cli[mcp]`, or the matching GitHub
-marketplace component. Archive the old CLI repository only after removing its
-publisher.
+Do not delete or overwrite historical artifacts. Local MCP retirement ships
+in the new CLI version. Update published CLI setup guides to use hosted MCP
+when releasing this candidate; existing published 0.2.8 installations retain
+their old behavior until upgraded. Any yanking or repository archival remains
+a separate, explicitly authorized operation.
 
 - A failed extensions release blocks the CLI release.
 - A failed publisher change or upload leaves historical releases active.

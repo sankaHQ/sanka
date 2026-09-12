@@ -15,9 +15,9 @@ strong-copyleft dependency outside the local `sanka-cli` distribution.
 | PyYAML | MIT | migration specifications |
 | Rich | MIT | terminal output |
 
-The optional `mcp` extra adds `mcp`, Pydantic, and Pydantic Settings plus their
-transitive transport and schema dependencies. Their resolved MIT, BSD,
-Apache-2.0, MPL-2.0, and PSF expressions remain checked by the same guard.
+The local MCP server and its installation extra were removed in 0.2.9.
+Hosted MCP runs as a separate service; the CLI does not depend on its server
+or transport packages.
 
 The embedded `sanka_connector` package is Sanka-owned Apache-2.0 source, not a
 separate runtime dependency. Connector and migration-extension wheels come
