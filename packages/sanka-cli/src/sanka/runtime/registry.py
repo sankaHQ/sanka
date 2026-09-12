@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_extensions.systems import ExtensionRegistration
-from sanka_extensions.systems.protocols import SystemReader, SystemWriter
+from sanka_extensions.data import ExtensionRegistration
+from sanka_extensions.data.protocols import DataReader, DataWriter
 
 HOSTED_SYSTEM_PROVIDERS = {
     "hubspot": "HubSpot",
@@ -18,7 +18,7 @@ HOSTED_SYSTEM_PROVIDERS = {
 }
 
 
-class UnknownSystemError(ValueError):
+class UnknownEndpointError(ValueError):
     """No installed local extension exposes the requested type."""
 
 
@@ -60,7 +60,7 @@ class ExtensionRegistry:
         return cls(
             {},
             resolver=store.resolve_extension,
-            providers=store.supported_systems(),
+            providers=store.supported_endpoints(),
             owner=store,
         )
 
@@ -86,26 +86,26 @@ class ExtensionRegistry:
         """Return locked package identity when discovery is backed by an extension store."""
         if self._owner is None:
             return {}
-        return dict(self._owner.system_extension_metadata(type_name.strip().lower()))
+        return dict(self._owner.endpoint_extension_metadata(type_name.strip().lower()))
 
-    def source(self, type_name: str) -> SystemReader:
+    def source(self, type_name: str) -> DataReader:
         registration = self._get(type_name)
         if registration.source is None:
-            raise UnknownSystemError(f"system type {type_name!r} has no source role")
+            raise UnknownEndpointError(f"system type {type_name!r} has no source role")
         return registration.source
 
-    def destination(self, type_name: str) -> SystemWriter:
+    def destination(self, type_name: str) -> DataWriter:
         registration = self._get(type_name)
         if registration.destination is None:
-            raise UnknownSystemError(f"system type {type_name!r} has no destination role")
+            raise UnknownEndpointError(f"system type {type_name!r} has no destination role")
         return registration.destination
 
     def _get(self, type_name: str) -> ExtensionRegistration:
         normalized = type_name.strip().lower()
         if normalized in HOSTED_SYSTEM_PROVIDERS:
             provider = HOSTED_SYSTEM_PROVIDERS[normalized]
-            raise UnknownSystemError(
-                f"{provider} system migrations run through Sanka's hosted System "
+            raise UnknownEndpointError(
+                f"{provider} data migrations run through Sanka's hosted Data "
                 "Migration API, not a local extension; use the Sanka web app or hosted API"
             )
         registration = self._registrations.get(normalized)
@@ -126,7 +126,7 @@ class ExtensionRegistry:
                 self._registrations[normalized] = registration
                 return registration
         available = ", ".join(self.names()) or "none"
-        raise UnknownSystemError(
+        raise UnknownEndpointError(
             f"no installed extension for system type {type_name!r} (available: {available}); "
             f"run `sanka extension add sanka/{normalized}`"
         )
@@ -134,4 +134,7 @@ class ExtensionRegistry:
 
 # Compatibility imports for existing clients.
 ConnectorRegistry = ExtensionRegistry
-UnknownConnectorError = UnknownSystemError
+UnknownConnectorError = UnknownEndpointError
+
+# Compatibility names from the earlier systems terminology.
+UnknownSystemError = UnknownEndpointError

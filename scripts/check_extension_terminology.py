@@ -22,6 +22,15 @@ LEGACY_TYPES = {
     "ProviderTimeoutError",
     "TransientProviderError",
     "Connection",
+    "SystemConfig",
+    "SystemReader",
+    "SystemWriter",
+    "SystemIdentity",
+    "SystemAccessError",
+    "SystemTimeoutError",
+    "TransientSystemError",
+    "SystemSupport",
+    "UnknownSystemError",
 }
 
 
@@ -41,7 +50,10 @@ def check(root: Path) -> list[str]:
             if (
                 isinstance(node, ast.ImportFrom)
                 and node.module
-                and (node.module == "sanka_connector" or node.module.startswith("sanka_connector."))
+                and any(
+                    node.module == legacy or node.module.startswith(legacy + ".")
+                    for legacy in ("sanka_connector", "sanka_extensions.systems")
+                )
             ):
                 errors.append(f"{relative}:{node.lineno}: use the sanka_extensions SDK interface")
     return errors
@@ -51,7 +63,7 @@ def main() -> int:
     errors = check(ROOT)
     if errors:
         raise SystemExit("\n".join(errors))
-    print("Extension/system terminology: OK")
+    print("Extension/data terminology: OK")
     return 0
 
 

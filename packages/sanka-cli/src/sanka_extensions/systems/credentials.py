@@ -1,14 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Canonical extension interfaces over the shared compatibility implementation."""
+"""Compatibility imports; new extensions use sanka_extensions.data."""
 
-from sanka_connector.credentials import (
-    CredentialProvider as CredentialProvider,
-)
-from sanka_connector.credentials import (
-    Credentials as Credentials,
-)
-from sanka_connector.credentials import (
-    SupportsCredentialRefresh as SupportsCredentialRefresh,
-)
+from sanka_extensions.data.credentials import CredentialProvider as CredentialProvider
+from sanka_extensions.data.credentials import Credentials as Credentials
+from sanka_extensions.data.credentials import SupportsCredentialRefresh as SupportsCredentialRefresh
 
 __all__ = ["CredentialProvider", "Credentials", "SupportsCredentialRefresh"]

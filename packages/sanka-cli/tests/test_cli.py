@@ -338,7 +338,7 @@ def test_connect_rejects_hosted_systems_without_cloud_dispatch(
 
     error = capsys.readouterr().err
     assert label in error
-    assert "hosted System Migration API" in error
+    assert "hosted Data Migration API" in error
     assert f"sanka-connector-{provider}" not in error
 
 

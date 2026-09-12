@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Structured error taxonomy for Sanka systems.
+"""Structured error taxonomy for Sanka data access.
 
-System readers and writers raise :class:`SystemAccessError` subclasses instead of leaking raw
+Data readers and writers raise :class:`DataAccessError` subclasses instead of leaking raw
 provider exceptions. The engine keys retry policy off ``category`` and
 ``retryable``, and surfaces ``remediation`` to operators and AI agents.
 """
@@ -33,8 +33,8 @@ _RETRYABLE_BY_DEFAULT = frozenset(
 )
 
 
-class SystemAccessError(Exception):
-    """Base class for all system access failures.
+class DataAccessError(Exception):
+    """Base class for all data access failures.
 
     ``retryable`` defaults from the category (rate-limit / transient / timeout
     retry; everything else does not) and can be overridden per instance.
@@ -63,55 +63,60 @@ class SystemAccessError(Exception):
         self.details: dict[str, Any] = details or {}
 
 
-class AuthenticationError(SystemAccessError):
+class AuthenticationError(DataAccessError):
     category = ErrorCategory.AUTHENTICATION
 
 
-class PermissionDeniedError(SystemAccessError):
+class PermissionDeniedError(DataAccessError):
     category = ErrorCategory.PERMISSION
 
 
-class RateLimitError(SystemAccessError):
+class RateLimitError(DataAccessError):
     category = ErrorCategory.RATE_LIMIT
 
 
-class TransientSystemError(SystemAccessError):
+class TransientDataError(DataAccessError):
     category = ErrorCategory.TRANSIENT
 
 
-class SystemTimeoutError(SystemAccessError):
+class DataTimeoutError(DataAccessError):
     category = ErrorCategory.TIMEOUT
 
 
-class NotFoundError(SystemAccessError):
+class NotFoundError(DataAccessError):
     category = ErrorCategory.NOT_FOUND
 
 
-class ConflictError(SystemAccessError):
+class ConflictError(DataAccessError):
     category = ErrorCategory.CONFLICT
 
 
-class ValidationFailedError(SystemAccessError):
+class ValidationFailedError(DataAccessError):
     category = ErrorCategory.VALIDATION
 
 
-class SchemaMismatchError(SystemAccessError):
+class SchemaMismatchError(DataAccessError):
     category = ErrorCategory.SCHEMA_MISMATCH
 
 
-class UnsupportedFeatureError(SystemAccessError):
+class UnsupportedFeatureError(DataAccessError):
     category = ErrorCategory.UNSUPPORTED
 
 
-class DataError(SystemAccessError):
+class DataError(DataAccessError):
     category = ErrorCategory.DATA
 
 
-class ConfigurationError(SystemAccessError):
+class ConfigurationError(DataAccessError):
     category = ErrorCategory.CONFIGURATION
 
 
 # Published compatibility names; both spellings identify the same classes.
-ConnectorError = SystemAccessError
-ProviderTimeoutError = SystemTimeoutError
-TransientProviderError = TransientSystemError
+ConnectorError = DataAccessError
+ProviderTimeoutError = DataTimeoutError
+TransientProviderError = TransientDataError
+
+# Compatibility names from the earlier systems facade.
+SystemAccessError = DataAccessError
+SystemTimeoutError = DataTimeoutError
+TransientSystemError = TransientDataError

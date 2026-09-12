@@ -43,16 +43,16 @@ from sanka.runtime.extensions.discovery import (
 )
 from sanka.runtime.extensions.model import (
     LIFECYCLE_COMMANDS,
+    EndpointSupport,
     ExtensionError,
     Fingerprint,
     Manifest,
     Recommendation,
-    SystemSupport,
     Wheel,
 )
 from sanka.runtime.hashing import content_hash
 from sanka_cli import __version__
-from sanka_extensions.systems import ENTRY_POINT_GROUP, ExtensionRegistration
+from sanka_extensions.data import ENTRY_POINT_GROUP, ExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
@@ -366,7 +366,7 @@ class ExtensionRecord:
     marketplace_identity: str
     manifest_digest: str
     kind: str
-    providers: tuple[SystemSupport, ...]
+    providers: tuple[EndpointSupport, ...]
     targets: tuple[str, ...]
     status: tuple[str, ...]
     wheels: tuple[Wheel, ...]
@@ -399,7 +399,7 @@ class LockEntry:
     configuration_digest: str
     kind: str = "migration"
     entry_point: str | None = None
-    providers: tuple[SystemSupport, ...] = ()
+    providers: tuple[EndpointSupport, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {
@@ -1853,7 +1853,7 @@ class ExtensionStore:
                     path=str(path),
                 )
             providers = tuple(
-                SystemSupport(
+                EndpointSupport(
                     provider["name"],
                     tuple(role for role in ("source", "destination") if role in provider["roles"]),
                 )
@@ -2594,7 +2594,7 @@ class ExtensionStore:
     def _wheel_connector_entry_points(
         self,
         wheels: tuple[tuple[Path, str], ...],
-        providers: tuple[SystemSupport, ...],
+        providers: tuple[EndpointSupport, ...],
     ) -> dict[str, str]:
         connector_entries: dict[str, str] = {}
         scripts: list[str] = []
@@ -2735,7 +2735,7 @@ class ExtensionStore:
         executable: str | None,
         wheels: tuple[tuple[Path, str], ...],
         *,
-        providers: tuple[SystemSupport, ...] = (),
+        providers: tuple[EndpointSupport, ...] = (),
     ) -> None:
         entry_point = self._wheel_entry_point(wheels, executable) if executable else None
         if executable is None:
@@ -2811,7 +2811,7 @@ class ExtensionStore:
         wheels: tuple[tuple[Path, str], ...],
         *,
         expected_digest: str | None = None,
-        providers: tuple[SystemSupport, ...] = (),
+        providers: tuple[EndpointSupport, ...] = (),
     ) -> Path:
         root = self._confined(
             self.user_root,
@@ -3455,7 +3455,7 @@ class ExtensionStore:
         if reserved:
             _error(
                 "SANKA_EXTENSION_SYSTEM_RESERVED",
-                "These system types run through the hosted System Migration API",
+                "These system types run through the hosted Data Migration API",
                 extension_id=manifest.id,
                 system_types=reserved,
             )
@@ -3497,7 +3497,7 @@ class ExtensionStore:
             )
         return selected[0]
 
-    def system_extension_metadata(self, system_type: str) -> dict[str, str]:
+    def endpoint_extension_metadata(self, system_type: str) -> dict[str, str]:
         entry = self.resolve_locked(self._system_lock(system_type).id)
         manifest = self._manifest_for_lock(entry)
         return {
@@ -3507,7 +3507,7 @@ class ExtensionStore:
             "package_version": manifest.distribution_version,
         }
 
-    def supported_systems(self) -> tuple[str, ...]:
+    def supported_endpoints(self) -> tuple[str, ...]:
         disabled = self._load_disabled()
         return tuple(
             sorted(
@@ -3571,7 +3571,9 @@ class ExtensionStore:
         )
 
     # Compatibility method names for existing runtime consumers.
-    connector_providers = supported_systems
+    supported_systems = supported_endpoints
+    system_extension_metadata = endpoint_extension_metadata
+    connector_providers = supported_endpoints
     resolve_connector = resolve_extension
 
 

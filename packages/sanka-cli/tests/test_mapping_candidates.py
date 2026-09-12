@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from sanka.runtime.mapping import generate_mapping_candidates
-from sanka_extensions.systems import FieldSchema, Inventory, ObjectSchema
+from sanka_extensions.data import FieldSchema, Inventory, ObjectSchema
 
 
 def _object(

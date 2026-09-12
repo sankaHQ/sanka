@@ -65,8 +65,8 @@ class SourceObject:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class SystemIdentity:
-    """Verified identity of the system behind a connection.
+class DataIdentity:
+    """Verified identity of a data endpoint.
 
     Used for identity readback before any mutation: the operator (or agent)
     must see which account/host/tenant a run is actually pinned to.
@@ -80,4 +80,7 @@ class SystemIdentity:
 
 
 # Published compatibility names; both spellings identify the same classes.
-ProviderIdentity = SystemIdentity
+ProviderIdentity = DataIdentity
+
+# Compatibility names from the earlier systems facade.
+SystemIdentity = DataIdentity

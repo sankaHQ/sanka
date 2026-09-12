@@ -23,7 +23,7 @@ from typing import Any
 
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.model import MigrationMappingField
-from sanka_extensions.systems import SourceFilter
+from sanka_extensions.data import SourceFilter
 
 MappingGroup = tuple[str, str, SourceFilter | None, list[MigrationMappingField]]
 MappingRouteManifest = list[dict[str, Any]]

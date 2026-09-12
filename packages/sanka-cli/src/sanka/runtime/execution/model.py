@@ -25,7 +25,7 @@ from typing import Any, Literal
 from sanka.runtime.hashing import content_hash
 from sanka.runtime.mapping.model import MigrationMappingField
 from sanka.runtime.mapping.pending_relationships import PendingRelationshipsByRoute
-from sanka_extensions.systems import SourceFilter
+from sanka_extensions.data import SourceFilter
 
 ExecutionStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 WriteStatus = Literal["created", "updated", "skipped", "failed"]

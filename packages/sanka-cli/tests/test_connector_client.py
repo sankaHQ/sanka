@@ -17,12 +17,12 @@ from sanka.runtime.connector_host import (
     encode_value,
 )
 from sanka.runtime.extensions import ExtensionError
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     Credentials,
+    DataReader,
+    DataWriter,
     SupportsHighWaterMark,
     SupportsRecordCounts,
-    SystemReader,
-    SystemWriter,
     WriteOptions,
 )
 
@@ -308,11 +308,11 @@ async def test_sqlite_connector_round_trip_stays_out_of_process(tmp_path: Path) 
     with ExtensionHostClient(sys.executable, environment=site_packages) as client:
         description = client.request("sqlite", "describe", {})
         source = cast(
-            SystemReader,
+            DataReader,
             build_remote_extension(client, "sqlite", "source", description=description),
         )
         destination = cast(
-            SystemWriter,
+            DataWriter,
             build_remote_extension(client, "sqlite", "destination", description=description),
         )
 

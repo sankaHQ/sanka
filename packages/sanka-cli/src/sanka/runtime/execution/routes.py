@@ -63,11 +63,13 @@ from sanka.runtime.mapping.record_mapping import (
     relationship_source_ids,
     source_field_keys,
 )
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
+    DataReader,
+    DataWriter,
     RecordPage,
     RelationshipWrite,
     RelationshipWriteResult,
@@ -75,12 +77,10 @@ from sanka_extensions.systems import (
     SupportsBatchWrites,
     SupportsBoundedReads,
     SupportsOwnerDirectory,
-    SystemReader,
-    SystemWriter,
     WriteOptions,
     WriteResult,
 )
-from sanka_extensions.systems.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
+from sanka_extensions.data.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
 
 if TYPE_CHECKING:
     from sanka.runtime.execution.scope import ExactIdScope
@@ -122,7 +122,7 @@ EXACT_SCOPE_COVERAGE_WARNING = (
 class WritePolicies:
     """Reviewed write behavior applied uniformly across one batch.
 
-    Per-route :class:`~sanka_extensions.systems.WriteOptions` derive from these plus
+    Per-route :class:`~sanka_extensions.data.WriteOptions` derive from these plus
     each route's identity fields; the owner policies feed the owner-mapping
     phase.
     """
@@ -219,7 +219,7 @@ async def _uncovered_candidate_count(
 async def _retry_parked_relationships(
     *,
     host: ExecutionHost,
-    destination: SystemWriter,
+    destination: DataWriter,
     destination_credentials: Credentials,
     snapshot: ExecutionSnapshot,
     route_key: str,
@@ -246,7 +246,7 @@ async def _retry_parked_relationships(
 
 async def _read_route_page(
     *,
-    source: SystemReader,
+    source: DataReader,
     source_credentials: Credentials,
     route: ExecutionRoute,
     batch_size: int,
@@ -396,9 +396,9 @@ def _destination_payload(
 async def run_batch(
     *,
     routes: Sequence[ExecutionRoute],
-    source: SystemReader,
+    source: DataReader,
     source_credentials: Credentials,
-    destination: SystemWriter,
+    destination: DataWriter,
     destination_credentials: Credentials,
     policies: WritePolicies,
     batch_size: int,

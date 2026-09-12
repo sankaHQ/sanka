@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Sanka Extension SDK — Apache-2.0 system access interfaces.
+"""Sanka Extension SDK — Apache-2.0 data access interfaces.
 
-Extensions implement the base protocols (:class:`SystemReader`,
-:class:`SystemWriter`) plus any optional capability protocols, and
+Extensions implement the base protocols (:class:`DataReader`,
+:class:`DataWriter`) plus any optional capability protocols, and
 must not import the AGPL-licensed runtime (``sanka.runtime``); CI enforces
 that boundary so an extension is never a derivative work of the runtime.
 """
@@ -17,19 +17,21 @@ from sanka_connector.errors import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
+    DataAccessError,
     DataError,
+    DataTimeoutError,
     ErrorCategory,
     NotFoundError,
     PermissionDeniedError,
     RateLimitError,
     SchemaMismatchError,
-    SystemAccessError,
-    SystemTimeoutError,
-    TransientSystemError,
+    TransientDataError,
     UnsupportedFeatureError,
     ValidationFailedError,
 )
 from sanka_connector.protocols import (
+    DataReader,
+    DataWriter,
     Limits,
     SupportsBatchRelationshipWrites,
     SupportsBatchWrites,
@@ -46,8 +48,6 @@ from sanka_connector.protocols import (
     SupportsRetryMetrics,
     SupportsSchemaProvisioning,
     SupportsSnapshotBounds,
-    SystemReader,
-    SystemWriter,
 )
 from sanka_connector.provisioning import (
     CustomObjectDefinition,
@@ -75,11 +75,11 @@ from sanka_connector.records import (
 )
 from sanka_connector.registration import ENTRY_POINT_GROUP, ExtensionRegistration
 from sanka_connector.schema import (
+    DataIdentity,
     FieldSchema,
     Inventory,
     ObjectSchema,
     SourceObject,
-    SystemIdentity,
 )
 
 __all__ = [
@@ -95,7 +95,12 @@ __all__ = [
     "Credentials",
     "CustomObjectDefinition",
     "CustomObjectProperty",
+    "DataAccessError",
     "DataError",
+    "DataIdentity",
+    "DataReader",
+    "DataTimeoutError",
+    "DataWriter",
     "ErrorCategory",
     "ExtensionRegistration",
     "FieldSchema",
@@ -134,12 +139,7 @@ __all__ = [
     "SupportsRetryMetrics",
     "SupportsSchemaProvisioning",
     "SupportsSnapshotBounds",
-    "SystemAccessError",
-    "SystemIdentity",
-    "SystemReader",
-    "SystemTimeoutError",
-    "SystemWriter",
-    "TransientSystemError",
+    "TransientDataError",
     "UnsupportedFeatureError",
     "ValidationFailedError",
     "WriteOptions",
@@ -149,13 +149,13 @@ __all__ = [
 ]
 
 # Published compatibility names; both spellings identify the same classes.
-SourceConnector = SystemReader
-DestinationConnector = SystemWriter
+SourceConnector = DataReader
+DestinationConnector = DataWriter
 ConnectorRegistration = ExtensionRegistration
-ConnectorError = SystemAccessError
-ProviderIdentity = SystemIdentity
-ProviderTimeoutError = SystemTimeoutError
-TransientProviderError = TransientSystemError
+ConnectorError = DataAccessError
+ProviderIdentity = DataIdentity
+ProviderTimeoutError = DataTimeoutError
+TransientProviderError = TransientDataError
 
 __all__ += [
     "ConnectorError",
@@ -165,4 +165,21 @@ __all__ += [
     "ProviderTimeoutError",
     "SourceConnector",
     "TransientProviderError",
+]
+
+# Compatibility names from the earlier systems facade.
+SystemReader = DataReader
+SystemWriter = DataWriter
+SystemAccessError = DataAccessError
+SystemIdentity = DataIdentity
+SystemTimeoutError = DataTimeoutError
+TransientSystemError = TransientDataError
+
+__all__ += [
+    "SystemAccessError",
+    "SystemIdentity",
+    "SystemReader",
+    "SystemTimeoutError",
+    "SystemWriter",
+    "TransientSystemError",
 ]

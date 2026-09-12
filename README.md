@@ -6,18 +6,19 @@ immutable plan, apply that exact plan, and verify the result. The
 migration engine, extension manager, extension host, and optional MCP
 integration behind one `sanka` executable.
 
-Sanka migrates systems and their data. Sanka Flow reconstructs business
-configurations and operates their workflows.
-Sanka Code migrates applications and code. This repository owns their shared CLI
+Sanka handles data migrations, including schemas, relationships and attachments.
+Sanka Flow handles workflow migrations: automations, triggers, actions and conditions.
+Sanka Code handles code migrations, including application code, SQL dialects, ORM
+and dbt transformations. This repository owns their shared CLI
 and OSS runtime; repository and executable names do not define product boundaries.
 
-Extensions are installable capability packages. Systems are the configured databases,
-files, or SaaS accounts used in a migration. Moving PostgreSQL records belongs to
+Extensions are installable capability packages. Data endpoints are the configured
+databases, files or SaaS accounts used in a migration. Moving PostgreSQL records belongs to
 Sanka; adapting an application's SQL/ORM belongs to Sanka Code. A project may need
-both. Installing an extension never implies successful system authentication.
+both. Installing an extension never implies successful endpoint authentication.
 See [the naming contract](docs/public-naming.md) and [compatibility map](docs/naming-compatibility.md).
 
-The shared Extension SDK includes `sanka_extensions.systems`,
+The shared Extension SDK includes `sanka_extensions.data`,
 `sanka_extensions.flow` and `sanka_extensions.code`. Flow currently provides
 declarative requests such as `flow.create(type="crm")`; this CLI does not yet
 resolve or execute them. Its required change-preservation and verified-activation
@@ -142,7 +143,7 @@ clients. They invoke `sanka <command> ... --json`; they do not install the CLI,
 reimplement migration behavior, or silently switch local commands to the
 hosted API.
 
-## Extensions and systems
+## Extensions and data endpoints
 
 The official component IDs are:
 
@@ -183,8 +184,8 @@ from sanka import Sanka
 
 async def main() -> None:
     with Sanka() as sanka:
-        source = sanka.configure_system("markdown", "./content")
-        target = sanka.configure_system("sqlite", "content.db")
+        source = sanka.configure_endpoint("markdown", "./content")
+        target = sanka.configure_endpoint("sqlite", "content.db")
         migration = sanka.migrate(source=source, target=target)
         plan = await migration.plan()
         await migration.apply(plan_hash=plan.plan_hash)
@@ -196,7 +197,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`Sanka.connect` is write-free. `Sanka.migrate` creates or resumes a lifecycle
+`Sanka.configure_endpoint` is write-free; `Sanka.connect` remains a compatibility alias. `Sanka.migrate` creates or resumes a lifecycle
 handle; destination writes remain behind `apply`.
 
 ## MCP
