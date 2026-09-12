@@ -7,7 +7,7 @@ consistency. An execution adapter owns the process and its host restrictions.
 The local path is:
 
 ```text
-CLI → ExtensionLifecycle → ExtensionRunner → ExtensionStageRunner
+CLI → ApplicationLifecycle → ExtensionRunner → ExtensionStageRunner
                                            → local process adapter → extension
 ```
 
@@ -46,6 +46,39 @@ The artifact roots describe the filesystem visible to the adapter and validator.
 Both must run in the same namespace, or the adapter must provide a deliberately
 reviewed mapping. Do not validate host paths as if they were sandbox paths.
 
+## Complete Code lifecycle
+
+`sanka.runtime.extensions.code_lifecycle.CodeLifecycle` sequences
+`scan → plan → apply → test → verify` through the same stage runner. It returns
+an immutable `CodeRun` with validated stage receipts. Any failed stage ends the
+run without a retry; transport, protocol or observer errors raise and stop.
+
+The host provides the verified binding, configuration, roots, bounded `execute`
+callback, a current `snapshot_inputs` callback and an `approve_plan` callback.
+The snapshot must hash all source/configuration inputs actually used by the
+extension. A constant claim ID or the CLI's static dependency fingerprint does
+not satisfy this contract. Generated output must be outside those input roots.
+
+After planning, the runtime pins extension identity/capabilities, paths, input
+digest, configuration, extension plan and artifact content digests in a core
+`CodePlan`. The host must return that exact core `plan_hash` to continue; returning
+`None` stops with `planned`. Later stages receive the core hash in
+`reviewed_plan_hash`, the extension's separate digest in
+`configuration.extension_plan_hash`, and the reviewed plan artifact paths.
+Both hashes are preserved; they have different ownership.
+
+The runtime checks current input and reviewed artifact digests before/after stages
+and after approval. It requires a full SHA-256 extension plan digest for this new
+lifecycle. Existing interactive `ApplicationLifecycle` plans keep their published
+behavior and format. Both lifecycles use the same artifact hashing implementation.
+Receipt and plan observers receive immutable bytes and decode independent copies.
+Observer errors stop execution rather than allowing an unrecorded apply.
+
+There is no implicit authorization, recovery, cancellation policy or certificate
+issuance. A stopped planning result is not a resumable token: continuing requires
+a fresh lifecycle and approval. The host owns claim/lease fencing and must reject
+duplicate execution; it must not silently retry an uncertain apply.
+
 ## Current integration status
 
 Local Code lifecycle execution uses this boundary. The hosted worker still has
@@ -53,12 +86,17 @@ its existing stage loop and direct extension invocation until a separate consume
 change is validated and released. This change does not update a cloud dependency,
 publish a package, or deploy a worker.
 
-The next step moves the shared stage sequence and plan-hash handoff into the
-runtime and connects the worker adapter. Local reviewed plans and hosted approved
-run profiles retain their separate authorization checks. Workspace authorization,
-image verification, isolation, claims, billing and storage stay in `sanka-api`.
+The new complete lifecycle is ready for the worker adapter, with fake-transport
+coverage for sequence, exact approval, changed inputs/artifacts, failures and
+observer errors. The interactive CLI continues to use `ApplicationLifecycle` and
+the common stage runner; this does not replace its saved-plan commands.
+Local reviewed plans and hosted approved run profiles retain separate
+authorization checks. Workspace authorization, image verification, isolation,
+claims, billing and storage stay in `sanka-api`. Publishing the runtime, updating
+worker hash locks and activating its entrypoint are separate steps. Repair and
+independent certificate integrations remain pending.
 
-This is the first implementation step in the workspace
+This continues the Code implementation in the workspace
 [shared runtime plan](https://github.com/sankaHQ/sanka-project/blob/shared-runtime-plan/plan/shared-runtime-unification/README.md).
 Data migration and Flow adoption are separate steps. The SDK and reusable
 extensions remain owned by `sankaHQ/extensions`; see [Flow ownership](flow.md).
