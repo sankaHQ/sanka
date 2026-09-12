@@ -21,7 +21,7 @@ def test_unified_project_metadata() -> None:
         "project"
     ]
     assert project["name"] == "sanka-cli"
-    assert project["version"] == "0.2.8"
+    assert project["version"] == "0.2.9"
     assert project["license"] == "Apache-2.0 AND AGPL-3.0-only"
     assert project["scripts"] == {"sanka": "sanka_cli.main:main"}
 
@@ -42,7 +42,7 @@ def test_unified_package_license_zones() -> None:
     )
 
 
-def test_base_cli_import_registers_mcp_without_loading_extra() -> None:
+def test_base_cli_import_keeps_only_the_hidden_mcp_retirement_hint() -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -50,7 +50,7 @@ def test_base_cli_import_registers_mcp_without_loading_extra() -> None:
             (
                 "import sys; "
                 "from sanka_cli.main import cli; "
-                "assert 'mcp' in cli.commands; "
+                "assert cli.commands['mcp'].hidden; "
                 "assert 'mcp' not in sys.modules; "
                 "assert 'sanka_cli.mcp.server' not in sys.modules"
             ),
@@ -137,12 +137,12 @@ def test_boundaries_pass_on_repo() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_boundaries_catch_mcp_integration_importing_runtime_namespace() -> None:
-    fixture = ROOT / "tests" / "fixtures" / "mcp_boundary_violation"
+def test_boundaries_catch_canonical_sdk_importing_runtime_namespace() -> None:
+    fixture = ROOT / "tests" / "fixtures" / "sdk_boundary_violation"
     result = _run("check_import_boundaries.py", str(fixture))
     assert result.returncode == 1
     assert "sanka.runtime" in result.stdout
-    assert "MCP integration cannot import the AGPL runtime" in result.stdout
+    assert "Sanka Extension SDK cannot import the AGPL runtime" in result.stdout
 
 
 def test_boundaries_catch_connector_sdk_importing_runtime_namespace(tmp_path: Path) -> None:

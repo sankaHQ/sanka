@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Enforce source-license and migration-extension import boundaries.
 
-The embedded Apache Connector SDK and MCP integration cannot import the AGPL
-runtime. Target-framework implementations and generated destination
-dependencies belong in GitHub marketplace extensions, not the local runtime.
+The embedded Apache Sanka Extension SDK cannot import the AGPL runtime.
+Target-framework implementations and generated destination dependencies belong
+in GitHub marketplace extensions, not the local runtime.
 
 Usage: ``python scripts/check_import_boundaries.py [repo_root]``
 """
@@ -17,7 +17,6 @@ from pathlib import Path
 RESTRICTED_ZONES = {
     "packages/sanka-cli/src/sanka_extension_sdk": "Extension SDK cannot import the AGPL runtime",
     "packages/sanka-cli/src/sanka_extensions": "Sanka Extension SDK cannot import the AGPL runtime",
-    "packages/sanka-cli/src/sanka_cli/mcp": ("MCP integration cannot import the AGPL runtime"),
     "packages/sanka-cli/src/sanka_connector": ("Connector SDK cannot import the AGPL runtime"),
 }
 TARGET_SPECIFIC_MODULES = frozenset(
