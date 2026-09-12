@@ -62,21 +62,86 @@ the same current revision. Changed configuration, target or plan invalidates the
 old evidence. Persist activation outcomes to recover uncertain retries without
 repeating side effects. Construction success is not an active flow.
 
-## Current delivery boundary
+## Shared planning and lifecycle library
 
-This change includes the declarative SDK and strict serialization validation. It
-does not implement the reconciliation planner, installation ledger, Flow host,
-runtime lifecycle or cloud Wizard adapter described above. The shared runtime
-must enforce the contract before advertising Flow execution. Schema validation
-and a passing SDK test do not establish runtime enforcement.
+The AGPL `sanka.runtime.flow` package provides the host-neutral planner,
+construction/verification/activation lifecycle, and a private SQLite installation
+ledger. Hosts supply a validated executable SDK Blueprint through the structural
+`BlueprintInput` port. SDK source and business templates stay in Extensions;
+this change does not advance the embedded SDK or distribution pins.
 
-The existing cloud Setup Wizard already uses `AppBuilderService` to create
-modules, custom-object shells, permission sets and guide artifacts. Its diagram
-is documentation; its preview is not a target-state diff. Integrate Flow through
-those services when implementing the cloud adapter, with matching React types,
-without changing existing API modes implicitly.
+`plan_reconstruction` binds the full Blueprint, installation ownership and target
+observation into an immutable `sanka-flow-plan/v1` digest. It compares the previous
+desired configuration with current and new desired values. Independent user edits
+survive; overlapping edits become blockers. Lists are atomic because order can
+carry workflow meaning. Missing owned resources block duplicate reconstruction.
+Omitted resources remain owned; removal requires the explicit `remove` argument
+and cannot remove a resource still referenced by retained resources.
 
-The canonical contract lives in
-[`extensions/docs/flow.md`](https://github.com/sankaHQ/extensions/blob/cbb2a4b57487b93a3c829e3affc7bf36820cf361/docs/flow.md).
+A `FlowTarget` adapter must first validate native capabilities, permissions and
+exact object/property/relationship bindings, and put failures in the observation's
+blockers. The planner does not infer these from names. That context is part of the
+reviewed digest and must remain unchanged through readback. The initial library
+blocks updates/removals of active workflows: it does not yet implement staged
+replacement or cutover, even when a host advertises staging capability.
+
+`FlowLifecycle.construct` requires the exact approved plan digest, saves intent
+before each mutation, and reads back inactive configuration. Lost responses recover
+from the host's durable operation identity; an unknown outcome stops the attempt.
+The installation ledger preserves desired baselines separately from merged user
+configuration. Leases and generations fence stale ledger writers. Native target
+writes must enforce the same claim and configuration preconditions atomically in
+their own transaction or conditional-write boundary. A pre-write read alone does
+not satisfy this contract.
+
+`verify` requires no-match, match and repeated-event scenarios for each desired
+workflow. The host runs its existing native executor with isolated records and
+adapters, then returns all created record IDs, fields, associations and completed
+event digests. The shared comparator checks those actual results against the
+reviewed expectations. A host's pass label cannot override missing retries,
+duplicate records, wrong fields, or missing/wrong associations. It evaluates
+expected value bindings only; it does not execute triggers, conditions or actions.
+
+`activate` requires explicit approval of the exact successful verification digest
+and unchanged target revision. It selects only workflows present in that Blueprint,
+not other resources retained by omission. Activation intents and receipts survive
+interruption. An uncertain construction or activation prevents another plan from
+replacing the installation until its outcome is recovered. An explicit `discard`
+operation can retire an unconstructed plan after fenced native recovery proves
+that every planned mutation is absent. It rejects partial, found or unknown
+results; it is not rollback. Discarded digests cannot be claimed again.
+
+Verification evidence is immutable for a plan. A failed or skipped check requires
+a new reviewed plan before another verification attempt; transient retries do not
+replace earlier evidence. Business-record identity across different events, such
+as a Deal leaving and reentering Quote, remains a native action responsibility in
+addition to the shared repeated-delivery evidence check.
+
+The SQLite ledger is for a local/offline host. A cloud adapter implements the same
+`InstallationStore` port using cloud persistence and authentication. Neither
+ledger is a substitute for native transactional fencing.
+
+## Delivery boundary and validation
+
+This library does not yet include a native Sanka API adapter, a runnable Sales
+extension, CLI/cloud controls, or staged active-workflow replacement. Calling the
+legacy SDK `flow.create` still only constructs an unresolved definition.
+
+Focused tests cover three-way conflict handling, ownership and removal ordering,
+lost-write recovery, immutable receipts, competing/expired claims, inactive
+construction, native scenario evidence comparison, and exact-revision activation.
+Their in-memory target is a control test double, not proof of native business
+execution. An additional development cross-check parsed the draft SDK's synthetic
+Sales Blueprint and compared its no-match/match/retry evidence; it does not claim
+a real workflow migration or provider equivalence.
+
+The existing cloud Setup Wizard uses `AppBuilderService` to create modules,
+custom-object shells, permission sets and guide artifacts. Its diagram is
+documentation; its preview is not a target-state diff. The native Flow adapter must
+integrate those services and the maintained workflow executor with matching React
+types, without changing existing API modes implicitly.
+
+The canonical contract lives in the
+[Extensions repository](https://github.com/sankaHQ/extensions/blob/main/docs/flow.md).
 SDK publication, runtime dependency upgrades and cloud deployment remain separate
 release steps.
