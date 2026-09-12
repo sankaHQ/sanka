@@ -18,7 +18,7 @@ import pytest
 from psycopg import sql
 
 from sanka.runtime.engine import MigrationEngine
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
 from sanka_connector_postgres import CONNECTOR, PostgresDestination
@@ -77,7 +77,7 @@ async def test_markdown_to_postgres_lifecycle(tmp_path: Path, schema: str) -> No
     )
     engine = MigrationEngine(
         store=SqliteStateStore(tmp_path / "state" / "state.db"),
-        registry=ConnectorRegistry.discover(),
+        registry=ExtensionRegistry.discover(),
         batch_size=2,  # force pagination + multiple checkpoints
     )
 

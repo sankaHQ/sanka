@@ -13,7 +13,7 @@ import sanka_cli
 import sanka_cli.mcp
 from sanka import Connection, EndpointSpec, PlanMismatchError, RunStatus, Sanka
 from sanka.runtime.extensions.store import ExtensionStore
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import ExtensionRegistry
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
@@ -35,7 +35,7 @@ def test_public_facade_version_matches_unified_distribution() -> None:
         == sanka_cli.__version__
         == sanka_cli.mcp.__version__
         == distribution_version("sanka-cli")
-        == "0.2.7"
+        == "0.2.8"
     )
 
 
@@ -67,15 +67,15 @@ def test_sanka_connect_selects_an_installed_provider(tmp_path: Path) -> None:
 def test_sanka_connect_rejects_an_unknown_provider(tmp_path: Path) -> None:
     with (
         Sanka(state=tmp_path / "state.db") as client,
-        pytest.raises(sanka.UnknownConnectorError, match="not-a-provider"),
+        pytest.raises(sanka.UnknownEndpointError, match="not-a-provider"),
     ):
         client.connect("not-a-provider")
 
 
-def test_sanka_connect_routes_system_providers_to_the_hosted_api(tmp_path: Path) -> None:
+def test_sanka_connect_rejects_hosted_systems_without_cloud_dispatch(tmp_path: Path) -> None:
     with (
         Sanka(state=tmp_path / "state.db") as client,
-        pytest.raises(sanka.UnknownConnectorError, match="hosted System Migration API"),
+        pytest.raises(sanka.UnknownEndpointError, match="hosted Data Migration API"),
     ):
         client.connect("hubspot")
 
@@ -167,9 +167,9 @@ def test_sanka_context_closes_owned_connector_store_once(
     host = Host()
     store = Store(tmp_path / "project", user_root=tmp_path / "user")
     store._connector_clients["artifact"] = host  # type: ignore[assignment]
-    registry = ConnectorRegistry({}, owner=store)
+    registry = ExtensionRegistry({}, owner=store)
     monkeypatch.setattr(
-        ConnectorRegistry,
+        ExtensionRegistry,
         "discover",
         classmethod(lambda _cls: registry),
     )
@@ -183,3 +183,48 @@ def test_sanka_context_closes_owned_connector_store_once(
     client.close()
     assert store.close_calls == 1
     assert host.close_calls == 1
+
+
+def test_configured_systems_keep_independent_endpoints_and_options(tmp_path: Path) -> None:
+    options = {"schema": "public"}
+    with Sanka(state=tmp_path / "state.db") as client:
+        production = client.configure_system("postgres", "production-db", options=options)
+        staging = client.configure_system("postgres", "staging-db", options={"schema": "test"})
+        legacy = client.connect(provider="postgres", connection="production-db", options=options)
+    options["schema"] = "changed-after-configuration"
+    assert isinstance(production, sanka.DataEndpoint)
+    assert production == legacy
+    assert production.endpoint_reference == "production-db"
+    assert staging.endpoint_reference == "staging-db"
+    assert production.endpoint().options == {"schema": "public"}
+    assert staging.endpoint().options == {"schema": "test"}
+
+
+def test_data_endpoint_preserves_both_earlier_facades(tmp_path: Path) -> None:
+    with Sanka(state=tmp_path / "state.db") as client:
+        endpoint = client.configure_endpoint("postgres", "production-db")
+        system = client.configure_system("postgres", "production-db")
+        connection = client.connect("postgres", "production-db")
+    assert endpoint == system == connection
+    assert sanka.DataEndpoint is sanka.SystemConfig is sanka.Connection
+    assert endpoint.endpoint_type == endpoint.system_type == endpoint.provider == "postgres"
+    assert endpoint.endpoint().connection == "production-db"
+
+
+@pytest.mark.parametrize("legacy", ["system_type", "provider"])
+def test_data_endpoint_rejects_conflicting_type_aliases(legacy: str) -> None:
+    with pytest.raises(ValueError, match="disagree"):
+        if legacy == "system_type":
+            sanka.DataEndpoint(endpoint_type="postgres", roles=("source",), system_type="sqlite")
+        else:
+            sanka.DataEndpoint(endpoint_type="postgres", roles=("source",), provider="sqlite")
+
+
+def test_compatibility_system_keywords_cannot_override_a_different_endpoint() -> None:
+    with pytest.raises(ValueError, match="disagree"):
+        sanka.DataEndpoint(
+            system_type="postgres",
+            roles=("source",),
+            endpoint_reference="production-db",
+            connection="staging-db",
+        )

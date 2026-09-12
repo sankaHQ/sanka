@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Sanka Connector SDK — Apache-2.0 migration connector interfaces.
+"""Sanka Extension SDK — Apache-2.0 data access interfaces.
 
-Connectors implement the base protocols (:class:`SourceConnector`,
-:class:`DestinationConnector`) plus any optional capability protocols, and
+Extensions implement the base protocols (:class:`DataReader`,
+:class:`DataWriter`) plus any optional capability protocols, and
 must not import the AGPL-licensed runtime (``sanka.runtime``); CI enforces
-that boundary so a connector is never a derivative work of the runtime.
+that boundary so an extension is never a derivative work of the runtime.
 """
 
 from sanka_connector.__about__ import __version__
@@ -17,22 +17,22 @@ from sanka_connector.errors import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
-    ConnectorError,
+    DataAccessError,
     DataError,
+    DataTimeoutError,
     ErrorCategory,
     NotFoundError,
     PermissionDeniedError,
-    ProviderTimeoutError,
     RateLimitError,
     SchemaMismatchError,
-    TransientProviderError,
+    TransientDataError,
     UnsupportedFeatureError,
     ValidationFailedError,
 )
 from sanka_connector.protocols import (
-    DestinationConnector,
+    DataReader,
+    DataWriter,
     Limits,
-    SourceConnector,
     SupportsBatchRelationshipWrites,
     SupportsBatchWrites,
     SupportsBoundedCounts,
@@ -73,12 +73,12 @@ from sanka_connector.records import (
     WriteResult,
     require_identity_values,
 )
-from sanka_connector.registration import ENTRY_POINT_GROUP, ConnectorRegistration
+from sanka_connector.registration import ENTRY_POINT_GROUP, ExtensionRegistration
 from sanka_connector.schema import (
+    DataIdentity,
     FieldSchema,
     Inventory,
     ObjectSchema,
-    ProviderIdentity,
     SourceObject,
 )
 
@@ -91,15 +91,18 @@ __all__ = [
     "ConfigurationError",
     "ConflictError",
     "ConflictPolicy",
-    "ConnectorError",
-    "ConnectorRegistration",
     "CredentialProvider",
     "Credentials",
     "CustomObjectDefinition",
     "CustomObjectProperty",
+    "DataAccessError",
     "DataError",
-    "DestinationConnector",
+    "DataIdentity",
+    "DataReader",
+    "DataTimeoutError",
+    "DataWriter",
     "ErrorCategory",
+    "ExtensionRegistration",
     "FieldSchema",
     "InvalidEmailPolicy",
     "Inventory",
@@ -112,15 +115,12 @@ __all__ = [
     "PipelineStage",
     "PropertyDefinition",
     "PropertyResult",
-    "ProviderIdentity",
-    "ProviderTimeoutError",
     "RateLimitError",
     "RecordPage",
     "RelationshipWrite",
     "RelationshipWriteResult",
     "ResourceResult",
     "SchemaMismatchError",
-    "SourceConnector",
     "SourceFilter",
     "SourceObject",
     "SupportsBatchRelationshipWrites",
@@ -139,11 +139,47 @@ __all__ = [
     "SupportsRetryMetrics",
     "SupportsSchemaProvisioning",
     "SupportsSnapshotBounds",
-    "TransientProviderError",
+    "TransientDataError",
     "UnsupportedFeatureError",
     "ValidationFailedError",
     "WriteOptions",
     "WriteResult",
     "__version__",
     "require_identity_values",
+]
+
+# Published compatibility names; both spellings identify the same classes.
+SourceConnector = DataReader
+DestinationConnector = DataWriter
+ConnectorRegistration = ExtensionRegistration
+ConnectorError = DataAccessError
+ProviderIdentity = DataIdentity
+ProviderTimeoutError = DataTimeoutError
+TransientProviderError = TransientDataError
+
+__all__ += [
+    "ConnectorError",
+    "ConnectorRegistration",
+    "DestinationConnector",
+    "ProviderIdentity",
+    "ProviderTimeoutError",
+    "SourceConnector",
+    "TransientProviderError",
+]
+
+# Compatibility names from the earlier systems facade.
+SystemReader = DataReader
+SystemWriter = DataWriter
+SystemAccessError = DataAccessError
+SystemIdentity = DataIdentity
+SystemTimeoutError = DataTimeoutError
+TransientSystemError = TransientDataError
+
+__all__ += [
+    "SystemAccessError",
+    "SystemIdentity",
+    "SystemReader",
+    "SystemTimeoutError",
+    "SystemWriter",
+    "TransientSystemError",
 ]

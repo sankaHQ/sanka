@@ -1,13 +1,14 @@
-# Sanka Extensions and the Connector SDK
+# Sanka Extensions and the Sanka Extension SDK
 
-The canonical Apache-2.0 extension SDKs and implementations live in
+The canonical Apache-2.0 Extension SDK and implementations live in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions). This repository
-embeds a byte-for-byte synchronized `sanka_connector` import package in
-`sanka-cli`, so the base CLI does not depend on a separate SDK distribution.
+embeds the byte-for-byte synchronized Sanka Extension SDK. New code uses
+`sanka_extensions.data` for data access and `sanka_extensions.code` for code migration.
+See [the compatibility guide](naming-compatibility.md) for retained published imports.
 
-The Connector SDK defines connector roles, typed source and destination
+The Sanka Extension SDK defines data read/write roles, typed source and destination
 protocols, optional capabilities, records, schemas, credentials, provisioning,
-registration, and stable errors. It has no runtime dependencies and never
+registration, and stable errors. Its only package dependency preserves published SDK types; it never
 imports the AGPL `sanka` runtime.
 
 Provider implementations remain separate wheels because a migration should
@@ -21,7 +22,7 @@ sanka extension add sanka/sqlite
 ```
 
 The extension manager creates an isolated environment from the complete
-manifest wheel set. A connector host loads the existing `sanka.connectors`
+manifest wheel set. An extension host loads the existing `sanka.connectors`
 entry points there and proxies their typed operations over
 `sanka-connector/v1`. Marketplace code never imports into the main CLI process.
 

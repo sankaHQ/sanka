@@ -36,8 +36,8 @@ from sanka.runtime.mapping import (
     resolve_destination_record_ids,
 )
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
-from sanka_connector import SourceFilter
-from sanka_connector.records import BatchWriteStatus
+from sanka_extensions.data import SourceFilter
+from sanka_extensions.data.records import BatchWriteStatus
 
 _FIELD = MigrationMappingField(source_field="email", target_object="contacts", target_field="email")
 

@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from sanka.runtime.connector_client import ConnectorHostClient, build_remote_connector
+from sanka.runtime.connector_client import ExtensionHostClient, build_remote_extension
 from sanka.runtime.connector_host import (
     MAX_REQUEST_BYTES,
     MAX_RESPONSE_BYTES,
@@ -17,10 +17,10 @@ from sanka.runtime.connector_host import (
     encode_value,
 )
 from sanka.runtime.extensions import ExtensionError
-from sanka_connector import (
+from sanka_extensions.data import (
     Credentials,
-    DestinationConnector,
-    SourceConnector,
+    DataReader,
+    DataWriter,
     SupportsHighWaterMark,
     SupportsRecordCounts,
     WriteOptions,
@@ -42,7 +42,7 @@ def test_connector_client_rejects_wrong_protocol(tmp_path: Path) -> None:
         "print(json.dumps({'protocol_version': 'wrong', 'id': request['id'], "
         "'ok': True, 'result': {}}), flush=True)\n",
     )
-    client = ConnectorHostClient(executable, environment=tmp_path)
+    client = ExtensionHostClient(executable, environment=tmp_path)
 
     try:
         with pytest.raises(ExtensionError, match="SANKA_CONNECTOR_PROTOCOL"):
@@ -55,7 +55,7 @@ def test_connector_client_rejects_wrong_protocol(tmp_path: Path) -> None:
 def test_connector_client_rejects_non_integer_response_ids(
     tmp_path: Path, response_id: str
 ) -> None:
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import json, sys\n"
@@ -78,7 +78,7 @@ def test_connector_client_rejects_non_integer_response_ids(
 
 def test_connector_client_rejects_unbounded_json_integer(tmp_path: Path) -> None:
     digits = "1" * 5_000
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import sys\n"
@@ -142,7 +142,7 @@ def test_connector_wire_codec_round_trips_tag_collisions(value: dict[str, object
 def test_connector_client_rejects_corrupt_host_output(
     tmp_path: Path, source: str, code: str
 ) -> None:
-    client = ConnectorHostClient(fake_python(tmp_path, source), environment=tmp_path)
+    client = ExtensionHostClient(fake_python(tmp_path, source), environment=tmp_path)
 
     try:
         with pytest.raises(ExtensionError) as raised:
@@ -154,7 +154,7 @@ def test_connector_client_rejects_corrupt_host_output(
 
 
 def test_connector_client_times_out_and_terminates_host(tmp_path: Path) -> None:
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import sys, time\nsys.stdin.readline()\ntime.sleep(5)\n",
@@ -171,7 +171,7 @@ def test_connector_client_times_out_and_terminates_host(tmp_path: Path) -> None:
 
 def test_connector_client_discards_stderr_without_leaking_secrets(tmp_path: Path) -> None:
     secret = "never-print-this-secret"
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import json, sys\n"
@@ -195,7 +195,7 @@ def test_connector_client_discards_stderr_without_leaking_secrets(tmp_path: Path
 
 
 def test_connector_client_rejects_request_over_limit(tmp_path: Path) -> None:
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(tmp_path, "import sys\nsys.stdin.readline()\n"),
         environment=tmp_path,
     )
@@ -210,7 +210,7 @@ def test_connector_client_rejects_request_over_limit(tmp_path: Path) -> None:
 
 
 def test_connector_client_rejects_unsolicited_output(tmp_path: Path) -> None:
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import json, sys, time\n"
@@ -232,7 +232,7 @@ def test_connector_client_rejects_unsolicited_output(tmp_path: Path) -> None:
 
 
 def test_connector_client_reuses_one_host_with_monotonic_ids(tmp_path: Path) -> None:
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import json, os, sys\n"
@@ -256,7 +256,7 @@ def test_connector_client_reuses_one_host_with_monotonic_ids(tmp_path: Path) -> 
 
 
 def test_connector_client_does_not_restart_an_exited_host(tmp_path: Path) -> None:
-    client = ConnectorHostClient(
+    client = ExtensionHostClient(
         fake_python(
             tmp_path,
             "import json, sys\n"
@@ -279,7 +279,7 @@ def test_connector_client_does_not_restart_an_exited_host(tmp_path: Path) -> Non
 
 
 def test_remote_connector_rejects_non_string_capability_names(tmp_path: Path) -> None:
-    client = ConnectorHostClient(sys.executable, environment=tmp_path)
+    client = ExtensionHostClient(sys.executable, environment=tmp_path)
     description = {
         "roles": ["source"],
         "binding_kinds": {"source": "fixture"},
@@ -287,7 +287,7 @@ def test_remote_connector_rejects_non_string_capability_names(tmp_path: Path) ->
     }
 
     with pytest.raises(ExtensionError) as raised:
-        build_remote_connector(client, "example", "source", description=description)
+        build_remote_extension(client, "example", "source", description=description)
 
     assert raised.value.code == "SANKA_CONNECTOR_CAPABILITY"
 
@@ -305,15 +305,15 @@ async def test_sqlite_connector_round_trip_stays_out_of_process(tmp_path: Path) 
         provider="sqlite", settings={"path": str(destination_path)}
     )
 
-    with ConnectorHostClient(sys.executable, environment=site_packages) as client:
+    with ExtensionHostClient(sys.executable, environment=site_packages) as client:
         description = client.request("sqlite", "describe", {})
         source = cast(
-            SourceConnector,
-            build_remote_connector(client, "sqlite", "source", description=description),
+            DataReader,
+            build_remote_extension(client, "sqlite", "source", description=description),
         )
         destination = cast(
-            DestinationConnector,
-            build_remote_connector(client, "sqlite", "destination", description=description),
+            DataWriter,
+            build_remote_extension(client, "sqlite", "destination", description=description),
         )
 
         assert isinstance(source, SupportsRecordCounts)

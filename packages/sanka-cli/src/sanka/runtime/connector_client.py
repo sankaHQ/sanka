@@ -23,25 +23,25 @@ from sanka.runtime.connector_host import (
     encode_value,
 )
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_connector import (
+from sanka_extensions.data import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
     CustomObjectDefinition,
-    DestinationConnector,
+    DataIdentity,
+    DataReader,
+    DataWriter,
     Inventory,
     Limits,
     OwnerProfile,
     PipelineDefinition,
     PropertyDefinition,
     PropertyResult,
-    ProviderIdentity,
     RecordPage,
     RelationshipWrite,
     RelationshipWriteResult,
     ResourceResult,
-    SourceConnector,
     SourceFilter,
     SourceObject,
     WriteOptions,
@@ -60,7 +60,7 @@ def _minimal_environment() -> dict[str, str]:
     return environment
 
 
-class ConnectorHostClient:
+class ExtensionHostClient:
     """One locked request stream to one verified connector environment."""
 
     def __init__(
@@ -293,7 +293,7 @@ class ConnectorHostClient:
             self._stdout = queue.Queue()
             self._stderr = queue.Queue()
 
-    def __enter__(self) -> ConnectorHostClient:
+    def __enter__(self) -> ExtensionHostClient:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -303,7 +303,7 @@ class ConnectorHostClient:
 class _RemoteConnector:
     def __init__(
         self,
-        client: ConnectorHostClient,
+        client: ExtensionHostClient,
         provider: str,
         role: str,
         binding_kind: str,
@@ -410,9 +410,9 @@ class _RemoteDestination(_RemoteConnector):
 
 
 class _IdentityInspection(_RemoteConnector):
-    async def inspect(self, credentials: Credentials) -> ProviderIdentity:
+    async def inspect(self, credentials: Credentials) -> DataIdentity:
         return cast(
-            ProviderIdentity, await self._async_request("inspect", {"credentials": credentials})
+            DataIdentity, await self._async_request("inspect", {"credentials": credentials})
         )
 
 
@@ -685,13 +685,13 @@ def _valid_description(description: Any, role: str) -> bool:
     return True
 
 
-def build_remote_connector(
-    client: ConnectorHostClient,
+def build_remote_extension(
+    client: ExtensionHostClient,
     provider: str,
     role: str,
     *,
     description: dict[str, Any] | None = None,
-) -> SourceConnector | DestinationConnector:
+) -> DataReader | DataWriter:
     """Build a structural proxy with only capabilities the host advertised."""
     description = description or cast(dict[str, Any], client.request(provider, "describe", {}))
     if not _valid_description(description, role):
@@ -702,9 +702,13 @@ def build_remote_connector(
     mixins = tuple(_MIXINS[name] for name in capabilities[role] if name in _MIXINS)
     proxy_type = type(f"Remote{provider.title()}{role.title()}", (base, *mixins), {})
     return cast(
-        SourceConnector | DestinationConnector,
+        DataReader | DataWriter,
         proxy_type(client, provider, role, binding_kinds[role]),
     )
 
 
-__all__ = ["ConnectorHostClient", "build_remote_connector"]
+__all__ = ["ExtensionHostClient", "build_remote_extension"]
+
+# Compatibility imports for existing clients.
+ConnectorHostClient = ExtensionHostClient
+build_remote_connector = build_remote_extension

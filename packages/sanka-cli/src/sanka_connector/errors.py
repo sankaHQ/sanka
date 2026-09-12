@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Structured error taxonomy for Sanka connectors.
+"""Structured error taxonomy for Sanka data access.
 
-Connectors raise :class:`ConnectorError` subclasses instead of leaking raw
+Data readers and writers raise :class:`DataAccessError` subclasses instead of leaking raw
 provider exceptions. The engine keys retry policy off ``category`` and
 ``retryable``, and surfaces ``remediation`` to operators and AI agents.
 """
@@ -33,8 +33,8 @@ _RETRYABLE_BY_DEFAULT = frozenset(
 )
 
 
-class ConnectorError(Exception):
-    """Base class for all connector failures.
+class DataAccessError(Exception):
+    """Base class for all data access failures.
 
     ``retryable`` defaults from the category (rate-limit / transient / timeout
     retry; everything else does not) and can be overridden per instance.
@@ -63,49 +63,60 @@ class ConnectorError(Exception):
         self.details: dict[str, Any] = details or {}
 
 
-class AuthenticationError(ConnectorError):
+class AuthenticationError(DataAccessError):
     category = ErrorCategory.AUTHENTICATION
 
 
-class PermissionDeniedError(ConnectorError):
+class PermissionDeniedError(DataAccessError):
     category = ErrorCategory.PERMISSION
 
 
-class RateLimitError(ConnectorError):
+class RateLimitError(DataAccessError):
     category = ErrorCategory.RATE_LIMIT
 
 
-class TransientProviderError(ConnectorError):
+class TransientDataError(DataAccessError):
     category = ErrorCategory.TRANSIENT
 
 
-class ProviderTimeoutError(ConnectorError):
+class DataTimeoutError(DataAccessError):
     category = ErrorCategory.TIMEOUT
 
 
-class NotFoundError(ConnectorError):
+class NotFoundError(DataAccessError):
     category = ErrorCategory.NOT_FOUND
 
 
-class ConflictError(ConnectorError):
+class ConflictError(DataAccessError):
     category = ErrorCategory.CONFLICT
 
 
-class ValidationFailedError(ConnectorError):
+class ValidationFailedError(DataAccessError):
     category = ErrorCategory.VALIDATION
 
 
-class SchemaMismatchError(ConnectorError):
+class SchemaMismatchError(DataAccessError):
     category = ErrorCategory.SCHEMA_MISMATCH
 
 
-class UnsupportedFeatureError(ConnectorError):
+class UnsupportedFeatureError(DataAccessError):
     category = ErrorCategory.UNSUPPORTED
 
 
-class DataError(ConnectorError):
+class DataError(DataAccessError):
     category = ErrorCategory.DATA
 
 
-class ConfigurationError(ConnectorError):
+class ConfigurationError(DataAccessError):
     category = ErrorCategory.CONFIGURATION
+
+
+# Published compatibility names; both spellings identify the same classes.
+ConnectorError = DataAccessError
+ProviderTimeoutError = DataTimeoutError
+TransientProviderError = TransientDataError
+
+# Compatibility names from the earlier systems facade.
+SystemAccessError = DataAccessError
+SystemTimeoutError = DataTimeoutError
+TransientSystemError = TransientDataError

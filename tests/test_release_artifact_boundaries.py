@@ -7,6 +7,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from scripts.check_release_artifacts import _runtime_boundary_errors, main
 
 
@@ -26,7 +28,23 @@ def test_runtime_boundary_rejects_target_dependencies_and_framework_members() ->
     ]
 
 
-def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "omitted",
+    [
+        None,
+        "sanka_extensions/flow/__init__.py",
+        "sanka_extensions/flow/definition.py",
+        "sanka/runtime/extensions/stage.py",
+        "sanka/runtime/extensions/code_lifecycle.py",
+        "sanka/runtime/extensions/code_repair.py",
+        "sanka/runtime/extensions/artifacts.py",
+        "sanka_extensions/data/__init__.py",
+        "sanka_extensions/data/protocols.py",
+    ],
+)
+def test_unified_release_artifact_contains_three_license_zones(
+    tmp_path: Path, monkeypatch, omitted: str | None
+) -> None:
     dist = tmp_path / "dist"
     dist.mkdir()
     wheel = dist / "sanka_cli-0.2.4-py3-none-any.whl"
@@ -35,10 +53,23 @@ def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, m
         "sanka/_client.py": b"",
         "sanka/connector/__init__.py": b"",
         "sanka/runtime/__init__.py": b"",
+        "sanka/runtime/extensions/stage.py": b"",
+        "sanka/runtime/extensions/code_lifecycle.py": b"",
+        "sanka/runtime/extensions/code_repair.py": b"",
+        "sanka/runtime/extensions/artifacts.py": b"",
         "sanka_cli/__init__.py": b"",
         "sanka_cli/commands/skill.py": b"",
         "sanka_cli/main.py": b"",
         "sanka_cli/skills/sanka-cli/SKILL.md": b"",
+        "sanka_extensions/__init__.py": b"",
+        "sanka_extensions/py.typed": b"",
+        "sanka_extensions/systems/__init__.py": b"",
+        "sanka_extensions/data/__init__.py": b"",
+        "sanka_extensions/data/protocols.py": b"",
+        "sanka_extensions/code/__init__.py": b"",
+        "sanka_extensions/flow/__init__.py": b"",
+        "sanka_extensions/flow/definition.py": b"",
+        "sanka_extension_sdk/contract.py": b"",
         "sanka_connector/__init__.py": b"",
         "sanka_connector/py.typed": b"",
         "sanka_cli-0.2.4.dist-info/METADATA": (
@@ -63,6 +94,8 @@ def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, m
         "sanka_cli-0.2.4.dist-info/licenses/LICENSES/AGPL-3.0-only.txt": b"AGPL\n",
         "sanka_cli-0.2.4.dist-info/licenses/NOTICE": b"MIT License\n",
     }
+    if omitted is not None:
+        del wheel_members[omitted]
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, data in wheel_members.items():
             archive.writestr(name, data)
@@ -77,4 +110,4 @@ def test_unified_release_artifact_contains_three_license_zones(tmp_path: Path, m
 
     monkeypatch.setattr(sys, "argv", ["check_release_artifacts.py", str(dist)])
 
-    assert main() == 0
+    assert main() == (0 if omitted is None else 1)

@@ -32,11 +32,11 @@ from sanka.runtime.execution import (
     validation_rejects_truncated_warning,
 )
 from sanka.runtime.mapping import MappingError, MigrationMappingField, mapping_groups
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
-from sanka_connector import Credentials, RecordPage, SourceFilter, SourceObject
-from sanka_connector.protocols import DestinationConnector, SourceConnector
+from sanka_extensions.data import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_extensions.data.protocols import DataReader, DataWriter
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
@@ -170,7 +170,7 @@ def test_validate_module_surface_admits_no_destination_and_no_ledger() -> None:
     from sanka.runtime.execution import validate as validate_module
 
     source = inspect.getsource(validate_module)
-    assert "DestinationConnector" not in source
+    assert "DataWriter" not in source
     assert "ExecutionLedger" not in source
     assert "ExecutionHost" not in source
     assert "ExecutionJournal" not in source
@@ -604,19 +604,19 @@ async def test_routes_validate_independently_with_route_keyed_rejects() -> None:
 # -- engine surface -----------------------------------------------------------
 
 
-class PoisonedRegistry(ConnectorRegistry):
+class PoisonedRegistry(ExtensionRegistry):
     """A registry whose destination role must never be resolved."""
 
-    def __init__(self, inner: ConnectorRegistry) -> None:
+    def __init__(self, inner: ExtensionRegistry) -> None:
         self._inner = inner
 
     def names(self) -> list[str]:
         return self._inner.names()
 
-    def source(self, type_name: str) -> SourceConnector:
+    def source(self, type_name: str) -> DataReader:
         return self._inner.source(type_name)
 
-    def destination(self, type_name: str) -> DestinationConnector:
+    def destination(self, type_name: str) -> DataWriter:
         raise AssertionError("write-free validation must never resolve a destination connector")
 
 
@@ -638,7 +638,7 @@ async def test_engine_validate_never_resolves_the_destination(tmp_path: Path) ->
     _write_markdown_content(content)
     store_path = tmp_path / "state" / "state.db"
     engine = MigrationEngine(
-        store=SqliteStateStore(store_path), registry=ConnectorRegistry.discover()
+        store=SqliteStateStore(store_path), registry=ExtensionRegistry.discover()
     )
     run_id = engine.create(_markdown_spec(content, db))
     await engine.plan(run_id)
@@ -646,7 +646,7 @@ async def test_engine_validate_never_resolves_the_destination(tmp_path: Path) ->
 
     validating_engine = MigrationEngine(
         store=SqliteStateStore(store_path),
-        registry=PoisonedRegistry(ConnectorRegistry.discover()),
+        registry=PoisonedRegistry(ExtensionRegistry.discover()),
     )
     payload = await validating_engine.validate(run_id)
 
@@ -664,7 +664,7 @@ async def test_engine_validate_requires_a_plan(tmp_path: Path) -> None:
     content, db = tmp_path / "content", tmp_path / "out.db"
     _write_markdown_content(content)
     engine = MigrationEngine(
-        store=SqliteStateStore(tmp_path / "state.db"), registry=ConnectorRegistry.discover()
+        store=SqliteStateStore(tmp_path / "state.db"), registry=ExtensionRegistry.discover()
     )
     run_id = engine.create(_markdown_spec(content, db))
 
@@ -676,7 +676,7 @@ async def test_engine_validate_wraps_execution_faults(tmp_path: Path) -> None:
     content, db = tmp_path / "content", tmp_path / "out.db"
     _write_markdown_content(content)
     engine = MigrationEngine(
-        store=SqliteStateStore(tmp_path / "state.db"), registry=ConnectorRegistry.discover()
+        store=SqliteStateStore(tmp_path / "state.db"), registry=ExtensionRegistry.discover()
     )
     run_id = engine.create(_markdown_spec(content, db))
     await engine.plan(run_id)

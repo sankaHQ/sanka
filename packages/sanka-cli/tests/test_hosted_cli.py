@@ -15,7 +15,7 @@ from sanka_cli.main import cli
 def test_migration_passthrough_delegates_in_process(runner: CliRunner, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_main(argv):
+    def _fake_main(argv, *, api_base=None):
         captured["argv"] = argv
         return 0
 
@@ -28,7 +28,7 @@ def test_migration_passthrough_delegates_in_process(runner: CliRunner, monkeypat
 def test_migration_passthrough_forwards_help(runner: CliRunner, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_main(argv):
+    def _fake_main(argv, *, api_base=None):
         captured["argv"] = argv
         return 0
 
@@ -50,7 +50,7 @@ def test_local_passthrough_preserves_double_dash(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_main(argv):
+    def _fake_main(argv, *, api_base=None):
         captured["argv"] = argv
         return 0
 
@@ -1041,3 +1041,46 @@ def test_verify_access_token_warns_when_unreachable(fake_verify_client) -> None:
     assert warning is not None
     assert "could not reach https://cli.example.com" in warning
     assert "ConnectError" in warning
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ("https://staging.example", "https://staging.example/v2/migrate/research/eol"),
+        (
+            "https://staging.example/prefix/",
+            "https://staging.example/prefix/v2/migrate/research/eol",
+        ),
+        ("https://staging.example/v2/migrate/", "https://staging.example/v2/migrate/research/eol"),
+        (None, "https://legacy.example/migration-service/research/eol"),
+    ],
+)
+def test_research_requests_use_global_api_override_before_legacy_environment(
+    runner: CliRunner,
+    monkeypatch,
+    override,
+    expected,
+) -> None:
+    import io
+    import json
+
+    import sanka.cli as local_cli
+    from sanka.cli._research import SankaMigrateApiClient
+
+    requests = []
+
+    def opener(request, *, timeout):
+        requests.append(request)
+        return io.BytesIO(json.dumps({"success": True, "data": {"events": ["fixture"]}}).encode())
+
+    monkeypatch.setenv("SANKA_MIGRATE_API_BASE", "https://legacy.example/migration-service/")
+    monkeypatch.setattr(
+        local_cli,
+        "SankaMigrateApiClient",
+        lambda **kwargs: SankaMigrateApiClient(opener=opener, **kwargs),
+    )
+    prefix = ["--base-url", override] if override else []
+    result = runner.invoke(cli, [*prefix, "research", "eol", "--json"])
+    assert result.exit_code == 0, result.output
+    assert requests[0].full_url == expected
+    assert requests[0].get_header("Authorization") is None

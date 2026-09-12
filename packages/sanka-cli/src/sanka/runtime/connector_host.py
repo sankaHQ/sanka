@@ -15,16 +15,18 @@ from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-from sanka_connector import (
+from sanka_extensions.data import (
     ENTRY_POINT_GROUP,
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
-    ConnectorRegistration,
     Credentials,
     CustomObjectDefinition,
     CustomObjectProperty,
-    DestinationConnector,
+    DataIdentity,
+    DataReader,
+    DataWriter,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     Limits,
@@ -34,12 +36,10 @@ from sanka_connector import (
     PipelineStage,
     PropertyDefinition,
     PropertyResult,
-    ProviderIdentity,
     RecordPage,
     RelationshipWrite,
     RelationshipWriteResult,
     ResourceResult,
-    SourceConnector,
     SourceFilter,
     SourceObject,
     SupportsBatchRelationshipWrites,
@@ -114,7 +114,7 @@ _WIRE_TYPES = {
         PipelineStage,
         PropertyDefinition,
         PropertyResult,
-        ProviderIdentity,
+        DataIdentity,
         RecordPage,
         RelationshipWrite,
         RelationshipWriteResult,
@@ -125,6 +125,10 @@ _WIRE_TYPES = {
         WriteResult,
     )
 }
+# The v1 wire tag is published independently of Python class names.
+_WIRE_TYPES.pop(DataIdentity.__name__, None)
+_WIRE_TYPES["ProviderIdentity"] = DataIdentity
+_WIRE_NAMES = {value: key for key, value in _WIRE_TYPES.items()}
 _WIRE_MARKER = "__sanka_wire__"
 
 
@@ -160,8 +164,8 @@ def encode_value(value: Any) -> Any:
                 "items": [[key, item] for key, item in encoded.items()],
             }
         return encoded
-    name = value_type.__name__
-    if is_dataclass(value) and _WIRE_TYPES.get(name) is value_type:
+    name = _WIRE_NAMES.get(value_type)
+    if name is not None and is_dataclass(value) and _WIRE_TYPES.get(name) is value_type:
         return {
             _WIRE_MARKER: "dataclass",
             "name": name,
@@ -302,10 +306,10 @@ def _site_packages(value: str) -> Path:
     return candidate
 
 
-def load_registrations(site_packages: Path) -> dict[str, ConnectorRegistration]:
+def load_registrations(site_packages: Path) -> dict[str, ExtensionRegistration]:
     """Load registrations only from distributions in the verified environment."""
     sys.path.insert(0, str(site_packages))
-    registrations: dict[str, ConnectorRegistration] = {}
+    registrations: dict[str, ExtensionRegistration] = {}
     for distribution in distributions(path=[str(site_packages)]):
         for entry in distribution.entry_points:
             if entry.group != ENTRY_POINT_GROUP:
@@ -319,7 +323,7 @@ def load_registrations(site_packages: Path) -> dict[str, ConnectorRegistration]:
                     "SANKA_CONNECTOR_LOAD", "connector registration could not be loaded"
                 ) from error
             if (
-                not isinstance(registration, ConnectorRegistration)
+                not isinstance(registration, ExtensionRegistration)
                 or registration.name != entry.name
             ):
                 _fail("SANKA_CONNECTOR_PROVIDER", "connector registration identity is invalid")
@@ -327,7 +331,7 @@ def load_registrations(site_packages: Path) -> dict[str, ConnectorRegistration]:
     return registrations
 
 
-def _describe(registration: ConnectorRegistration) -> dict[str, Any]:
+def _describe(registration: ExtensionRegistration) -> dict[str, Any]:
     roles: list[str] = []
     capabilities: dict[str, list[str]] = {}
     binding_kinds: dict[str, str] = {}
@@ -335,7 +339,7 @@ def _describe(registration: ConnectorRegistration) -> dict[str, Any]:
         connector = getattr(registration, role)
         if connector is None:
             continue
-        expected = SourceConnector if role == "source" else DestinationConnector
+        expected = DataReader if role == "source" else DataWriter
         if not isinstance(connector, expected) or connector.provider != registration.name:
             _fail("SANKA_CONNECTOR_PROVIDER", "connector registration role is invalid")
         roles.append(role)
@@ -349,7 +353,7 @@ def _describe(registration: ConnectorRegistration) -> dict[str, Any]:
 
 
 def invoke_registration(
-    registration: ConnectorRegistration,
+    registration: ExtensionRegistration,
     operation: str,
     payload: dict[str, Any],
 ) -> Any:
@@ -368,7 +372,7 @@ def invoke_registration(
     connector = registration.source if role == "source" else registration.destination
     if connector is None:
         _fail("SANKA_CONNECTOR_CAPABILITY", "connector does not expose the requested role")
-    base = SourceConnector if role == "source" else DestinationConnector
+    base = DataReader if role == "source" else DataWriter
     if not isinstance(connector, base):
         _fail("SANKA_CONNECTOR_CAPABILITY", "connector role does not implement its base protocol")
     allowed = _SOURCE_OPERATIONS if role == "source" else _DESTINATION_OPERATIONS
@@ -388,7 +392,7 @@ def invoke_registration(
 
 
 def handle(
-    request: dict[str, Any], registrations: dict[str, ConnectorRegistration]
+    request: dict[str, Any], registrations: dict[str, ExtensionRegistration]
 ) -> dict[str, Any]:
     if set(request) != {"protocol_version", "id", "provider", "operation", "payload"}:
         _fail("SANKA_CONNECTOR_PROTOCOL", "connector request fields are invalid")

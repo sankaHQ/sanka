@@ -14,7 +14,7 @@ import pytest
 from sanka.cli import main
 from sanka.runtime.engine import MigrationEngine, PlanMismatchError
 from sanka.runtime.execution import exact_candidate_hash
-from sanka.runtime.registry import ConnectorRegistry
+from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
 
@@ -40,7 +40,7 @@ def _spec(content: Path, db: Path) -> MigrationSpec:
 def _engine(tmp_path: Path) -> MigrationEngine:
     return MigrationEngine(
         store=SqliteStateStore(tmp_path / "state" / "state.db"),
-        registry=ConnectorRegistry.discover(),
+        registry=ExtensionRegistry.discover(),
         batch_size=2,  # force pagination + multiple checkpoints
     )
 

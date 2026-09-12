@@ -63,16 +63,16 @@ from sanka.runtime.mapping.record_mapping import (
     relationship_source_ids,
     source_field_keys,
 )
-from sanka_connector import (
+from sanka_extensions.data import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
-    DestinationConnector,
+    DataReader,
+    DataWriter,
     RecordPage,
     RelationshipWrite,
     RelationshipWriteResult,
-    SourceConnector,
     SupportsBatchRelationshipWrites,
     SupportsBatchWrites,
     SupportsBoundedReads,
@@ -80,7 +80,7 @@ from sanka_connector import (
     WriteOptions,
     WriteResult,
 )
-from sanka_connector.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
+from sanka_extensions.data.records import BatchWriteStatus, ConflictPolicy, InvalidEmailPolicy
 
 if TYPE_CHECKING:
     from sanka.runtime.execution.scope import ExactIdScope
@@ -122,7 +122,7 @@ EXACT_SCOPE_COVERAGE_WARNING = (
 class WritePolicies:
     """Reviewed write behavior applied uniformly across one batch.
 
-    Per-route :class:`~sanka_connector.WriteOptions` derive from these plus
+    Per-route :class:`~sanka_extensions.data.WriteOptions` derive from these plus
     each route's identity fields; the owner policies feed the owner-mapping
     phase.
     """
@@ -219,7 +219,7 @@ async def _uncovered_candidate_count(
 async def _retry_parked_relationships(
     *,
     host: ExecutionHost,
-    destination: DestinationConnector,
+    destination: DataWriter,
     destination_credentials: Credentials,
     snapshot: ExecutionSnapshot,
     route_key: str,
@@ -246,7 +246,7 @@ async def _retry_parked_relationships(
 
 async def _read_route_page(
     *,
-    source: SourceConnector,
+    source: DataReader,
     source_credentials: Credentials,
     route: ExecutionRoute,
     batch_size: int,
@@ -396,9 +396,9 @@ def _destination_payload(
 async def run_batch(
     *,
     routes: Sequence[ExecutionRoute],
-    source: SourceConnector,
+    source: DataReader,
     source_credentials: Credentials,
-    destination: DestinationConnector,
+    destination: DataWriter,
     destination_credentials: Credentials,
     policies: WritePolicies,
     batch_size: int,

@@ -15,7 +15,7 @@ from sanka.runtime.connector_host import (
     _describe,
     invoke_registration,
 )
-from sanka_connector import ConnectorRegistration
+from sanka_extensions.data import ExtensionRegistration
 
 
 def run_host(site_packages: Path, request: dict[str, Any]) -> dict[str, Any]:
@@ -115,7 +115,7 @@ def test_connector_host_describes_aggregate_optional_protocols() -> None:
         async def count_records_bounded(self, credentials: object, **kwargs: object) -> int:
             raise NotImplementedError
 
-    registration = ConnectorRegistration(name="example", source=Source())  # type: ignore[arg-type]
+    registration = ExtensionRegistration(name="example", source=Source())  # type: ignore[arg-type]
     description = _describe(registration)
 
     assert "SupportsSnapshotBounds" in description["capabilities"]["source"]

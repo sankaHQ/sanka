@@ -7,21 +7,21 @@ import pytest
 
 from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions import store as extension_store
-from sanka.runtime.registry import ConnectorRegistry, UnknownConnectorError
-from sanka_connector import ConnectorRegistration
-from sanka_connector.protocols import SourceConnector
+from sanka.runtime.registry import ExtensionRegistry, UnknownEndpointError
+from sanka_extensions.data import ExtensionRegistration
+from sanka_extensions.data.protocols import DataReader
 
-SOURCE = cast(SourceConnector, object())
+SOURCE = cast(DataReader, object())
 
 
 def test_discovery_resolves_marketplace_connector_lazily_through_store() -> None:
     calls: list[str] = []
 
-    def resolve(provider: str) -> ConnectorRegistration:
+    def resolve(provider: str) -> ExtensionRegistration:
         calls.append(provider)
-        return ConnectorRegistration(name=provider, source=SOURCE)
+        return ExtensionRegistration(name=provider, source=SOURCE)
 
-    registry = ConnectorRegistry.discover(resolve, providers=("markdown",))
+    registry = ExtensionRegistry.discover(resolve, providers=("markdown",))
 
     assert registry.names() == ["markdown"]
     assert calls == []
@@ -34,16 +34,16 @@ def test_discovery_resolves_marketplace_connector_lazily_through_store() -> None
 def test_default_discovery_uses_extension_store_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registration = ConnectorRegistration(name="markdown", source=SOURCE)
+    registration = ExtensionRegistration(name="markdown", source=SOURCE)
 
     class Store:
         def __init__(self, _root: object) -> None:
             self.closed = False
 
-        def connector_providers(self) -> tuple[str, ...]:
+        def supported_endpoints(self) -> tuple[str, ...]:
             return ("markdown",)
 
-        def resolve_connector(self, provider: str) -> ConnectorRegistration:
+        def resolve_extension(self, provider: str) -> ExtensionRegistration:
             assert provider == "markdown"
             return registration
 
@@ -51,38 +51,38 @@ def test_default_discovery_uses_extension_store_resolver(
             self.closed = True
 
     monkeypatch.setattr(extension_store, "ExtensionStore", Store)
-    registry = ConnectorRegistry.discover()
+    registry = ExtensionRegistry.discover()
 
     assert registry.source("markdown") is SOURCE
     registry.close()
 
 
 def test_missing_store_connector_is_an_unknown_connector() -> None:
-    def missing(_provider: str) -> ConnectorRegistration:
+    def missing(_provider: str) -> ExtensionRegistration:
         raise ExtensionError("SANKA_EXTENSION_REQUIRED", "not locked")
 
-    registry = ConnectorRegistry.discover(missing, providers=("sqlite",))
+    registry = ExtensionRegistry.discover(missing, providers=("sqlite",))
 
-    with pytest.raises(UnknownConnectorError, match="no installed connector"):
+    with pytest.raises(UnknownEndpointError, match="no installed extension"):
         registry.source("sqlite")
 
 
 def test_explicit_registration_cannot_enable_a_hosted_system_provider() -> None:
-    registry = ConnectorRegistry(
-        {"salesforce": ConnectorRegistration(name="salesforce", source=SOURCE)}
+    registry = ExtensionRegistry(
+        {"salesforce": ExtensionRegistration(name="salesforce", source=SOURCE)}
     )
 
     assert registry.names() == []
-    with pytest.raises(UnknownConnectorError, match="hosted System Migration API"):
+    with pytest.raises(UnknownEndpointError, match="hosted Data Migration API"):
         registry.roles("salesforce")
 
 
 def test_hosted_system_provider_never_reaches_store_resolver() -> None:
-    def poisoned(_provider: str) -> ConnectorRegistration:
+    def poisoned(_provider: str) -> ExtensionRegistration:
         raise AssertionError("hosted provider must not reach local connector store")
 
-    registry = ConnectorRegistry.discover(poisoned, providers=("hubspot",))
+    registry = ExtensionRegistry.discover(poisoned, providers=("hubspot",))
 
     assert registry.names() == []
-    with pytest.raises(UnknownConnectorError, match="hosted System Migration API"):
+    with pytest.raises(UnknownEndpointError, match="hosted Data Migration API"):
         registry.roles("hubspot")

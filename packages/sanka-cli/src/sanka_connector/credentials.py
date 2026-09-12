@@ -2,7 +2,7 @@
 """Credential types and the provider protocol.
 
 The runtime resolves a named connection through a :class:`CredentialProvider`
-and hands the resulting :class:`Credentials` to connector methods. Secret
+and hands the resulting :class:`Credentials` to data access methods. Secret
 fields are excluded from ``repr`` so credentials never leak through logs,
 reports, or exception messages by accident — but any string field may still be
 sensitive; never log credentials wholesale.

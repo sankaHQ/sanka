@@ -1,60 +1,61 @@
-# Sanka public naming contract
+# Sanka naming contract
 
-**Sanka** is the company, platform, repository, project, executable, and Python
-facade brand. Migration-domain type names may continue to include “Migrate”
-when they describe an operation rather than a retired package.
+Use the same nouns in the product, CLI, developer documentation, and code.
 
-## Active names
+| Product | Responsibility |
+| --- | --- |
+| Sanka | Data migrations: records, schemas, relationships and attachments |
+| Sanka Flow | Workflow migrations: automations, triggers, actions and conditions |
+| Sanka Code | Code migrations: application code, SQL dialects, ORM and dbt transformations |
+
+The `sanka` repository owns the shared OSS CLI/runtime. The executable is an interface to product capabilities, not an additional product. Migration-domain names may include “Migrate” when they describe operations rather than retired packages.
+
+## Resources and responsibilities
+
+- **Extension:** an independently versioned capability package, installed by extension ID. Describe its data-access or code-conversion capabilities when needed.
+- **Data endpoint:** a configured database, file source or SaaS account used as a source or destination. Each endpoint retains independent address and credential references.
+- **Migration:** a planned, executed, and verified move of data, workflows, or code.
+
+Installation and endpoint authentication are different facts. An installed extension supports endpoint types; “Connected” is appropriate only after actual authentication/reachability verification. Do not introduce Connections or Integrations as competing resource categories. Ordinary network/database connections and credential providers retain their technical meanings.
+
+Moving PostgreSQL records is a Sanka data migration. Adapting the application's SQL/ORM is Sanka Code work. One project can need both. Technology names alone do not determine product ownership or imply a supported service-to-service migration route.
+
+## Canonical names
 
 | Surface | Name |
-|---|---|
-| GitHub repository | `sankaHQ/sanka` |
-| Python distribution | `sanka-cli` |
-| CLI command | `sanka` |
-| Default migration spec | `sanka.yaml` |
-| Preferred Python facade | `from sanka import Sanka` |
-| Hosted dispatcher import | `sanka_cli` |
-| Connector interface import | `sanka_connector` |
-| Extensions repository | `sankaHQ/extensions` |
-| Marketplace component IDs | `sanka/<component>` |
-| Local state | `.sanka/migrate/` |
-| Machine protocol | `sanka-cli/v1` |
-| MCP command | `sanka mcp` |
-| MCP tools | `sanka_research_eol`, `sanka_research_tco`, `sanka_research_compare`, `sanka_assess` |
-| Marketing route | `https://sanka.com/migrate/` |
+| --- | --- |
+| Repository | `sankaHQ/sanka` |
+| Python distribution / executable | `sanka-cli` / `sanka` |
+| Python facade | `from sanka import Sanka, DataEndpoint` |
+| Configure a data endpoint | `Sanka.configure_endpoint(...)` |
+| Resolve installed data support | `ExtensionRegistry` |
+| Register data read/write roles | `ExtensionRegistration` |
+| Data read/write protocols | `DataReader` / `DataWriter` |
+| Manifest's supported endpoint declaration | `EndpointSupport` |
+| Sanka Extension SDK imports | `sanka_extensions.data` / `sanka_extensions.flow` / `sanka_extensions.code` |
+| Hosted dispatcher | `sanka_cli` |
+| Extension repository / IDs | `sankaHQ/extensions` / `sanka/<component>` |
+| Spec / local state | `sanka.yaml` / `.sanka/migrate/` |
+| CLI JSON protocol | `sanka-cli/v1` |
+| Custom function commands | `sanka functions` |
+| Code migration commands | `sanka scan`, `plan`, `apply`, `test`, `verify` |
+| MCP | `sanka mcp` |
 
-The distribution deliberately contains three import packages: `sanka_cli`,
-`sanka_connector`, and `sanka`. The executable is owned only by `sanka-cli`.
-There are no compatibility console scripts or alternate default spec names.
+`Sanka.configure_endpoint` creates a write-free `DataEndpoint`. It does not verify authentication. `Sanka.migrate` creates or resumes a local lifecycle; destination writes require `apply` and the reviewed plan hash. Old `SystemConfig` / `Connection` imports, constructor keywords, `Sanka.configure_system` and `Sanka.connect` remain compatible.
 
-Provider wheel project names remain implementation identities inside exact
-marketplace manifests. They are not user install commands. Users install by
-component ID:
+The existing `sanka code` group retains its custom-function semantics as a compatibility alias. Never silently reinterpret old function invocations as application migration commands. Reassigning that command group requires a separately versioned command migration.
+
+Install by extension ID, not by a distribution name inferred from an endpoint type:
 
 ```bash
 sanka extension add sanka/postgres
 ```
 
-Provider modules retain `sanka_connector_<provider>` and their
-`sanka.connectors` entry points inside isolated connector-host environments.
-The `sanka.connector` import remains a temporary source-compatibility alias;
-new connector code imports `sanka_connector`.
+A third-party extension may serve several endpoint types from an unrelated distribution name. Display locked manifest metadata. Reject overlapping enabled endpoint claims before downloading/installing or re-enabling an extension, and keep runtime resolution fail-closed.
 
-## Python contract
+The [compatibility inventory](naming-compatibility.md) records retained import paths, distribution names, schemas, protocols, API paths, and command aliases with removal conditions. These are transition contracts, not canonical terminology for new abstractions. Preserve the separate typed contracts for data access and code conversion.
 
-```python
-from sanka import Sanka
-```
-
-`Sanka.connect` creates a write-free descriptor. `Sanka.migrate` creates or
-resumes a local lifecycle. Destination writes remain behind `apply`, which
-requires the reviewed plan hash. Hosted clients keep their own explicit
-authentication surface.
-
-## Retirement note
-
-After the unified release and every rollback gate pass, the historical
-`sanka-migrate`, `sanka-migrate-mcp`, and `sanka-connector-*` PyPI releases are
-yanked, not deleted. Their project pages point to `sanka-cli`,
-`sanka-cli[mcp]`, or the matching `sanka extension add sanka/<component>`
-command. Exact historical pins remain recoverable for rollback.
+`flow.create(type="crm")` creates an unresolved business definition. It does not
+apply a configuration or activate automations. `Blueprint` describes a resolved
+artifact inside Flow; use `sanka_extensions.flow`, not the unshipped
+`sanka_extensions.blueprints` proposal. See [Flow status and ownership](flow.md).

@@ -50,7 +50,7 @@ class Inventory:
 class SourceObject:
     """A discoverable source object type, before full inventory.
 
-    ``automatic_target_object`` is the connector's suggested destination
+    ``automatic_target_object`` is the writer's suggested destination
     object for this type; the planner may override it.
     """
 
@@ -65,8 +65,8 @@ class SourceObject:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ProviderIdentity:
-    """Verified identity of the system behind a connection.
+class DataIdentity:
+    """Verified identity of a data endpoint.
 
     Used for identity readback before any mutation: the operator (or agent)
     must see which account/host/tenant a run is actually pinned to.
@@ -77,3 +77,10 @@ class ProviderIdentity:
     account_label: str | None = None
     host: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# Published compatibility names; both spellings identify the same classes.
+ProviderIdentity = DataIdentity
+
+# Compatibility names from the earlier systems facade.
+SystemIdentity = DataIdentity

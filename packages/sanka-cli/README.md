@@ -5,7 +5,7 @@ executable and contains:
 
 - the Apache-2.0 hosted command dispatcher, authentication, output, and
   optional MCP integration under `sanka_cli`;
-- the embedded Apache-2.0 Connector SDK under `sanka_connector`; and
+- the embedded Apache-2.0 Sanka Extension SDK through `sanka_extensions`; and
 - the AGPL-3.0-only local migration runtime under `sanka`.
 
 Python 3.12 or newer is required.
@@ -77,6 +77,13 @@ workflows, AI, Custom Code, and explicitly cloud-selected migrations retain
 their existing authentication requirements. Add `--json` to local lifecycle
 commands for the stable `sanka-cli/v1` response envelope.
 
+Custom functions use `sanka functions`; the old `sanka code` group keeps its original
+function operations as a compatibility alias. Sanka Code migration commands remain
+`scan`, `plan`, `apply`, `test`, and `verify`.
+
+`--base-url` also selects the API origin for anonymous research/assessment. A full
+migration-service URL in `SANKA_MIGRATE_API_BASE` is retained as a fallback.
+
 ## Hosted repository runs
 
 `sanka cloud` uploads reviewed repository ZIPs, starts runs with an explicit
@@ -95,10 +102,10 @@ component/runtime compatibility, exact wheel URL and SHA-256 digest, package
 metadata, entry points, and installed files. Project locks record the exact
 snapshot and artifact identities in `.sanka/extensions.lock`.
 
-Migration components use the `sanka-extension/v1` subprocess protocol.
-Connector implementations load only in an isolated child environment and are
+Code extensions use the `sanka-extension/v1` subprocess protocol.
+Extension implementations load only in an isolated child environment and are
 proxied over `sanka-connector/v1`; provider code is never imported into the
-main CLI process. Hosted providers are not local connectors.
+main CLI process. Hosted SaaS implementations remain private to the cloud runtime.
 
 ## Python facade
 
@@ -106,7 +113,7 @@ main CLI process. Hosted providers are not local connectors.
 from sanka import Sanka
 ```
 
-`Sanka.connect(...)` creates a write-free endpoint descriptor.
+`Sanka.configure_system(...)` creates a write-free endpoint descriptor.
 `Sanka.migrate(...)` creates or resumes a local lifecycle handle. Planning is
 destination-write-free, and apply requires the exact plan hash returned by
 plan.

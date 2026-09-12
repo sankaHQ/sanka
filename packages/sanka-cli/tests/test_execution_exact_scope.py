@@ -40,7 +40,7 @@ from sanka.runtime.execution.state import ClaimOutcome
 from sanka.runtime.mapping import MigrationMappingField, mapping_groups
 from sanka.runtime.mapping.record_mapping import MappingGroup
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
-from sanka_connector import (
+from sanka_extensions.data import (
     Credentials,
     RecordPage,
     RelationshipWrite,

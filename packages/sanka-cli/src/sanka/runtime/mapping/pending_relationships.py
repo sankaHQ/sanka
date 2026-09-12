@@ -28,9 +28,9 @@ from collections.abc import Sequence
 from typing import Any, Protocol
 
 from sanka.runtime.mapping.errors import MappingError
-from sanka_connector import (
+from sanka_extensions.data import (
     Credentials,
-    DestinationConnector,
+    DataWriter,
     RelationshipWrite,
     SupportsBatchRelationshipWrites,
 )
@@ -230,7 +230,7 @@ async def retry_pending_relationships(
     *,
     ledger: IdentityLedger,
     shared_ledger: SharedIdentityLedger | None = None,
-    destination: DestinationConnector,
+    destination: DataWriter,
     credentials: Credentials,
     pending_relationships: PendingRelationships,
     excluded_source_record_ids: set[str] | None = None,

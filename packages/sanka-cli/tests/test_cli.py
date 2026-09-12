@@ -304,8 +304,8 @@ def test_connect_reports_an_installed_provider(capsys: pytest.CaptureFixture[str
     assert main(["connect", "markdown"]) == 0
 
     output = capsys.readouterr().out
-    assert "markdown: ready (source)" in output
-    assert "provided by installed package sanka-connector-markdown" in output
+    assert "markdown: extension installed (source)" in output
+    assert "System authentication and reachability have not been checked." in output
 
 
 def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) -> None:
@@ -315,14 +315,15 @@ def test_connect_json_normalizes_postgresql(capsys: pytest.CaptureFixture[str]) 
         "provider": "postgres",
         "roles": ["source", "destination"],
         "installed": True,
-        "package": "sanka-connector-postgres",
+        "system_type": "postgres",
+        "connection_status": "not_checked",
     }
 
 
 def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["connect", "not-a-provider"]) == 1
     error = capsys.readouterr().err
-    assert "no installed connector" in error
+    assert "no installed extension" in error
     assert "sanka extension add sanka/not-a-provider" in error
 
 
@@ -330,14 +331,14 @@ def test_connect_rejects_an_unknown_provider(capsys: pytest.CaptureFixture[str])
     ("provider", "label"),
     [("hubspot", "HubSpot"), ("salesforce", "Salesforce"), ("sendgrid", "SendGrid")],
 )
-def test_connect_routes_system_providers_to_the_hosted_api(
+def test_connect_rejects_hosted_systems_without_cloud_dispatch(
     provider: str, label: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["connect", provider]) == 1
 
     error = capsys.readouterr().err
     assert label in error
-    assert "hosted System Migration API" in error
+    assert "hosted Data Migration API" in error
     assert f"sanka-connector-{provider}" not in error
 
 
@@ -617,7 +618,7 @@ def test_research_client_uses_public_branded_base_and_unwraps_data() -> None:
         "after": ["2027-01"],
         "locale": ["ja"],
     }
-    assert request.get_header("User-agent") == "sanka-cli/0.2.7"
+    assert request.get_header("User-agent") == "sanka-cli/0.2.8"
     assert timeout == 10.0
 
 
@@ -694,7 +695,7 @@ def test_research_cli_renders_citations_and_attribution(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _FakeResearchClient()
-    monkeypatch.setattr("sanka.cli._research_client", lambda: fake)
+    monkeypatch.setattr("sanka.cli._research_client", lambda _base=None: fake)
 
     assert main(["research", "eol", "--after", "2027-01", "--lang", "en"]) == 0
 
@@ -724,7 +725,7 @@ def test_research_json_is_unwrapped_and_empty_result_exits_two(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = _FakeResearchClient()
-    monkeypatch.setattr("sanka.cli._research_client", lambda: fake)
+    monkeypatch.setattr("sanka.cli._research_client", lambda _base=None: fake)
 
     assert main(["research", "tco", "--json"]) == 2
 
@@ -740,7 +741,7 @@ def test_assess_waits_honestly_and_prints_branded_handoff(
 ) -> None:
     fake = _FakeResearchClient()
     times = iter((1_000.0, 1_003.0))
-    monkeypatch.setattr("sanka.cli._research_client", lambda: fake)
+    monkeypatch.setattr("sanka.cli._research_client", lambda _base=None: fake)
     monkeypatch.setattr("sanka.cli.time.time", lambda: next(times))
 
     assert main(["assess", "--source", "SAP ECC", "--lang", "en"]) == 0

@@ -75,7 +75,7 @@ local environment files, or repository history.
    once.
 8. Install `sanka-cli==0.2.7` and `sanka-cli[mcp]` in fresh environments;
    verify CLI help, local tokenless behavior, hosted authentication failure,
-   extension installation from GitHub, one connector migration, MCP tool
+   extension installation from GitHub, one data migration, MCP tool
    names, and both SDK adapters.
 9. Publish and verify SDK/Homebrew/docs follow-ups in their approved order.
 10. Only then retire legacy projects and the old publishing identity.
@@ -86,7 +86,7 @@ release tag.
 ## Retirement and rollback
 
 After every clean-install and downstream gate passes, yank—never delete—the
-historical CLI, MCP, Connector SDK, and first-party connector PyPI releases.
+historical CLI, MCP, Sanka Extension SDK, and first-party extension PyPI releases.
 Yank reasons name `sanka-cli`, `sanka-cli[mcp]`, or the matching GitHub
 marketplace component. Archive the old CLI repository only after removing its
 publisher.

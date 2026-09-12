@@ -15,14 +15,14 @@ MIGRATION_COMMANDS: dict[str, str] = {
     "plan": "inspect source/target and produce a reviewable plan",
     "validate": "validate sampled source records against the plan without writing",
     "apply": "execute the reviewed plan (resumable)",
-    "test": "generate and run unit tests for the created FastAPI app",
+    "test": "generate and run tests for the converted application",
     "verify": "verify the target against the source and ledger",
     "status": "show run status and ledger counts",
     "migrate": "plan + apply + verify in one go",
-    "connect": "select a built-in provider and show its supported migration roles",
+    "connect": "inspect installed extension support; does not authenticate a system",
     "research": "query cited Sanka lifecycle, cost, and comparison research",
     "assess": "submit a free migration assessment",
-    "extension": "manage local migration extensions",
+    "extension": "manage data and code extensions",
 }
 
 HYBRID_CLOUD_COMMANDS = {"plan", "apply", "status", "verify"}
@@ -66,7 +66,7 @@ def _build_passthrough(name: str, help_text: str) -> click.Command:
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
     def passthrough(ctx: click.Context, args: tuple[str, ...]) -> None:
-        _run_local(name, ctx.meta["sanka.raw_args"])
+        _run_local(name, ctx.meta["sanka.raw_args"], api_base=ctx.obj.base_url)
 
     return passthrough
 
@@ -101,7 +101,7 @@ def _build_hybrid(name: str, help_text: str) -> click.Command:
                 args=args,
             )
             return
-        _run_local(name, ctx.meta["sanka.raw_args"])
+        _run_local(name, ctx.meta["sanka.raw_args"], api_base=ctx.obj.base_url)
 
     return hybrid
 
@@ -137,7 +137,7 @@ def _build_cloud_only(name: str, help_text: str) -> click.Command:
     return cloud_only
 
 
-def _run_local(name: str, args: tuple[str, ...]) -> NoReturn:
+def _run_local(name: str, args: tuple[str, ...], *, api_base: str | None = None) -> NoReturn:
     from sanka.cli import main as local_main
 
-    raise SystemExit(local_main([name, *args]))
+    raise SystemExit(local_main([name, *args], api_base=api_base))
