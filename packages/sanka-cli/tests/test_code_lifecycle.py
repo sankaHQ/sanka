@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from sanka.runtime.extensions.code_lifecycle import CodeLifecycle, CodePlan, CodeStage
+from sanka.runtime.extensions.code_lifecycle import CodeLifecycle, CodePlan, CodeRun, CodeStage
 from sanka.runtime.extensions.model import ExtensionError
 from sanka.runtime.extensions.stage import ExtensionBinding
 
@@ -38,7 +38,10 @@ class Fixture:
             commands=tuple(sorted(COMMANDS)),
             enabled=True,
         )
-        self.configuration = {"output": str(self.output), "options": {"mode": "reviewed"}}
+        self.configuration: dict[str, Any] = {
+            "output": str(self.output),
+            "options": {"mode": "reviewed"},
+        }
         self.calls: list[dict[str, Any]] = []
         self.events: list[CodeStage] = []
         self.plans: list[CodePlan] = []
@@ -74,8 +77,8 @@ class Fixture:
             response["error"] = {"code": "CONVERSION_FAILED", "message": "failed", "details": {}}
         return int(error), json.dumps(response).encode(), b"fixture log"
 
-    def run(self, **overrides: Any):
-        arguments = {
+    def run(self, **overrides: Any) -> CodeRun:
+        arguments: dict[str, Any] = {
             "binding": self.binding,
             "project_root": self.source,
             "artifact_root": self.artifacts,
@@ -99,6 +102,7 @@ def test_success_requires_five_stages_and_exact_plan_handoff(tmp_path: Path) -> 
     assert fixture.events == list(result.stages)
     assert [request["command"] for request in fixture.calls] == COMMANDS
     assert len(fixture.plans) == 1
+    assert result.plan is not None
     assert result.plan == fixture.plans[0]
     assert result.plan.extension_plan_hash == PLAN_HASH
     for request in fixture.calls[:2]:
@@ -176,6 +180,7 @@ def test_receipt_and_configuration_mutation_cannot_change_the_plan(tmp_path: Pat
 
     result = fixture.run(on_stage=observe)
     assert result.outcome == "success"
+    assert result.plan is not None
     assert result.plan.extension_plan_hash == PLAN_HASH
     assert all(
         request["configuration"]["options"]["mode"] == "reviewed" for request in fixture.calls
@@ -210,7 +215,7 @@ def test_callback_failure_stops_without_retry(tmp_path: Path) -> None:
 @pytest.mark.parametrize("invalid", ["capability", "input_digest", "request_id", "configuration"])
 def test_invalid_run_cannot_reach_the_transport(tmp_path: Path, invalid: str) -> None:
     fixture = Fixture(tmp_path)
-    overrides = {
+    overrides: dict[str, dict[str, Any]] = {
         "capability": {"binding": replace(fixture.binding, commands=("scan",))},
         "input_digest": {"snapshot_inputs": lambda: "not-a-digest"},
         "request_id": {"request_id_prefix": ""},
