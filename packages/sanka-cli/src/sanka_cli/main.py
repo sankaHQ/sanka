@@ -8,6 +8,7 @@ from sanka_cli.commands.ai import ai
 from sanka_cli.commands.auth import auth, auth_login, auth_logout, auth_status
 from sanka_cli.commands.cloud import cloud
 from sanka_cli.commands.code import code
+from sanka_cli.commands.flow import flow
 from sanka_cli.commands.functions import functions
 from sanka_cli.commands.migrate import register_migration_passthroughs
 from sanka_cli.commands.profiles import profiles
@@ -44,6 +45,7 @@ cli.add_command(auth_logout, "logout")
 cli.add_command(auth_status, "whoami")
 cli.add_command(profiles)
 cli.add_command(workflows)
+cli.add_command(flow)
 cli.add_command(ai)
 cli.add_command(functions)
 cli.add_command(code)

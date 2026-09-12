@@ -15,6 +15,37 @@ activate an automation. CRM/billing selectors are examples, not bundled or
 published Flow implementations. The SDK is synchronized from the canonical
 Extensions repository with the same provenance checks as its other namespaces.
 
+## Generate a native workflow with Studio
+
+Studio presents categories and workflow templates. Its hosted CLI counterpart uses
+that same catalog and generation service:
+
+```bash
+sanka flow --workspace "$WORKSPACE_UUID" categories
+sanka flow --workspace "$WORKSPACE_UUID" templates --category sales
+sanka flow --workspace "$WORKSPACE_UUID" generate sales.deal-to-estimate
+```
+
+The Sales template creates a configured, inactive native workflow:
+**Deal created → Create Estimate**. No installation name, mapping form, plan digest
+or installation history is required. The result includes `workflow_id`; manage
+and activate the workflow using the existing Workflows UI. Templates available in
+a workspace come from the hosted API, not a hardcoded CLI catalog. This command
+requires a compatible deployed API and an authenticated account with permission
+to create workflows in the exact selected workspace.
+
+For packaged templates, generation prints a request UUID to stderr before sending
+the write. If the response is lost, rerun the same command with `--request-id UUID`; the API returns
+the same workflow instead of creating another. Reusing that UUID with a different
+template fails. A separate invocation without a request ID intentionally creates
+another workflow. `--language ja` selects the Japanese template title. Every
+catalog and generation response must match the selected workspace UUID.
+
+This is a hosted native-template operation; no portable business implementation or
+SaaS provider is bundled in the CLI. The existing `sanka workflows` resource
+commands retain their CRUD/run semantics. The Python `flow.create` definitions and
+the separate reconstruction library below retain their existing contracts.
+
 ## Shared runtime versus extensions
 
 `sanka` owns verified extension discovery, planning, execution, verification,
@@ -124,8 +155,8 @@ ledger is a substitute for native transactional fencing.
 ## Delivery boundary and validation
 
 This library does not yet include a native Sanka API adapter, a runnable Sales
-extension, CLI/cloud controls, or staged active-workflow replacement. Calling the
-legacy SDK `flow.create` still only constructs an unresolved definition.
+extension, a hosted reconstruction CLI, or staged active-workflow replacement.
+Calling the legacy SDK `flow.create` still only constructs an unresolved definition.
 
 Focused tests cover three-way conflict handling, ownership and removal ordering,
 lost-write recovery, immutable receipts, competing/expired claims, inactive
