@@ -79,6 +79,33 @@ issuance. A stopped planning result is not a resumable token: continuing require
 a fresh lifecycle and approval. The host owns claim/lease fencing and must reject
 duplicate execution; it must not silently retry an uncertain apply.
 
+## One repair attempt
+
+`sanka.runtime.extensions.code_repair.CodeRepairLifecycle` revalidates an existing
+candidate, requests at most one patch, then reruns the same checks. It does not
+call the normal lifecycle's `apply`: regenerating output could erase the repair.
+
+The host supplies candidate authorization and identity verification, preparation
+of a fixed test harness, OS-level freezing, live protected/selected file digests,
+bounded check execution and a patch callback that validates exact allowed paths
+and their original hashes before writing. Preparation must preserve all source,
+plan and application inputs outside the generated harness. Snapshots must read
+current bytes, and protection must cover every input outside the edit scope.
+
+The runtime validates immutable `CodeChecks`, requires a positive prepared test
+count, detects changed inputs, skips an already passing target gate, and compares
+both gates after one patch. A successful repair requires all expected tests and
+static verification to pass, unchanged protected files, and unchanged patch output
+after the checks. A scope violation takes precedence over a passing check result.
+Hosts can include bounded JSON diagnostics in `context`; the runtime does not
+interpret framework metadata. Host or observer errors propagate without retry.
+
+`CodeRepairRun` and `CodeRepairEvidence` report the result; they do not constitute
+independent behavioral certification. Model calls, candidate extraction, edit
+application, sandbox restrictions, deadlines, claim fencing, billing and private
+receipts remain host-owned. Hosts must reject duplicate/uncertain attempts and
+must never rerun the patch callback automatically.
+
 ## Current integration status
 
 Local Code lifecycle execution uses this boundary. The hosted worker still has

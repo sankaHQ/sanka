@@ -182,6 +182,7 @@ def main() -> int:
                 "sanka/runtime/__init__.py",
                 "sanka/runtime/extensions/stage.py",
                 "sanka/runtime/extensions/code_lifecycle.py",
+                "sanka/runtime/extensions/code_repair.py",
                 "sanka/runtime/extensions/artifacts.py",
                 "sanka_cli/__init__.py",
                 "sanka_cli/commands/skill.py",
