@@ -10,7 +10,7 @@ from sanka.runtime.mapping import (
     SourceOwnerDirectory,
     map_owner_properties,
 )
-from sanka_extensions.systems import OwnerProfile
+from sanka_extensions.data import OwnerProfile
 
 
 def _directory(*profiles: OwnerProfile) -> OwnerDirectory:

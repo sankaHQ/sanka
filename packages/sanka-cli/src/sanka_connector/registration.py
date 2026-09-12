@@ -10,26 +10,26 @@ group::
 
 The runtime discovers registrations via ``importlib.metadata``. Extension
 source never imports the runtime, preserving the Apache-2.0 source boundary.
-System reader and writer instances are stateless: every SPI call receives credentials, so a
-single registration object serves all configured systems.
+Data reader and writer instances are stateless: every SPI call receives credentials, so a
+single registration object serves all configured data endpoints.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sanka_connector.protocols import SystemReader, SystemWriter
+from sanka_connector.protocols import DataReader, DataWriter
 
 ENTRY_POINT_GROUP = "sanka.connectors"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ExtensionRegistration:
-    """An extension's advertised system roles. Either side may be ``None``."""
+    """An extension's advertised data access roles. Either side may be ``None``."""
 
     name: str
-    source: SystemReader | None = None
-    destination: SystemWriter | None = None
+    source: DataReader | None = None
+    destination: DataWriter | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():

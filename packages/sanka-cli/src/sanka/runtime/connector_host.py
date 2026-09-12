@@ -15,7 +15,7 @@ from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     ENTRY_POINT_GROUP,
     BatchRelationshipWriteResult,
     BatchWriteInput,
@@ -23,6 +23,9 @@ from sanka_extensions.systems import (
     Credentials,
     CustomObjectDefinition,
     CustomObjectProperty,
+    DataIdentity,
+    DataReader,
+    DataWriter,
     ExtensionRegistration,
     FieldSchema,
     Inventory,
@@ -54,9 +57,6 @@ from sanka_extensions.systems import (
     SupportsRetryMetrics,
     SupportsSchemaProvisioning,
     SupportsSnapshotBounds,
-    SystemIdentity,
-    SystemReader,
-    SystemWriter,
     WriteOptions,
     WriteResult,
 )
@@ -114,7 +114,7 @@ _WIRE_TYPES = {
         PipelineStage,
         PropertyDefinition,
         PropertyResult,
-        SystemIdentity,
+        DataIdentity,
         RecordPage,
         RelationshipWrite,
         RelationshipWriteResult,
@@ -126,8 +126,8 @@ _WIRE_TYPES = {
     )
 }
 # The v1 wire tag is published independently of Python class names.
-_WIRE_TYPES.pop("SystemIdentity", None)
-_WIRE_TYPES["ProviderIdentity"] = SystemIdentity
+_WIRE_TYPES.pop(DataIdentity.__name__, None)
+_WIRE_TYPES["ProviderIdentity"] = DataIdentity
 _WIRE_NAMES = {value: key for key, value in _WIRE_TYPES.items()}
 _WIRE_MARKER = "__sanka_wire__"
 
@@ -339,7 +339,7 @@ def _describe(registration: ExtensionRegistration) -> dict[str, Any]:
         connector = getattr(registration, role)
         if connector is None:
             continue
-        expected = SystemReader if role == "source" else SystemWriter
+        expected = DataReader if role == "source" else DataWriter
         if not isinstance(connector, expected) or connector.provider != registration.name:
             _fail("SANKA_CONNECTOR_PROVIDER", "connector registration role is invalid")
         roles.append(role)
@@ -372,7 +372,7 @@ def invoke_registration(
     connector = registration.source if role == "source" else registration.destination
     if connector is None:
         _fail("SANKA_CONNECTOR_CAPABILITY", "connector does not expose the requested role")
-    base = SystemReader if role == "source" else SystemWriter
+    base = DataReader if role == "source" else DataWriter
     if not isinstance(connector, base):
         _fail("SANKA_CONNECTOR_CAPABILITY", "connector role does not implement its base protocol")
     allowed = _SOURCE_OPERATIONS if role == "source" else _DESTINATION_OPERATIONS

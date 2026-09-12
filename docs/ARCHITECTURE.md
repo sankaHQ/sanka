@@ -1,7 +1,7 @@
 # Sanka architecture
 
 The OSS CLI/runtime is shared by Sanka, Sanka Flow and Sanka Code. Extensions own
-the SDK and reusable system, business and code capabilities. Private cloud
+the SDK and reusable data, workflow and code capabilities. Private cloud
 authentication, workspace services and hosted SaaS implementations remain in
 `sanka-api`; screens remain in `sanka-react`. The embedded Flow definition contract
 does not yet provide a Flow execution path; see [Flow runtime ownership](flow.md).
@@ -51,7 +51,7 @@ SHA-256 digests, package identities, entry points, protocols, and compatible
 and artifacts.
 
 Extensions for code conversion execute through `sanka-extension/v1`. Extensions
-that read or write systems retain their typed `sanka.connectors` registrations but load only in a verified
+that read or write data retain their typed `sanka.connectors` registrations but load only in a verified
 isolated environment. The main process communicates with one persistent child
 through `sanka-connector/v1`; it never imports marketplace provider code.
 Credentials reach only the selected host and are not written to manifests,
@@ -80,7 +80,7 @@ to them for documented local behavior.
 4. Checkpoints and identity-ledger writes make interrupted work resumable and
    idempotent.
 5. Verification reconciles the reviewed source scope with target readback.
-6. Optional system-access behavior is expressed through typed capability
+6. Optional data-access behavior is expressed through typed capability
    protocols, not ad hoc attribute checks.
 
 Generated destination dependencies belong to the generated project. Provider

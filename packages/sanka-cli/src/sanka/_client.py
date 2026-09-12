@@ -15,18 +15,18 @@ from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_extensions.systems import CredentialProvider
+from sanka_extensions.data import CredentialProvider
 
 
 @dataclass(frozen=True, slots=True, kw_only=True, init=False)
-class SystemConfig:
-    """A named system endpoint and independent, non-secret configuration.
+class DataEndpoint:
+    """A data source or destination with independent, non-secret configuration.
 
-    Creating this descriptor never authenticates a system. Secret values stay
+    Creating this descriptor never authenticates an endpoint. Secret values stay
     in environment variables or a managed credential store.
     """
 
-    system_type: str
+    endpoint_type: str
     roles: tuple[str, ...]
     endpoint_reference: str | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
@@ -34,6 +34,7 @@ class SystemConfig:
     def __init__(
         self,
         *,
+        endpoint_type: str | None = None,
         system_type: str | None = None,
         roles: tuple[str, ...],
         endpoint_reference: str | None = None,
@@ -45,16 +46,23 @@ class SystemConfig:
         # choosing one endpoint when a caller supplies conflicting identities.
         if system_type is not None and provider is not None and system_type != provider:
             raise ValueError("system_type and compatibility provider disagree")
+        compatibility_type = system_type if system_type is not None else provider
+        if (
+            endpoint_type is not None
+            and compatibility_type is not None
+            and endpoint_type != compatibility_type
+        ):
+            raise ValueError("endpoint_type and compatibility type disagree")
         if (
             endpoint_reference is not None
             and connection is not None
             and endpoint_reference != connection
         ):
             raise ValueError("endpoint_reference and compatibility connection disagree")
-        selected_type = system_type if system_type is not None else provider
+        selected_type = endpoint_type if endpoint_type is not None else compatibility_type
         if selected_type is None or not selected_type.strip():
-            raise ValueError("system_type is required")
-        object.__setattr__(self, "system_type", selected_type)
+            raise ValueError("endpoint_type is required")
+        object.__setattr__(self, "endpoint_type", selected_type)
         object.__setattr__(self, "roles", roles)
         object.__setattr__(
             self,
@@ -65,8 +73,13 @@ class SystemConfig:
 
     @property
     def provider(self) -> str:
-        """Compatibility spelling for system_type."""
-        return self.system_type
+        """Compatibility spelling for endpoint_type."""
+        return self.endpoint_type
+
+    @property
+    def system_type(self) -> str:
+        """Compatibility spelling for endpoint_type."""
+        return self.endpoint_type
 
     @property
     def connection(self) -> str | None:
@@ -75,13 +88,13 @@ class SystemConfig:
 
     def endpoint(self) -> EndpointSpec:
         return EndpointSpec(
-            type=self.system_type,
+            type=self.endpoint_type,
             connection=self.endpoint_reference,
             options=dict(self.options),
         )
 
 
-EndpointInput = str | Path | EndpointSpec | SystemConfig
+EndpointInput = str | Path | EndpointSpec | DataEndpoint
 
 
 class Migration:
@@ -156,29 +169,39 @@ class Sanka:
         )
         self._closed = False
 
+    def configure_endpoint(
+        self,
+        endpoint_type: str,
+        endpoint_reference: str | Path | None = None,
+        *,
+        options: Mapping[str, Any] | None = None,
+    ) -> DataEndpoint:
+        """Configure a data endpoint supported by an installed extension.
+
+        The endpoint reference is a path, URL, or named data endpoint.
+        Authentication and reachability are checked by the migration lifecycle.
+        """
+        self._ensure_open()
+        normalized = endpoint_type.strip().lower()
+        if normalized == "postgresql":
+            normalized = "postgres"
+        roles = self._registry.roles(normalized)
+        return DataEndpoint(
+            endpoint_type=normalized,
+            roles=roles,
+            endpoint_reference=None if endpoint_reference is None else str(endpoint_reference),
+            options=options,
+        )
+
     def configure_system(
         self,
         system_type: str,
         endpoint_reference: str | Path | None = None,
         *,
         options: Mapping[str, Any] | None = None,
-    ) -> SystemConfig:
-        """Configure a system supported by an installed extension.
-
-        The endpoint reference is a path, URL, or named system reference.
-        Authentication and reachability are checked by the migration lifecycle.
-        """
-        self._ensure_open()
-        normalized = system_type.strip().lower()
-        if normalized == "postgresql":
-            normalized = "postgres"
-        roles = self._registry.roles(normalized)
-        return SystemConfig(
-            system_type=normalized,
-            roles=roles,
-            endpoint_reference=None if endpoint_reference is None else str(endpoint_reference),
-            options=options,
-        )
+    ) -> DataEndpoint:
+        """Compatibility method for configure_endpoint; does not authenticate."""
+        return self.configure_endpoint(system_type, endpoint_reference, options=options)
 
     def connect(
         self,
@@ -186,9 +209,9 @@ class Sanka:
         connection: str | Path | None = None,
         *,
         options: Mapping[str, Any] | None = None,
-    ) -> SystemConfig:
-        """Compatibility method for configure_system; does not authenticate."""
-        return self.configure_system(provider, connection, options=options)
+    ) -> DataEndpoint:
+        """Compatibility method for configure_endpoint; does not authenticate."""
+        return self.configure_endpoint(provider, connection, options=options)
 
     def migrate(
         self,
@@ -242,7 +265,7 @@ class Sanka:
 
 
 def _endpoint(value: EndpointInput, *, role: str) -> EndpointSpec:
-    if isinstance(value, SystemConfig):
+    if isinstance(value, DataEndpoint):
         return value.endpoint()
     if isinstance(value, EndpointSpec):
         return value
@@ -272,4 +295,7 @@ def _endpoint(value: EndpointInput, *, role: str) -> EndpointSpec:
 
 
 # Compatibility import for clients using the original descriptor name.
-Connection = SystemConfig
+Connection = DataEndpoint
+
+# Compatibility names from the earlier systems terminology.
+SystemConfig = DataEndpoint

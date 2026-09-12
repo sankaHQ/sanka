@@ -2929,7 +2929,7 @@ def test_system_metadata_uses_manifest_distribution_for_third_party_extension(
     registry = ExtensionRegistry(
         {},
         resolver=store.resolve_extension,
-        providers=store.supported_systems(),
+        providers=store.supported_endpoints(),
         owner=store,
     )
     try:

@@ -55,7 +55,7 @@ from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
 from sanka.runtime.extensions.runner import ExtensionResult
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.planner import MigrationPlan
-from sanka.runtime.registry import ExtensionRegistry, UnknownSystemError
+from sanka.runtime.registry import ExtensionRegistry, UnknownEndpointError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import SqliteStateStore
 
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None, *, api_base: str | None = None) -> int:
         )
     except (
         SpecError,
-        UnknownSystemError,
+        UnknownEndpointError,
         ExecutionError,
         FileNotFoundError,
     ) as error:

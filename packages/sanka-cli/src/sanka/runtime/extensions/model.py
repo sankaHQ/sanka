@@ -45,7 +45,7 @@ class Wheel:
 
 
 @dataclass(frozen=True)
-class SystemSupport:
+class EndpointSupport:
     name: str
     roles: tuple[Literal["source", "destination"], ...]
 
@@ -70,7 +70,7 @@ class Manifest:
     distribution_version: str
     executable: str | None
     entry_point: str | None
-    providers: tuple[SystemSupport, ...]
+    providers: tuple[EndpointSupport, ...]
     commands: tuple[str, ...]
     match_all: tuple[Matcher, ...]
     match_any: tuple[Matcher, ...]
@@ -96,4 +96,7 @@ class Recommendation:
 
 
 # Compatibility import for the published manifest model.
-Provider = SystemSupport
+Provider = EndpointSupport
+
+# Compatibility names from the earlier systems terminology.
+SystemSupport = EndpointSupport

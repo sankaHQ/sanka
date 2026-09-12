@@ -23,12 +23,15 @@ from sanka.runtime.connector_host import (
     encode_value,
 )
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
     CustomObjectDefinition,
+    DataIdentity,
+    DataReader,
+    DataWriter,
     Inventory,
     Limits,
     OwnerProfile,
@@ -41,9 +44,6 @@ from sanka_extensions.systems import (
     ResourceResult,
     SourceFilter,
     SourceObject,
-    SystemIdentity,
-    SystemReader,
-    SystemWriter,
     WriteOptions,
     WriteResult,
 )
@@ -410,9 +410,9 @@ class _RemoteDestination(_RemoteConnector):
 
 
 class _IdentityInspection(_RemoteConnector):
-    async def inspect(self, credentials: Credentials) -> SystemIdentity:
+    async def inspect(self, credentials: Credentials) -> DataIdentity:
         return cast(
-            SystemIdentity, await self._async_request("inspect", {"credentials": credentials})
+            DataIdentity, await self._async_request("inspect", {"credentials": credentials})
         )
 
 
@@ -691,7 +691,7 @@ def build_remote_extension(
     role: str,
     *,
     description: dict[str, Any] | None = None,
-) -> SystemReader | SystemWriter:
+) -> DataReader | DataWriter:
     """Build a structural proxy with only capabilities the host advertised."""
     description = description or cast(dict[str, Any], client.request(provider, "describe", {}))
     if not _valid_description(description, role):
@@ -702,7 +702,7 @@ def build_remote_extension(
     mixins = tuple(_MIXINS[name] for name in capabilities[role] if name in _MIXINS)
     proxy_type = type(f"Remote{provider.title()}{role.title()}", (base, *mixins), {})
     return cast(
-        SystemReader | SystemWriter,
+        DataReader | DataWriter,
         proxy_type(client, provider, role, binding_kinds[role]),
     )
 

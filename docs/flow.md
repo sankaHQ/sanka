@@ -19,7 +19,7 @@ Extensions repository with the same provenance checks as its other namespaces.
 
 `sanka` owns verified extension discovery, planning, execution, verification,
 resumable state and the CLI across all three products. `extensions` owns typed
-SDK contracts and independently versioned capabilities: local system access,
+SDK contracts and independently versioned capabilities: local data access,
 business templates/transformations and code conversion. Extension implementations
 must not import the shared runtime. Hosted authentication, credentials, workspace
 services, SaaS adapters and jobs remain private to `sanka-api`; `sanka-react` owns
@@ -29,7 +29,7 @@ A Flow runtime should resolve a definition to one verified, versioned extension
 and construct a Blueprint of desired resources. It must produce a target-state
 diff and bind the approved plan to the target, observed revisions and immutable
 extension/template identity. Unsupported resources and capabilities fail before
-mutation. Existing system/code manifests and protocols must not be repurposed to
+mutation. Existing data/code manifests and protocols must not be repurposed to
 execute an unsupported Flow request.
 
 ## Required reapplication behavior
@@ -77,6 +77,6 @@ those services when implementing the cloud adapter, with matching React types,
 without changing existing API modes implicitly.
 
 The canonical contract lives in
-[`extensions/docs/flow.md`](https://github.com/sankaHQ/extensions/blob/be22ac64240a7da05265fc8519d5d147f3b472c8/docs/flow.md).
+[`extensions/docs/flow.md`](https://github.com/sankaHQ/extensions/blob/cbb2a4b57487b93a3c829e3affc7bf36820cf361/docs/flow.md).
 SDK publication, runtime dependency upgrades and cloud deployment remain separate
 release steps.

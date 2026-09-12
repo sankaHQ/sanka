@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Sanka system access interfaces: base protocols plus optional capability protocols.
+"""The Sanka data access interfaces: base protocols plus optional capability protocols.
 
-Base protocols carry the minimum a system reader or writer must implement. Everything else
+Base protocols carry the minimum a data reader or writer must implement. Everything else
 is an optional capability protocol the runtime discovers with ``isinstance``
 (all protocols here are ``runtime_checkable``) — never with ``getattr``. An
 extension advertises a capability by implementing the protocol; the runtime
@@ -39,12 +39,12 @@ from sanka_connector.records import (
     WriteOptions,
     WriteResult,
 )
-from sanka_connector.schema import Inventory, SourceObject, SystemIdentity
+from sanka_connector.schema import DataIdentity, Inventory, SourceObject
 
 
 @runtime_checkable
-class SystemReader(Protocol):
-    """Minimum contract for reading a system out."""
+class DataReader(Protocol):
+    """Minimum contract for reading data from a source."""
 
     provider: str
     binding_kind: str
@@ -74,8 +74,8 @@ class SystemReader(Protocol):
 
 
 @runtime_checkable
-class SystemWriter(Protocol):
-    """Minimum contract for writing a system in."""
+class DataWriter(Protocol):
+    """Minimum contract for writing data to a destination."""
 
     provider: str
     binding_kind: str
@@ -116,12 +116,12 @@ class SupportsIdentityInspection(Protocol):
     """Verify and read back the identity behind a connection (safety tenet:
     runs are pinned to a verified identity before any mutation)."""
 
-    async def inspect(self, credentials: Credentials) -> SystemIdentity: ...
+    async def inspect(self, credentials: Credentials) -> DataIdentity: ...
 
 
 @runtime_checkable
 class SupportsConfigValidation(Protocol):
-    """Self-check system configuration/reachability without mutating."""
+    """Self-check data endpoint configuration/reachability without mutating."""
 
     async def validate(self, credentials: Credentials) -> list[str]: ...
 
@@ -340,5 +340,9 @@ class SupportsRetryMetrics(Protocol):
 
 
 # Published compatibility names; both spellings identify the same classes.
-SourceConnector = SystemReader
-DestinationConnector = SystemWriter
+SourceConnector = DataReader
+DestinationConnector = DataWriter
+
+# Compatibility names from the earlier systems facade.
+SystemReader = DataReader
+SystemWriter = DataWriter

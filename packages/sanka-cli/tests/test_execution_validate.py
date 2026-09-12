@@ -35,8 +35,8 @@ from sanka.runtime.mapping import MappingError, MigrationMappingField, mapping_g
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
-from sanka_extensions.systems import Credentials, RecordPage, SourceFilter, SourceObject
-from sanka_extensions.systems.protocols import SystemReader, SystemWriter
+from sanka_extensions.data import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_extensions.data.protocols import DataReader, DataWriter
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 
@@ -170,7 +170,7 @@ def test_validate_module_surface_admits_no_destination_and_no_ledger() -> None:
     from sanka.runtime.execution import validate as validate_module
 
     source = inspect.getsource(validate_module)
-    assert "SystemWriter" not in source
+    assert "DataWriter" not in source
     assert "ExecutionLedger" not in source
     assert "ExecutionHost" not in source
     assert "ExecutionJournal" not in source
@@ -613,10 +613,10 @@ class PoisonedRegistry(ExtensionRegistry):
     def names(self) -> list[str]:
         return self._inner.names()
 
-    def source(self, type_name: str) -> SystemReader:
+    def source(self, type_name: str) -> DataReader:
         return self._inner.source(type_name)
 
-    def destination(self, type_name: str) -> SystemWriter:
+    def destination(self, type_name: str) -> DataWriter:
         raise AssertionError("write-free validation must never resolve a destination connector")
 
 

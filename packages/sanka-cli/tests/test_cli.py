@@ -338,7 +338,7 @@ def test_connect_rejects_hosted_systems_without_cloud_dispatch(
 
     error = capsys.readouterr().err
     assert label in error
-    assert "hosted System Migration API" in error
+    assert "hosted Data Migration API" in error
     assert f"sanka-connector-{provider}" not in error
 
 
@@ -618,7 +618,7 @@ def test_research_client_uses_public_branded_base_and_unwraps_data() -> None:
         "after": ["2027-01"],
         "locale": ["ja"],
     }
-    assert request.get_header("User-agent") == "sanka-cli/0.2.7"
+    assert request.get_header("User-agent") == "sanka-cli/0.2.8"
     assert timeout == 10.0
 
 

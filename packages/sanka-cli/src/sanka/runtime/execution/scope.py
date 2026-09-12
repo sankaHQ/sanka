@@ -2,11 +2,11 @@
 """Scope freeze: per-route high-water marks, frozen totals, route resolution.
 
 Faithful port of the production scope mechanics: the queue-time high-water
-mark freeze probes :class:`~sanka_extensions.systems.SupportsHighWaterMark` and
+mark freeze probes :class:`~sanka_extensions.data.SupportsHighWaterMark` and
 freezes a mark for **every** reviewed route (not only the selected ones); the
-claim-time total count probes :class:`~sanka_extensions.systems.SupportsRecordCounts`
+claim-time total count probes :class:`~sanka_extensions.data.SupportsRecordCounts`
 and counts **selected** routes only, bounded by the frozen marks through
-:class:`~sanka_extensions.systems.SupportsBoundedCounts`. A route whose frozen mark is
+:class:`~sanka_extensions.data.SupportsBoundedCounts`. A route whose frozen mark is
 ``None`` (the source held no records at freeze time) counts as ``0`` and is
 completed without a read. Sources that cannot count report ``None`` totals —
 unknown, never zero.
@@ -46,12 +46,12 @@ from sanka.runtime.mapping.record_mapping import (
     mapping_group_key,
     mapping_route_manifest,
 )
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     Credentials,
+    DataReader,
     SupportsBoundedCounts,
     SupportsHighWaterMark,
     SupportsRecordCounts,
-    SystemReader,
 )
 
 EXACT_CANDIDATE_HASH_MISMATCH_CODE = "SANKA_MIGRATE_EXACT_SCOPE_CANDIDATE_HASH_MISMATCH"
@@ -92,7 +92,7 @@ def execution_routes(
 
 async def freeze_route_high_water_marks(
     *,
-    source: SystemReader,
+    source: DataReader,
     source_credentials: Credentials,
     routes: Sequence[ExecutionRoute],
 ) -> dict[str, str | None]:
@@ -117,7 +117,7 @@ async def freeze_route_high_water_marks(
 
 async def frozen_route_totals(
     *,
-    source: SystemReader,
+    source: DataReader,
     source_credentials: Credentials,
     routes: Sequence[ExecutionRoute],
     route_high_water_marks: Mapping[str, str | None],
@@ -173,7 +173,7 @@ async def frozen_route_totals(
 async def freeze_scope(
     *,
     groups: list[MappingGroup],
-    source: SystemReader,
+    source: DataReader,
     source_credentials: Credentials,
     requested_route_keys: Any | None = None,
     expected_route_manifest: Any | None = None,

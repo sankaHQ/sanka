@@ -23,10 +23,11 @@ from sanka.runtime.planner import MigrationPlan, RoutePlan
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
+    DataAccessError,
     ErrorCategory,
     ExtensionRegistration,
     FieldSchema,
@@ -38,7 +39,6 @@ from sanka_extensions.systems import (
     RelationshipWriteResult,
     SourceFilter,
     SourceObject,
-    SystemAccessError,
     WriteOptions,
     WriteResult,
 )
@@ -115,7 +115,7 @@ class MemorySource:
     ) -> RecordPage:
         self.read_requests.append((object_type, cursor))
         if self.fail_at_cursor is not None and cursor == self.fail_at_cursor:
-            raise SystemAccessError(
+            raise DataAccessError(
                 "simulated source outage",
                 category=ErrorCategory.TRANSIENT,
                 retryable=False,

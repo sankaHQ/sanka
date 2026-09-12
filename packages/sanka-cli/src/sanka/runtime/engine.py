@@ -59,14 +59,14 @@ from sanka.runtime.planner import MigrationPlan, RoutePlan, build_plan
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, resolve_env
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES, RunStatus, StateStore
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     ConflictPolicy,
     CredentialProvider,
     Credentials,
+    DataAccessError,
     SupportsRecordCounts,
-    SystemAccessError,
 )
-from sanka_extensions.systems.protocols import SystemReader, SystemWriter
+from sanka_extensions.data.protocols import DataReader, DataWriter
 
 MAX_WRITE_ATTEMPTS = 5
 _BACKOFF_BASE_SECONDS = 0.5
@@ -315,7 +315,7 @@ class MigrationEngine:
                 sample_size=sample_size,
                 full=full,
             )
-        except SystemAccessError as error:
+        except DataAccessError as error:
             raise ExecutionError(
                 f"run {run_id!r} validation failed ({error.category}): {error}"
             ) from error
@@ -366,7 +366,7 @@ class MigrationEngine:
                 policies=policies,
                 approved_scope=approved_scope,
             )
-        except SystemAccessError as error:
+        except DataAccessError as error:
             self._store.set_status(run_id, RunStatus.FAILED)
             raise ExecutionError(f"run {run_id!r} failed ({error.category}): {error}") from error
         except ExecutionFault as fault:
@@ -444,9 +444,9 @@ class MigrationEngine:
         plan: MigrationPlan,
         *,
         host: ExecutionHost,
-        source: SystemReader,
+        source: DataReader,
         source_credentials: Credentials,
-        destination: SystemWriter,
+        destination: DataWriter,
         destination_credentials: Credentials,
         policies: WritePolicies,
         approved_scope: ExactIdScope,
@@ -522,7 +522,7 @@ class MigrationEngine:
                     on_missing_identity="fail",
                     retry=self._with_retries,
                 )
-            except (SystemAccessError, ExecutionFault) as error:
+            except (DataAccessError, ExecutionFault) as error:
                 await self._save_failed(journal, entry, message=str(error))
                 raise
             entry.batches_completed += 1
@@ -592,7 +592,7 @@ class MigrationEngine:
     async def _candidate_ids(
         self,
         *,
-        source: SystemReader,
+        source: DataReader,
         source_credentials: Credentials,
         route: RoutePlan,
     ) -> list[str]:
@@ -683,7 +683,7 @@ class MigrationEngine:
         while True:
             try:
                 return await operation()
-            except SystemAccessError as error:
+            except DataAccessError as error:
                 attempt += 1
                 if not error.retryable or attempt >= MAX_WRITE_ATTEMPTS:
                     raise
@@ -693,7 +693,7 @@ class MigrationEngine:
                 await self._sleep(delay)
 
     async def _source_count(
-        self, source: SystemReader, credentials: Credentials, route: RoutePlan
+        self, source: DataReader, credentials: Credentials, route: RoutePlan
     ) -> int | None:
         if isinstance(source, SupportsRecordCounts):
             return await source.count_records(credentials, object_type=route.source_object)
@@ -704,13 +704,13 @@ class MigrationEngine:
         spec = MigrationSpec.from_dict(json.loads(run.spec_json))
         return resolve_env(spec, env=self._env) if self._env is not None else resolve_env(spec)
 
-    async def _source(self, spec: MigrationSpec) -> tuple[SystemReader, Credentials]:
+    async def _source(self, spec: MigrationSpec) -> tuple[DataReader, Credentials]:
         return self._registry.source(spec.source.type), await self._credentials(spec.source)
 
     async def _destination(
         self,
         spec: MigrationSpec,
-    ) -> tuple[SystemWriter, Credentials]:
+    ) -> tuple[DataWriter, Credentials]:
         return self._registry.destination(spec.target.type), await self._credentials(spec.target)
 
     async def _credentials(self, endpoint: EndpointSpec) -> Credentials:
@@ -778,7 +778,7 @@ def _source_object_payload(obj: Any) -> dict[str, Any]:
 
 
 def _source_object_from_payload(payload: dict[str, Any]) -> Any:
-    from sanka_extensions.systems.schema import SourceObject
+    from sanka_extensions.data.schema import SourceObject
 
     return SourceObject(
         key=payload["key"],
@@ -810,7 +810,7 @@ def _inventory_payload(inventory: Any) -> dict[str, Any]:
 
 
 def _inventory_from_payload(payload: dict[str, Any]) -> Any:
-    from sanka_extensions.systems.schema import FieldSchema, Inventory, ObjectSchema
+    from sanka_extensions.data.schema import FieldSchema, Inventory, ObjectSchema
 
     return Inventory(
         provider=payload["provider"],

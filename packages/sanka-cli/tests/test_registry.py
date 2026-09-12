@@ -7,11 +7,11 @@ import pytest
 
 from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions import store as extension_store
-from sanka.runtime.registry import ExtensionRegistry, UnknownSystemError
-from sanka_extensions.systems import ExtensionRegistration
-from sanka_extensions.systems.protocols import SystemReader
+from sanka.runtime.registry import ExtensionRegistry, UnknownEndpointError
+from sanka_extensions.data import ExtensionRegistration
+from sanka_extensions.data.protocols import DataReader
 
-SOURCE = cast(SystemReader, object())
+SOURCE = cast(DataReader, object())
 
 
 def test_discovery_resolves_marketplace_connector_lazily_through_store() -> None:
@@ -40,7 +40,7 @@ def test_default_discovery_uses_extension_store_resolver(
         def __init__(self, _root: object) -> None:
             self.closed = False
 
-        def supported_systems(self) -> tuple[str, ...]:
+        def supported_endpoints(self) -> tuple[str, ...]:
             return ("markdown",)
 
         def resolve_extension(self, provider: str) -> ExtensionRegistration:
@@ -63,7 +63,7 @@ def test_missing_store_connector_is_an_unknown_connector() -> None:
 
     registry = ExtensionRegistry.discover(missing, providers=("sqlite",))
 
-    with pytest.raises(UnknownSystemError, match="no installed extension"):
+    with pytest.raises(UnknownEndpointError, match="no installed extension"):
         registry.source("sqlite")
 
 
@@ -73,7 +73,7 @@ def test_explicit_registration_cannot_enable_a_hosted_system_provider() -> None:
     )
 
     assert registry.names() == []
-    with pytest.raises(UnknownSystemError, match="hosted System Migration API"):
+    with pytest.raises(UnknownEndpointError, match="hosted Data Migration API"):
         registry.roles("salesforce")
 
 
@@ -84,5 +84,5 @@ def test_hosted_system_provider_never_reaches_store_resolver() -> None:
     registry = ExtensionRegistry.discover(poisoned, providers=("hubspot",))
 
     assert registry.names() == []
-    with pytest.raises(UnknownSystemError, match="hosted System Migration API"):
+    with pytest.raises(UnknownEndpointError, match="hosted Data Migration API"):
         registry.roles("hubspot")
