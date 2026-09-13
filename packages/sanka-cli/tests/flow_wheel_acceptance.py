@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from pathlib import Path
 
@@ -13,7 +14,10 @@ from test_extension_store import _marketplace, _responses
 from sanka.runtime.extensions.model import ExtensionError
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.flow.extension import FlowExtensionRunner
-from sanka_extensions import flow
+
+# This child explicitly loads the supplied SDK wheel, not the embedded SDK whose
+# protocol has intentionally not advanced before the upstream publication gate.
+flow = importlib.import_module("sanka_extensions.flow")
 
 GENERATOR = """import json
 import sys
