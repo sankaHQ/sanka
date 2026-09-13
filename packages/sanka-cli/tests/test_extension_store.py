@@ -708,6 +708,65 @@ def test_local_marketplace_is_a_copied_content_digest_snapshot(tmp_path: Path) -
     assert (record.snapshot_root / "marketplace.json").read_bytes() == before
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_published_catalog_ignores_unreleased_head_and_preserves_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, explicit: bool
+) -> None:
+    source, _wheel = _marketplace(tmp_path / "source")
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(source), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@sanka.invalid", "commit", "-qm", "release")
+    release = git("rev-parse", "HEAD")
+    # A valid published snapshot remains usable even when main's catalog is invalid.
+    (source / "marketplace.json").write_text("{}")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@sanka.invalid", "commit", "-qm", "candidate")
+    monkeypatch.setattr(extension_store, "OFFICIAL_REVISION", release)
+    monkeypatch.setattr(
+        extension_store,
+        "_canonical_source",
+        lambda _source: ("git", source.as_uri(), OFFICIAL_IDENTITY),
+    )
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    record = store.add_marketplace("official", revision=release if explicit else None)
+    assert record.resolved_commit == release
+    assert record.revision == (release if explicit else None)
+    assert store.marketplaces()[0] == record
+    assert store.upgrade_marketplace(record.name)[0] == record
+    assert not (record.snapshot_root / ".git").exists()
+    if explicit:
+        monkeypatch.setattr(extension_store, "OFFICIAL_REVISION", "f" * 40)
+        assert store.upgrade_marketplace(record.name)[0] == record
+    else:
+        # No fallback to development HEAD if the selected release is missing.
+        monkeypatch.setattr(extension_store, "OFFICIAL_REVISION", "f" * 40)
+        with pytest.raises(ExtensionError, match="Git snapshot failed"):
+            store.upgrade_marketplace(record.name)
+        assert store.marketplaces()[0] == record
+
+
+@pytest.mark.parametrize("revision", ["main", "v1", "a" * 7, "--help", "A" * 40, ""])
+def test_marketplace_requires_full_immutable_revision(tmp_path: Path, revision: str) -> None:
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    with pytest.raises(ExtensionError) as raised:
+        store.add_marketplace(extension_store.OFFICIAL_SOURCE, revision=revision)
+    assert raised.value.code == "SANKA_MARKETPLACE_REVISION_INVALID"
+
+
+def test_local_marketplace_rejects_git_revision(tmp_path: Path) -> None:
+    source, _wheel = _marketplace(tmp_path / "source")
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    with pytest.raises(ExtensionError) as raised:
+        store.add_marketplace(source, trust=True, revision="a" * 40)
+    assert raised.value.code == "SANKA_MARKETPLACE_REVISION_INVALID"
+
+
 def test_tree_digest_frames_file_content_and_following_paths(tmp_path: Path) -> None:
     first = tmp_path / "first"
     second = tmp_path / "second"

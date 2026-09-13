@@ -56,6 +56,9 @@ from sanka_extensions.data import ENTRY_POINT_GROUP, ExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
+# Published extensions-v0.1.0a18. Advance only after verifying its release wheels.
+# The development catalog can refer to artifacts that have not been published yet.
+OFFICIAL_REVISION = "1a8c9450243b1cc25096396244dac5ed3cf7abfd"
 DEFAULT_EXTENSION_ID = "sanka/drf-to-fastapi"
 MAX_WHEEL_BYTES = 128 * 1024 * 1024
 MAX_WHEEL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -353,6 +356,7 @@ class MarketplaceRecord:
     content_digest: str | None
     tree_digest: str
     snapshot_root: Path
+    revision: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {"snapshot_root": str(self.snapshot_root)}
@@ -1147,7 +1151,9 @@ class ExtensionStore:
             "trusted",
             "tree_digest",
         }
-        if set(value) != keys or not isinstance(value.get("snapshot_root"), str):
+        if set(value) not in (keys, keys | {"revision"}) or not isinstance(
+            value.get("snapshot_root"), str
+        ):
             _error(
                 "SANKA_EXTENSION_STATE_INVALID",
                 "Marketplace record is invalid",
@@ -1184,6 +1190,7 @@ class ExtensionStore:
                 and value["content_digest"] is None
                 and isinstance(value["snapshot_digest"], str)
                 and _COMMIT.fullmatch(value["snapshot_digest"]) is not None
+                and (value.get("revision") is None or value["revision"] == value["resolved_commit"])
             )
         else:
             valid_snapshot = (
@@ -1192,6 +1199,7 @@ class ExtensionStore:
                 and value["tree_digest"] == value["snapshot_digest"]
                 and isinstance(value["snapshot_digest"], str)
                 and re.fullmatch(r"sha256:[0-9a-f]{64}", value["snapshot_digest"]) is not None
+                and value.get("revision") is None
             )
         if not valid_snapshot:
             _error(
@@ -1227,6 +1235,7 @@ class ExtensionStore:
             content_digest=value["content_digest"],
             tree_digest=value["tree_digest"],
             snapshot_root=root,
+            revision=value.get("revision"),
         )
 
     @_store_operation
@@ -1450,14 +1459,34 @@ class ExtensionStore:
             with suppress(OSError, ExtensionError):
                 _remove_store_tree(self.user_root, staging.parent)
 
-    def _snapshot_git(self, source: str, identity: str) -> tuple[Path, str, str, int]:
+    def _snapshot_git(
+        self, source: str, identity: str, *, revision: str | None = None
+    ) -> tuple[Path, str, str, int]:
+        selected_revision = revision or (
+            OFFICIAL_REVISION if identity == OFFICIAL_IDENTITY else None
+        )
         temporary_root = self._confined(self.user_root, self.user_root / "tmp")
         temporary_root.mkdir(parents=True, exist_ok=True)
         parent = Path(tempfile.mkdtemp(prefix="git-", dir=temporary_root))
         checkout = parent / "checkout"
         try:
             subprocess.run(
-                ["git", "clone", "--quiet", "--", source, str(checkout)],
+                ["git", "clone", "--quiet", "--no-checkout", "--", source, str(checkout)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "checkout",
+                    "--quiet",
+                    "--detach",
+                    selected_revision or "HEAD",
+                    "--",
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -1468,7 +1497,9 @@ class ExtensionStore:
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            if _COMMIT.fullmatch(commit) is None:
+            if _COMMIT.fullmatch(commit) is None or (
+                selected_revision is not None and commit != selected_revision
+            ):
                 _error(
                     "SANKA_MARKETPLACE_GIT_INVALID",
                     "Marketplace Git source did not resolve to an immutable commit",
@@ -1516,8 +1547,16 @@ class ExtensionStore:
         *,
         name: str | None = None,
         trust: bool = False,
+        revision: str | None = None,
     ) -> MarketplaceRecord:
         kind, fetch_source, identity = _canonical_source(source)
+        if revision is not None and (
+            kind != "git" or not isinstance(revision, str) or _COMMIT.fullmatch(revision) is None
+        ):
+            _error(
+                "SANKA_MARKETPLACE_REVISION_INVALID",
+                "A marketplace revision must be a full immutable Git commit",
+            )
         trusted = identity == OFFICIAL_IDENTITY or trust
         if not trusted:
             _error(
@@ -1538,7 +1577,14 @@ class ExtensionStore:
                     name=chosen_name,
                 )
             if kind == "git":
-                root, digest, tree_digest, descriptor = self._snapshot_git(fetch_source, identity)
+                if revision is None:
+                    root, digest, tree_digest, descriptor = self._snapshot_git(
+                        fetch_source, identity
+                    )
+                else:
+                    root, digest, tree_digest, descriptor = self._snapshot_git(
+                        fetch_source, identity, revision=revision
+                    )
                 commit, content_digest = digest, None
             else:
                 root, digest, tree_digest, descriptor = self._snapshot_local(
@@ -1564,6 +1610,8 @@ class ExtensionStore:
                     "tree_digest": tree_digest,
                     "trusted": trusted,
                 }
+                if revision is not None:
+                    raw["revision"] = revision
                 records.append(raw)
                 self._write_marketplace_state(records, snapshots)
                 return self._record(raw, history)
@@ -1591,7 +1639,15 @@ class ExtensionStore:
                     identity = raw["identity"]
                     source = raw["source"]
                     if kind == "git":
-                        root, digest, tree_digest, descriptor = self._snapshot_git(source, identity)
+                        revision = raw.get("revision")
+                        if revision is None:
+                            root, digest, tree_digest, descriptor = self._snapshot_git(
+                                source, identity
+                            )
+                        else:
+                            root, digest, tree_digest, descriptor = self._snapshot_git(
+                                source, identity, revision=revision
+                            )
                         raw["resolved_commit"], raw["content_digest"] = digest, None
                     elif kind == "local":
                         current_kind, current_source, current_identity = _canonical_source(source)
