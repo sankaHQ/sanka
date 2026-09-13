@@ -148,7 +148,7 @@ release steps.
 
 ## Verified generator loading
 
-`sanka.runtime.flow.extension.FlowExtensionRunner` prepares the generator loading
+`sanka.runtime.flow.extension.FlowExtensionRunner` provides the generator loading
 boundary. A `kind="flow"` manifest lives in the existing marketplace and exposes
 only `blueprint` over `sanka-flow-extension/v1`. It declares a selector, exact
 template ID/revision/digest, Blueprint v1 or v2 output, reference roles and scalar
@@ -170,25 +170,27 @@ the full Blueprint, mandatory scenario assertions and independently supplied tar
 capabilities. Hosts must derive capabilities from their native adapter and recheck
 the target before mutation; the extension cannot grant itself a capability.
 
-This change does **not** advance the embedded SDK or default marketplace revision.
-`SDKFlowCodec` fails with `SANKA_FLOW_SDK_REQUIRED` before starting extension code
-when the host SDK lacks the protocol. SDK a4 is prepared in Extensions and must be
-reviewed and published before runtime provenance/pins advance. A host may supply
-the `FlowCodec` port from its separately installed canonical SDK. The codec is
-trusted host code, never selected from extension output.
+The 0.2.10 candidate embeds the published SDK a4 from Extensions commit
+`b52bf22f60b2a3704bf0414d609c3e3f767bcd41`, verified byte-for-byte by the provenance
+guard. Its default marketplace is the immutable `extensions-v0.1.0a20` snapshot;
+existing project locks retain their selected artifacts. A host may also supply
+`FlowCodec` from its separately installed canonical SDK. The codec is trusted host
+code, never selected from extension output. Older hosts without the protocol fail
+with `SANKA_FLOW_SDK_REQUIRED` before starting extension code.
 
 Boundary tests cover installed fixture wheels, deadline enforcement, environment
 mutation, response tampering, and missing host SDK. The explicit wheel conformance
-test uses the actual SDK/compatibility wheels for both host validation and the
-generator's isolated environment:
+test covers both the embedded SDK and the standalone published SDK host paths,
+with the published SDK wheels installed in the generator environment:
 
 ```bash
 uv run python -m pytest packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
-  --extension-release /absolute/path/to/extensions/dist
+  --extension-release /absolute/path/to/published/sdk/wheels \
+  --cli-wheel dist/sanka_cli-0.2.10-py3-none-any.whl
 ```
 
 The synthetic v1/v2 fixtures validate artifact generation, not native business
-execution. This command requires the a4 candidate/released SDK bundle and is
+execution. This command requires the published a4 SDK and a12 compatibility wheels and is
 separate from `make check`, like the existing Code wheel acceptance suite. Run it
 when changing this boundary or adopting the SDK. Native Workflows compilation,
 durable Estimate identity, Save/reload preservation and native scenario verification

@@ -1,102 +1,66 @@
 # Sanka release procedure
 
-No package is published by a push or merge. The manual workflow builds and
-verifies one `sanka-cli` wheel/sdist pair in an unprivileged job, then a
-separate protected job downloads that exact artifact, verifies its source and
-SHA-256 hashes, and publishes through job-scoped OIDC.
+## Candidate and published prerequisites
 
-## Candidate and prerequisite
+The current candidate is `sanka-cli==0.2.10`, tagged `v0.2.10`. It embeds SDK
+0.1.0a4 from the published Extensions source
+`b52bf22f60b2a3704bf0414d609c3e3f767bcd41` and selects that immutable commit as the
+default marketplace (`extensions-v0.1.0a20`). SDK and marketplace publication must
+succeed, with source tags and artifact hashes verified, before runtime pins advance.
+Published `sanka-cli==0.2.9` and all earlier versions remain immutable.
 
-The current candidate is `sanka-cli==0.2.9`, tagged `v0.2.9`. Its source
-authority is the reviewed, merged `sankaHQ/sanka` commit; PyPI becomes the
-artifact authority only after publication and clean-install verification.
-This release removes the local research MCP implementation and installation
-extra. Existing `sanka mcp` configurations receive a retirement message that
-points to `https://mcp.sanka.com/mcp`; they do not start a server. The local
-migration runtime, SDK adapters, and hosted command routes are preserved.
-Published version `0.2.8` remains immutable.
+This release makes the shared Flow loader use the canonical protocol in its normal
+installed package. It does not add a native Workflows adapter or a runnable official
+Sales extension. Data/Code interfaces, existing project locks and hosted command
+routes retain their meanings. Local MCP remains retired as of 0.2.9.
 
-Use the already published `extensions-v0.1.0a17` marketplace release. This
-candidate changes no SDK or extension implementation and needs no new
-Extensions publication. CI and the CLI build use the locked workspace.
+## Local preparation and review
 
-## Local, write-free preparation
+Use `uv sync --frozen --all-packages`. Run focused tests while editing and review
+source changes before final broad validation. Let the workspace PR helper own
+`make check build-release` through the shared local resource guard. The final gate
+checks imports, licensing, immutable SDK provenance, tests and both package artifacts.
+It stages `SOURCE_COMMIT` and `SHA256SUMS` in `release/` and performs only a dry-run
+upload. It does not publish, tag or push packages.
 
-With exact sibling `sanka` and `extensions` checkouts:
+Download the two published SDK wheels and independently verify their release hashes.
+Run Flow wheel acceptance against the built CLI artifact:
 
 ```bash
-uv sync --frozen --all-packages
-make check
-make build-release
-uv run python scripts/check_release_tag.py v0.2.9 tag
+uv run python -m pytest packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
+  --extension-release /absolute/path/to/published/sdk/wheels \
+  --cli-wheel dist/sanka_cli-0.2.10-py3-none-any.whl
 ```
 
-`make build-release` clears `dist/`, builds only:
+This verifies the embedded and standalone SDK paths, both Blueprint schemas,
+capability rejection even when a generator ignores it, and template/schema tampering.
+The synthetic generator verifies artifact transport, not native business execution.
+Also clean-install the candidate, resolve the official public marketplace, install
+Data/Code extensions, exercise a bounded data plan and code scan, and verify that a
+catalog refresh does not rewrite project locks. Do not run a full local migration.
 
-```text
-sanka_cli-0.2.9-py3-none-any.whl
-sanka_cli-0.2.9.tar.gz
-```
+## Publication
 
-It checks package metadata, dependencies, entry points, licenses, imports, and
-the complete artifact set; stages those two files with `SOURCE_COMMIT` and
-`SHA256SUMS` in `release/`; and runs a write-free `uv publish --dry-run`. It
-does not upload, tag, push, or modify GitHub/PyPI state.
+1. Merge the exact human-approved final head through `sanka-pr-flow`. Do not append
+   unreviewed SDK, packaging or version changes after approval.
+2. With user authorization, create and push `v0.2.10` at the reviewed merge. Never
+   move an existing release tag or republish an existing package version.
+3. Dispatch `publish.yml` at that tag with confirmation `publish-v0.2.10`.
+4. The unprivileged build job validates the tag, runs checks, builds the wheel/sdist
+   and stages their source identity and hashes. The protected `pypi` job downloads
+   that exact artifact, verifies the selected SHA and hashes, and publishes through
+   job-scoped OIDC. No long-lived PyPI token is used.
+5. Read back the published PyPI version, filenames and hashes. Clean-install
+   `sanka-cli==0.2.10` from PyPI and repeat the package acceptance checks against
+   public extension wheels. Record what was exercised and its source/artifact IDs.
 
-## External setup gate
+A successful SDK upload is not a CLI upload, and a successful package test is not
+hosted workflow execution. Native API/Jobs adoption and production scenario
+verification remain separate changes with their owning deployment procedures.
 
-Before the first unified publication, an owner must register the existing
-PyPI `sanka-cli` project to trust:
+## Recovery
 
-- owner: `sankaHQ`;
-- repository: `sanka`;
-- workflow: `publish.yml`; and
-- protected GitHub environment: `pypi`.
-
-The protected environment and the exact tag/artifact hashes require explicit
-human authorization. No long-lived PyPI token belongs in GitHub secrets,
-local environment files, or repository history.
-
-## Publication gate
-
-1. Verify the existing `extensions-v0.1.0a17` release and its manifest wheel hashes.
-2. Merge the reviewed Sanka change through `sanka-pr-flow` and verify required
-   CI on the exact final head.
-3. Create and push `v0.2.9` only with explicit authorization. Do not move or
-   reuse an existing release tag or the published `0.2.8` package version.
-4. Verify local `release/SOURCE_COMMIT` and `release/SHA256SUMS` against the
-   approved tag.
-5. Dispatch **Publish sanka-cli** at `v0.2.9` with confirmation
-   `publish-v0.2.9`.
-6. The build job runs the full checks, builds once, stages once, and uploads
-   one workflow artifact. It has no OIDC permission.
-7. The `pypi` job receives only `id-token: write`, downloads the named
-   artifact, verifies its source commit and hashes, and invokes the PyPI action
-   once.
-8. Install `sanka-cli==0.2.9` in a fresh environment. Verify CLI help,
-   local tokenless behavior, hosted authentication failure, GitHub extension
-   installation, and both SDK adapters. Confirm the wheel has no local MCP
-   server, `mcp` extra, or MCP dependency. Confirm `sanka mcp` exits nonzero
-   with the hosted URL on stderr and no stdout protocol output.
-9. Publish and verify SDK/Homebrew/docs follow-ups in their approved order.
-10. Only then retire legacy projects and the old publishing identity.
-
-PyPI and GitHub artifacts are immutable. Never overwrite or reuse a version or
-release tag.
-
-## Retirement and rollback
-
-Do not delete or overwrite historical artifacts. Local MCP retirement ships
-in the new CLI version. Update published CLI setup guides to use hosted MCP
-when releasing this candidate; existing published 0.2.8 installations retain
-their old behavior until upgraded. Any yanking or repository archival remains
-a separate, explicitly authorized operation.
-
-- A failed extensions release blocks the CLI release.
-- A failed publisher change or upload leaves historical releases active.
-- A failed CLI, extension, SDK, Homebrew, or documentation check blocks
-  retirement and archival.
-- For rollback, unyank the last known-good historical releases, restore the
-  prior Homebrew formula if necessary, and unarchive the old repository.
-- Fix-forward always uses a new reviewed version; immutable artifacts are never
-  replaced.
+A failed publisher leaves prior releases available. Inspect exact run/artifact state
+before retrying; do not duplicate or overwrite an uncertain upload. Any fix-forward
+uses a new reviewed version. Package yanking, archival or unrelated production
+changes require their own explicit authorization.

@@ -19,10 +19,11 @@ both. Installing an extension never implies successful endpoint authentication.
 See [the naming contract](docs/public-naming.md) and [compatibility map](docs/naming-compatibility.md).
 
 The shared Extension SDK includes `sanka_extensions.data`,
-`sanka_extensions.flow` and `sanka_extensions.code`. Flow currently provides
-declarative requests such as `flow.create(type="crm")`; this CLI does not yet
-resolve or execute them. Its required change-preservation and verified-activation
-behavior is described in [Flow runtime ownership](docs/flow.md).
+`sanka_extensions.flow` and `sanka_extensions.code`. The 0.2.10 candidate embeds
+published SDK a4 with Blueprint v1/v2 and a typed Flow generator protocol. The
+shared runtime can load an explicitly installed Flow generator in an isolated
+process and validate its output. Native Workflows compilation and runnable business
+templates remain separate; see [Flow runtime ownership](docs/flow.md).
 
 Python 3.12 or newer is required.
 
