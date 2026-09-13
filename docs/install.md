@@ -84,6 +84,24 @@ environment; installing the isolated CLI does not install those dependencies.
 
 ## Diagnose an installation
 
+### Update an existing quickstart project
+
+After upgrading the CLI, refresh its official catalog from the project directory.
+For a project set up with `sanka extension add sanka/drf-to-fastapi`:
+
+```bash
+sanka extension marketplace upgrade official
+sanka extension add sanka/drf-to-fastapi
+sanka scan .
+```
+
+The catalog refresh preserves project locks. The explicit `extension add` selects
+and locks the new DRF extension for this project. Review a new plan before applying
+it. If you gave the official marketplace a different name, use the name shown by
+`sanka extension marketplace list` in the first command.
+
+### Check the selected executable
+
 `sanka doctor` is read-only and works without a token, keychain access or network.
 It reports the running version, executable, Python runtime, all executable PATH
 candidates, duplicate installations and recovery commands. It does not execute
@@ -91,7 +109,7 @@ other discovered binaries or claim an installed extension is authenticated.
 
 ```bash
 sanka doctor --json
-sanka doctor --expected-version 0.2.11
+sanka doctor --expected-version 0.2.12
 ```
 
 JSON uses `sanka-doctor/v1`. Errors (unsupported runtime or unexpected version)

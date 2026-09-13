@@ -45,7 +45,11 @@ def test_publish_job_downloads_and_hash_checks_the_build_artifact() -> None:
     jobs = _workflow("publish.yml")["jobs"]
     build = jobs["build"]
     publish = jobs["publish"]
-    uploads = _uses_steps(build, "actions/upload-artifact@")
+    uploads = [
+        step
+        for step in _uses_steps(build, "actions/upload-artifact@")
+        if step["with"]["path"] == "sanka/release/"
+    ]
     downloads = _uses_steps(publish, "actions/download-artifact@")
     publishers = _uses_steps(publish, PUBLISH_ACTION)
 
@@ -59,6 +63,8 @@ def test_publish_job_downloads_and_hash_checks_the_build_artifact() -> None:
     ]
     assert len(verification_steps) == 1
     assert "rm SHA256SUMS SOURCE_COMMIT" in verification_steps[0]["run"]
+    runs = [step.get("run", "") for step in build["steps"]]
+    assert runs.index("make build-release") < runs.index("make quickstart-acceptance")
 
 
 def test_ci_and_publish_do_not_require_private_cross_repo_checkout() -> None:
@@ -100,8 +106,9 @@ def test_installer_distribution_follows_pypi_and_tests_before_publication() -> N
     assert job["permissions"] == {"contents": "write"}
     runs = [step.get("run", "") for step in job["steps"]]
     smoke = next(index for index, run in enumerate(runs) if "smoke_installer.py" in run)
+    quickstart = next(index for index, run in enumerate(runs) if "smoke_quickstart.py" in run)
     publish = next(index for index, run in enumerate(runs) if "gh release create" in run)
-    assert smoke < publish
+    assert smoke < quickstart < publish
     assert "--verify-tag" in runs[publish]
     assert "--clobber" not in runs[publish]
     assert 'test "$(cat release/SOURCE_COMMIT)" = "$GITHUB_SHA"' in runs[publish]
@@ -139,7 +146,11 @@ def test_public_installer_travels_with_verified_homebrew_candidate() -> None:
     assert "cp release/install.md docs/install.md" in runs
     assert "-- Formula/sanka.rb install.sh" in runs
     assert "https://raw.githubusercontent.com/sankaHQ/homebrew-cli/main/install.sh" in runs
-    uploads = _uses_steps(jobs["installer"], "actions/upload-artifact@")
+    uploads = [
+        step
+        for step in _uses_steps(jobs["installer"], "actions/upload-artifact@")
+        if step["with"]["path"] == "release/"
+    ]
     downloads = _uses_steps(jobs["homebrew"], "actions/download-artifact@")
     assert downloads[0]["with"]["name"] == uploads[0]["with"]["name"]
     assert uploads[0]["with"]["path"] == "release/"
