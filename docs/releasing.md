@@ -2,15 +2,16 @@
 
 ## Candidate and published prerequisites
 
-The current candidate is `sanka-cli==0.2.11`, tagged `v0.2.11`. It embeds SDK
+The latest published release is `sanka-cli==0.2.11`, tagged `v0.2.11`. It embeds SDK
 0.1.0a4 from the published Extensions source
 `b52bf22f60b2a3704bf0414d609c3e3f767bcd41` and selects that immutable commit as the
 default marketplace (`extensions-v0.1.0a20`). SDK and marketplace publication must
 succeed, with source tags and artifact hashes verified, before runtime pins advance.
-Published `sanka-cli==0.2.10` and all earlier versions remain immutable.
+Published `sanka-cli==0.2.11` and all earlier versions remain immutable.
 
-This release adds the managed macOS/Linux installer, read-only installation
-diagnostics, installation acceptance and Homebrew release-channel preparation.
+The managed installer and doctor shipped in 0.2.11. The maintained publisher now
+waits for PyPI index propagation and includes the installer and guide in matching
+Homebrew updates. These automation changes do not republish 0.2.11.
 SDK a4 and the a20 marketplace pins are unchanged. It does not add a native Workflows adapter or a runnable official
 Sales extension. Data/Code interfaces, existing project locks and hosted command
 routes retain their meanings. Local MCP remains retired as of 0.2.9.
@@ -42,6 +43,10 @@ catalog refresh does not rewrite project locks. Do not run a full local migratio
 
 ## Publication
 
+For a future release, first bump the package and installer versions in a reviewed
+PR. The commands below show the already published 0.2.11 release; substitute the
+new version. Never recreate its tag or upload its package again.
+
 1. Merge the exact human-approved final head through `sanka-pr-flow`. Do not append
    unreviewed SDK, packaging or version changes after approval.
 2. With user authorization, create and push `v0.2.11` at the reviewed merge. Never
@@ -69,24 +74,39 @@ changes require their own explicit authorization.
 ## Installer and Homebrew completion
 
 Merge the Homebrew tooling PR before dispatching this CLI publisher. The reviewed
-`publish.yml` now performs four separate stages: build, PyPI publication, installer
-acceptance/publication, and Homebrew candidate preparation/validation. Only the
+`publish.yml` performs build, PyPI publication, public index readiness, installer
+acceptance/staging, and Homebrew candidate preparation/validation. Only the
 PyPI job has OIDC; only the installer distribution job can write GitHub releases.
 
-After PyPI succeeds, a clean installer run verifies the selected package using its
-own Python. The workflow then publishes the reviewed `install.sh`, wheel, source
-archive, source commit and checksums as immutable GitHub release assets. A second
+After PyPI succeeds, a bounded readiness check waits until both its metadata and
+install index expose the wheel and source archive with the release hashes. A
+successful upload alone does not mean installers can resolve the version yet.
+A clean installer run then verifies the selected package using its own Python.
+The workflow stages the reviewed `install.sh`, wheel, source archive, source
+commit and checksums as immutable GitHub release assets and a workflow artifact.
+The CLI repository and its release assets are public. A second
 attempt to create an existing release fails; inspect its exact assets before any
 retry. Never overwrite an uncertain release. The default installer version must
 match the package version, and existing system/uv/Homebrew installs remain owned
 by their original installation method.
 
-The Homebrew job verifies the public source archive against the build receipt,
-regenerates platform resources and tests an isolated source installation on macOS.
-It uploads `homebrew.patch` plus `release-status.json`, including the base commit,
-formula digest and the pending human-review state. Apply the patch to a clean
+The Homebrew job explicitly trusts only `sankahq/cli/sanka` before loading the tap,
+verifies the public source archive against the build receipt, regenerates platform
+resources and tests an isolated source installation on macOS. It includes the
+verified installer in the public repository's update. It uploads `homebrew.patch`
+plus `release-status.json`, including the base commit, formula digest and pending
+human-review state. Apply the patch to a clean
 Homebrew worktree and use the workspace Change Bot PR flow. Homebrew PR CI tests
 both macOS and Linux. A candidate artifact is not a published Homebrew update.
+
+The main public installer is `https://github.com/sankaHQ/sanka/releases/latest/download/install.sh`.
+The Homebrew repository also mirrors the installer and guide after the matching
+Homebrew PR merges.
+Verify this URL without GitHub authentication and compare its bytes to the reviewed
+installer. If PyPI publication succeeded but a later job failed, inspect the exact
+release state and rerun only the appropriate failed job; never republish PyPI.
+An immutable older workflow can be recovered using the reviewed Homebrew preparation
+and validation scripts locally, with the same artifact hashes and PR review gate.
 
 After that PR merges, run `python3 scripts/channel_status.py` in `homebrew-cli`.
 Exit 0 means the live Homebrew version and source digest match the latest PyPI

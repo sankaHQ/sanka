@@ -31,7 +31,7 @@ def test_publish_workflow_has_one_package_and_job_scoped_oidc() -> None:
     jobs = workflow["jobs"]
 
     assert set(inputs) == {"confirmation"}
-    assert set(jobs) == {"build", "publish", "installer", "homebrew"}
+    assert set(jobs) == {"build", "publish", "ready", "installer", "homebrew"}
     assert "id-token" not in jobs["build"].get("permissions", {})
     assert jobs["publish"]["permissions"] == {"id-token": "write"}
     assert jobs["publish"]["environment"] == "pypi"
@@ -96,7 +96,7 @@ def test_ci_defers_connector_e2e_until_marketplace_artifacts_exist() -> None:
 
 def test_installer_distribution_follows_pypi_and_tests_before_publication() -> None:
     job = _workflow("publish.yml")["jobs"]["installer"]
-    assert job["needs"] == "publish"
+    assert job["needs"] == "ready"
     assert job["permissions"] == {"contents": "write"}
     runs = [step.get("run", "") for step in job["steps"]]
     smoke = next(index for index, run in enumerate(runs) if "smoke_installer.py" in run)
@@ -109,7 +109,7 @@ def test_installer_distribution_follows_pypi_and_tests_before_publication() -> N
 
 def test_homebrew_candidate_is_validated_and_preserves_human_review() -> None:
     job = _workflow("publish.yml")["jobs"]["homebrew"]
-    assert job["needs"] == "publish"
+    assert job["needs"] == "installer"
     assert job["permissions"] == {"contents": "read"}
     runs = [step.get("run", "") for step in job["steps"]]
     prepare = next(index for index, run in enumerate(runs) if "scripts/prepare_release.py" in run)
@@ -119,3 +119,27 @@ def test_homebrew_candidate_is_validated_and_preserves_human_review() -> None:
     assert "--expected-sha256" in runs[prepare]
     assert "homebrew_base_commit" in runs[report]
     assert "gh pr merge" not in "\n".join(runs)
+
+
+def test_readiness_verifies_public_index_before_downstream_installation() -> None:
+    jobs = _workflow("publish.yml")["jobs"]
+    job = jobs["ready"]
+    assert job["needs"] == "publish"
+    assert job["permissions"] == {"contents": "read"}
+    checks = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "wait_for_pypi.py" in checks and "--release-dir release" in checks
+    assert "--timeout 300" in checks and '--source-commit "$GITHUB_SHA"' in checks
+
+
+def test_public_installer_travels_with_verified_homebrew_candidate() -> None:
+    jobs = _workflow("publish.yml")["jobs"]
+    runs = "\n".join(step.get("run", "") for step in jobs["homebrew"]["steps"])
+    assert runs.index("brew trust --formula sankahq/cli/sanka") < runs.index("brew tap sankaHQ/cli")
+    assert "cp release/install.sh install.sh" in runs
+    assert "cp release/install.md docs/install.md" in runs
+    assert "-- Formula/sanka.rb install.sh" in runs
+    assert "https://raw.githubusercontent.com/sankaHQ/homebrew-cli/main/install.sh" in runs
+    uploads = _uses_steps(jobs["installer"], "actions/upload-artifact@")
+    downloads = _uses_steps(jobs["homebrew"], "actions/download-artifact@")
+    assert downloads[0]["with"]["name"] == uploads[0]["with"]["name"]
+    assert uploads[0]["with"]["path"] == "release/"
