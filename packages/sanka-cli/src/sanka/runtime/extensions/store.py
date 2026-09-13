@@ -46,6 +46,7 @@ from sanka.runtime.extensions.model import (
     EndpointSupport,
     ExtensionError,
     Fingerprint,
+    FlowCapability,
     Manifest,
     Recommendation,
     Wheel,
@@ -374,9 +375,10 @@ class ExtensionRecord:
     targets: tuple[str, ...]
     status: tuple[str, ...]
     wheels: tuple[Wheel, ...]
+    capabilities: tuple[FlowCapability, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             **asdict(self),
             "providers": [
                 asdict(provider) | {"roles": list(provider.roles)} for provider in self.providers
@@ -385,6 +387,12 @@ class ExtensionRecord:
             "status": list(self.status),
             "wheels": [asdict(wheel) for wheel in self.wheels],
         }
+        # Keep published Data/Code listing keys unchanged.
+        if self.kind == "flow":
+            payload["capabilities"] = [item.to_dict() for item in self.capabilities]
+        else:
+            payload.pop("capabilities")
+        return payload
 
 
 @dataclass(frozen=True)
@@ -947,10 +955,10 @@ class ExtensionStore:
     @contextmanager
     def execution_lease(self, entry: LockEntry) -> Iterator[int]:
         """Bind the verified console script inode until its subprocess completes."""
-        if entry.kind != "migration" or entry.executable is None:
+        if entry.kind not in {"migration", "flow"} or entry.executable is None:
             _error(
                 "SANKA_EXTENSION_PROTOCOL",
-                "Only migration extensions expose lifecycle executables",
+                "Only Code and Flow extensions expose protocol executables",
                 extension_id=entry.id,
             )
         if self.resolve_locked(entry.id) != entry:
@@ -1883,7 +1891,8 @@ class ExtensionStore:
                 )
                 or not isinstance(value["commands"], list)
                 or any(
-                    not isinstance(command, str) or command not in LIFECYCLE_COMMANDS
+                    not isinstance(command, str)
+                    or command not in LIFECYCLE_COMMANDS | {"blueprint"}
                     for command in value["commands"]
                 )
                 or len(value["commands"]) != len(set(value["commands"]))
@@ -1930,7 +1939,7 @@ class ExtensionStore:
                     re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", entry.snapshot_digest)
                     or re.fullmatch(r"sha256:[0-9a-f]{64}", entry.snapshot_digest)
                 )
-                or entry.kind not in {"migration", "connector"}
+                or entry.kind not in {"migration", "connector", "flow"}
                 or (
                     entry.kind == "migration"
                     and (
@@ -1941,6 +1950,19 @@ class ExtensionStore:
                         or entry.entry_point is not None
                         or entry.providers
                         or not entry.commands
+                        or not set(entry.commands).issubset(LIFECYCLE_COMMANDS)
+                    )
+                )
+                or (
+                    entry.kind == "flow"
+                    and (
+                        entry.protocol_version != "sanka-flow-extension/v1"
+                        or not isinstance(entry.executable, str)
+                        or not entry.executable
+                        or "/" in entry.executable
+                        or entry.entry_point is not None
+                        or entry.providers
+                        or entry.commands != ("blueprint",)
                     )
                 )
                 or (
@@ -2048,6 +2070,7 @@ class ExtensionStore:
                     targets=manifest.targets,
                     status=tuple(item for item in STATUS_ORDER if item in statuses),
                     wheels=manifest.wheels,
+                    capabilities=manifest.capabilities,
                 )
             )
         return tuple(sorted(records, key=lambda item: (item.id, item.version, item.marketplace)))
@@ -2496,7 +2519,7 @@ class ExtensionStore:
             assert identity_name is not None
             try:
                 parser.read_string(entry_points)
-                if manifest.kind == "migration":
+                if manifest.kind in {"migration", "flow"}:
                     assert manifest.executable is not None
                     target = parser["console_scripts"][manifest.executable]
                 else:
@@ -3105,7 +3128,7 @@ class ExtensionStore:
                 (path, wheel.sha256) for path, wheel in zip(cached, selected_wheels, strict=True)
             )
             self._wheel_import_records(verified_wheels)
-            if manifest.kind == "migration":
+            if manifest.kind in {"migration", "flow"}:
                 assert manifest.executable is not None
                 self._wheel_entry_point(verified_wheels, manifest.executable)
             else:
@@ -3125,7 +3148,7 @@ class ExtensionStore:
                 None,
             )
             expected_digest = prior.get("environment_digest") if isinstance(prior, dict) else None
-            if manifest.kind == "migration":
+            if manifest.kind in {"migration", "flow"}:
                 environment = self._materialize_environment(
                     artifact_digest,
                     manifest.executable,
@@ -3326,6 +3349,18 @@ class ExtensionStore:
             )
         return manifest
 
+    @_store_operation
+    def flow_manifest(self, extension_id: str) -> tuple[LockEntry, Manifest]:
+        """Resolve an explicitly selected Flow installation and its verified capabilities."""
+        entry = self.resolve_locked(extension_id)
+        if entry.kind != "flow":
+            _error(
+                "SANKA_FLOW_EXTENSION_REQUIRED",
+                "Selected extension does not declare Flow generation",
+                extension_id=extension_id,
+            )
+        return entry, self._manifest_for_lock(entry)
+
     @staticmethod
     def _manifest_artifact_digest(manifest: Manifest) -> str:
         return content_hash(
@@ -3428,7 +3463,7 @@ class ExtensionStore:
             must_exist=True,
             expected=expected_root,
         )
-        if manifest.kind == "migration":
+        if manifest.kind in {"migration", "flow"}:
             assert manifest.executable is not None
             binary = root / ("Scripts" if os.name == "nt" else "bin") / manifest.executable
             self._confined(self.user_root, binary, must_exist=True, expected=binary)

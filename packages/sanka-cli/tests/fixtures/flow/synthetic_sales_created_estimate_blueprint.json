@@ -1,0 +1,306 @@
+{
+  "schema_version": "sanka-flow-blueprint/v2",
+  "id": "synthetic.sales-created-estimate",
+  "revision": "1",
+  "origin": {
+    "kind": "template",
+    "identity": {
+      "id": "example/sales-created-estimate",
+      "revision": "1",
+      "digest": "sha256:7f4bcea420d90e150e71c5e4858eccdc261954cf0c2061d9419f4a5b00d405fc"
+    }
+  },
+  "extension": {
+    "id": "example-flow-extension",
+    "revision": "0.0.0",
+    "digest": "sha256:fe7a8b95a783ce524741a43c15769027257cd4e69eb4f51cf3afe95e535b3839"
+  },
+  "parameters": {
+    "description": "Synthetic contract fixture; no installed extension, live API mapping or source equivalence is claimed.",
+    "fixture_only": true
+  },
+  "policies": {
+    "reapply": {
+      "user_changes": "preserve",
+      "conflicts": "require_resolution",
+      "ownership": "installation",
+      "removals": "explicit_plan"
+    },
+    "lifecycle": {
+      "stages": [
+        "construct",
+        "verify",
+        "activate"
+      ],
+      "new_automations": "disabled_until_activation",
+      "activation": "explicit_verified_revision"
+    }
+  },
+  "resources": [
+    {
+      "id": "sales.estimate",
+      "kind": "workflow",
+      "spec": {
+        "edges": [
+          {
+            "source": "deal.created",
+            "target": "estimate.create",
+            "when": "always"
+          }
+        ],
+        "id": "sales.estimate",
+        "nodes": [
+          {
+            "id": "deal.created",
+            "kind": "trigger",
+            "spec": {
+              "changed_fields": [],
+              "object_ref": "deal",
+              "operation": "record.created"
+            }
+          },
+          {
+            "id": "estimate.create",
+            "kind": "action",
+            "spec": {
+              "associations": [
+                {
+                  "record": {
+                    "kind": "event_record"
+                  },
+                  "relationship_ref": "estimate.deal",
+                  "required": true
+                }
+              ],
+              "fields": [
+                {
+                  "field_ref": "estimate.status",
+                  "value": {
+                    "kind": "literal",
+                    "value": "draft"
+                  }
+                },
+                {
+                  "field_ref": "estimate.title",
+                  "value": {
+                    "field_ref": "deal.title",
+                    "kind": "event_field",
+                    "phase": "after"
+                  }
+                }
+              ],
+              "identity": {
+                "on_existing": "preserve",
+                "on_missing": "conflict",
+                "scope": "installation_workflow_action_event_record"
+              },
+              "object_ref": "estimate",
+              "operation": "record.create"
+            }
+          }
+        ],
+        "schema_version": "sanka-flow-graph/v2"
+      },
+      "depends_on": []
+    }
+  ],
+  "references": [
+    {
+      "id": "deal",
+      "kind": "object",
+      "key": "synthetic.deal",
+      "parent_id": null,
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "deal.stage",
+      "kind": "property",
+      "key": "stage",
+      "parent_id": "deal",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "deal.title",
+      "kind": "property",
+      "key": "title",
+      "parent_id": "deal",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "estimate",
+      "kind": "object",
+      "key": "synthetic.estimate",
+      "parent_id": null,
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "estimate.deal",
+      "kind": "relationship",
+      "key": "deal",
+      "parent_id": "estimate",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": "deal"
+    },
+    {
+      "id": "estimate.status",
+      "kind": "property",
+      "key": "status",
+      "parent_id": "estimate",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "estimate.title",
+      "kind": "property",
+      "key": "title",
+      "parent_id": "estimate",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    }
+  ],
+  "mappings": [],
+  "scenarios": [
+    {
+      "id": "sales.match",
+      "workflow_id": "sales.estimate",
+      "case": "match",
+      "events": [
+        {
+          "id": "synthetic.estimate-event",
+          "record_id": "synthetic.deal-1",
+          "before": {},
+          "after": {
+            "deal.stage": "Quote",
+            "deal.title": "Synthetic deal"
+          },
+          "operation": "record.created"
+        }
+      ],
+      "expected_created_count": 1,
+      "expected_fields": [
+        {
+          "field_ref": "estimate.status",
+          "value": {
+            "kind": "literal",
+            "value": "draft"
+          }
+        },
+        {
+          "field_ref": "estimate.title",
+          "value": {
+            "kind": "literal",
+            "value": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_associations": [
+        {
+          "relationship_ref": "estimate.deal",
+          "record": {
+            "kind": "event_record"
+          },
+          "required": true
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "sales.no-match",
+      "workflow_id": "sales.estimate",
+      "case": "no_match",
+      "events": [
+        {
+          "id": "synthetic.no-match-event",
+          "record_id": "synthetic.deal-1",
+          "before": {
+            "deal.stage": "Discovery",
+            "deal.title": "Synthetic deal"
+          },
+          "after": {
+            "deal.stage": "Negotiation",
+            "deal.title": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_created_count": 0,
+      "expected_fields": [],
+      "expected_associations": [],
+      "required": true
+    },
+    {
+      "id": "sales.retry",
+      "workflow_id": "sales.estimate",
+      "case": "retry",
+      "events": [
+        {
+          "id": "synthetic.estimate-event",
+          "record_id": "synthetic.deal-1",
+          "before": {},
+          "after": {
+            "deal.stage": "Quote",
+            "deal.title": "Synthetic deal"
+          },
+          "operation": "record.created"
+        },
+        {
+          "id": "synthetic.estimate-event",
+          "record_id": "synthetic.deal-1",
+          "before": {},
+          "after": {
+            "deal.stage": "Quote",
+            "deal.title": "Synthetic deal"
+          },
+          "operation": "record.created"
+        }
+      ],
+      "expected_created_count": 1,
+      "expected_fields": [
+        {
+          "field_ref": "estimate.status",
+          "value": {
+            "kind": "literal",
+            "value": "draft"
+          }
+        },
+        {
+          "field_ref": "estimate.title",
+          "value": {
+            "kind": "literal",
+            "value": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_associations": [
+        {
+          "relationship_ref": "estimate.deal",
+          "record": {
+            "kind": "event_record"
+          },
+          "required": true
+        }
+      ],
+      "required": true
+    }
+  ],
+  "unsupported": [],
+  "required_capabilities": [
+    "flow.action.record.create/v1",
+    "flow.associations/v1",
+    "flow.record-identity/v1",
+    "flow.resource.workflow/v1",
+    "flow.trigger.record.created/v1",
+    "sanka-flow-blueprint/v2",
+    "sanka-flow-graph/v2"
+  ]
+}

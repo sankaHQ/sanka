@@ -20,6 +20,10 @@ from sanka.runtime.extensions.model import (
     EndpointSupport,
     ExtensionError,
     Fingerprint,
+    FlowCapability,
+    FlowReferenceRole,
+    FlowTemplateIdentity,
+    FlowValueRole,
     Manifest,
     MatchedEvidence,
     Matcher,
@@ -425,6 +429,100 @@ def _load_json(path: Path, code: str, *, data: bytes | None = None) -> dict[str,
     return payload
 
 
+def _flow_capabilities(value: Any, code: str, path: Path) -> tuple[FlowCapability, ...]:
+    """Validate static Flow declarations without importing an extension SDK or provider."""
+    logical_id = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}")
+
+    def identifier(item: Any) -> bool:
+        return isinstance(item, str) and logical_id.fullmatch(item) is not None
+
+    if not isinstance(value, list) or not value:
+        _invalid(code, path, "Flow capabilities must be a nonempty array")
+    capabilities: list[FlowCapability] = []
+    for raw in value:
+        item = _object(
+            raw,
+            {"type", "references", "values", "template", "output_schema"},
+            code,
+            path,
+            "capability",
+        )
+        flow_type = item["type"]
+        if (
+            not isinstance(flow_type, str)
+            or len(flow_type) > 127
+            or re.fullmatch(
+                r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)?", flow_type
+            )
+            is None
+            or item["output_schema"] not in ("sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2")
+            or not isinstance(item["references"], list)
+            or not isinstance(item["values"], list)
+        ):
+            _invalid(code, path, "Flow capability type, output schema or inputs are invalid")
+        template = _object(item["template"], {"id", "revision", "digest"}, code, path, "template")
+        if (
+            template["id"] != flow_type
+            or not isinstance(template["revision"], str)
+            or not template["revision"].strip()
+            or template["revision"] != template["revision"].strip()
+            or len(template["revision"]) > 1024
+            or not isinstance(template["digest"], str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", template["digest"]) is None
+        ):
+            _invalid(code, path, "Flow capability requires an exact template artifact identity")
+        references: list[FlowReferenceRole] = []
+        for raw_role in item["references"]:
+            role = _object(
+                raw_role,
+                {"id", "kind", "parent_id", "related_object_id"},
+                code,
+                path,
+                "reference role",
+            )
+            kind, parent, related = role["kind"], role["parent_id"], role["related_object_id"]
+            if (
+                not identifier(role["id"])
+                or kind not in ("object", "property", "relationship", "record")
+                or (kind == "object" and (parent is not None or related is not None))
+                or (kind != "object" and not identifier(parent))
+                or (kind == "relationship" and not identifier(related))
+                or (kind != "relationship" and related is not None)
+            ):
+                _invalid(code, path, "Flow reference role is invalid")
+            references.append(FlowReferenceRole(**role))
+        index = {reference.id: reference for reference in references}
+        if len(index) != len(references):
+            _invalid(code, path, "Flow reference roles must be unique")
+        for reference in references:
+            for parent in (reference.parent_id, reference.related_object_id):
+                if parent is not None and (parent not in index or index[parent].kind != "object"):
+                    _invalid(code, path, "Flow reference role must name a declared object parent")
+        values: list[FlowValueRole] = []
+        for raw_role in item["values"]:
+            role = _object(raw_role, {"id", "types"}, code, path, "value role")
+            types = _string_list(role["types"], code=code, path=path, label="Flow scalar types")
+            if not identifier(role["id"]) or not set(types).issubset(
+                {"string", "number", "boolean", "null"}
+            ):
+                _invalid(code, path, "Flow value role is invalid")
+            values.append(FlowValueRole(role["id"], tuple(sorted(types))))
+        if len({role.id for role in values}) != len(values):
+            _invalid(code, path, "Flow value roles must be unique")
+        capabilities.append(
+            FlowCapability(
+                flow_type,
+                tuple(sorted(references, key=lambda role: role.id)),
+                tuple(sorted(values, key=lambda role: role.id)),
+                FlowTemplateIdentity(**template),
+                item["output_schema"],
+            )
+        )
+    if len({capability.type for capability in capabilities}) != len(capabilities):
+        _invalid(code, path, "Flow capability types must be unique")
+    return tuple(sorted(capabilities, key=lambda capability: capability.type))
+
+
 def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -> Manifest:
     code = "SANKA_EXTENSION_MANIFEST_INVALID"
     raw = _load_json(path, code, data=data)
@@ -445,6 +543,8 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
         keys = common | {"commands", "match", "targets"}
     elif kind == "connector":
         keys = common | {"providers"}
+    elif kind == "flow":
+        keys = common | {"commands", "capabilities"}
     else:
         _invalid(code, path, "manifest kind is unsupported")
     payload = _object(
@@ -459,11 +559,15 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
     version = payload["version"]
     if not isinstance(version, str) or VERSION.fullmatch(version) is None:
         _invalid(code, path, "extension version must be exact")
-    protocol = "sanka-extension/v1" if kind == "migration" else "sanka-connector/v1"
+    protocol = {
+        "migration": "sanka-extension/v1",
+        "connector": "sanka-connector/v1",
+        "flow": "sanka-flow-extension/v1",
+    }[kind]
     if payload["protocol_version"] != protocol:
         _invalid(code, path, "manifest kind and protocol version differ")
 
-    distribution_key = "executable" if kind == "migration" else "entry_point"
+    distribution_key = "entry_point" if kind == "connector" else "executable"
     distribution = _object(
         payload["distribution"],
         {distribution_key, "name", "version"},
@@ -485,6 +589,7 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
     match_all: tuple[Matcher, ...] = ()
     match_any: tuple[Matcher, ...] = ()
     providers: tuple[EndpointSupport, ...] = ()
+    capabilities: tuple[FlowCapability, ...] = ()
     if kind == "migration":
         commands = _string_list(payload["commands"], code=code, path=path, label="commands")
         if not set(commands).issubset(LIFECYCLE_COMMANDS):
@@ -503,6 +608,11 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
             _invalid(code, path, "manifest must declare at least one matcher")
         if len(set(match_all)) != len(match_all) or len(set(match_any)) != len(match_any):
             _invalid(code, path, "manifest matchers must be unique")
+    elif kind == "flow":
+        if payload["commands"] != ["blueprint"]:
+            _invalid(code, path, "Flow extensions expose only the blueprint command")
+        commands = ("blueprint",)
+        capabilities = _flow_capabilities(payload["capabilities"], code, path)
     else:
         raw_providers = payload["providers"]
         if not isinstance(raw_providers, list) or not raw_providers:
@@ -589,6 +699,7 @@ def _load_manifest(path: Path, marketplace: str, *, data: bytes | None = None) -
         runtime_sanka_cli=runtime_specifier,
         wheels=tuple(sorted(wheels, key=lambda item: item.name)),
         digest=content_hash(payload),
+        capabilities=capabilities,
     )
 
 
