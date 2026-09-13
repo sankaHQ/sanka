@@ -31,7 +31,7 @@ def test_publish_workflow_has_one_package_and_job_scoped_oidc() -> None:
     jobs = workflow["jobs"]
 
     assert set(inputs) == {"confirmation"}
-    assert set(jobs) == {"build", "publish"}
+    assert set(jobs) == {"build", "publish", "installer", "homebrew"}
     assert "id-token" not in jobs["build"].get("permissions", {})
     assert jobs["publish"]["permissions"] == {"id-token": "write"}
     assert jobs["publish"]["environment"] == "pypi"
@@ -92,3 +92,30 @@ def test_ci_defers_connector_e2e_until_marketplace_artifacts_exist() -> None:
     assert "services" not in job
     assert "SANKA_MIGRATE_TEST_POSTGRES_DSN" not in job.get("env", {})
     assert "SANKA_MIGRATE_TEST_CLICKHOUSE_URL" not in job.get("env", {})
+
+
+def test_installer_distribution_follows_pypi_and_tests_before_publication() -> None:
+    job = _workflow("publish.yml")["jobs"]["installer"]
+    assert job["needs"] == "publish"
+    assert job["permissions"] == {"contents": "write"}
+    runs = [step.get("run", "") for step in job["steps"]]
+    smoke = next(index for index, run in enumerate(runs) if "smoke_installer.py" in run)
+    publish = next(index for index, run in enumerate(runs) if "gh release create" in run)
+    assert smoke < publish
+    assert "--verify-tag" in runs[publish]
+    assert "--clobber" not in runs[publish]
+    assert 'test "$(cat release/SOURCE_COMMIT)" = "$GITHUB_SHA"' in runs[publish]
+
+
+def test_homebrew_candidate_is_validated_and_preserves_human_review() -> None:
+    job = _workflow("publish.yml")["jobs"]["homebrew"]
+    assert job["needs"] == "publish"
+    assert job["permissions"] == {"contents": "read"}
+    runs = [step.get("run", "") for step in job["steps"]]
+    prepare = next(index for index, run in enumerate(runs) if "scripts/prepare_release.py" in run)
+    validate = next(index for index, run in enumerate(runs) if "scripts/check_formula.sh" in run)
+    report = next(index for index, run in enumerate(runs) if "review_required" in run)
+    assert prepare < validate < report
+    assert "--expected-sha256" in runs[prepare]
+    assert "homebrew_base_commit" in runs[report]
+    assert "gh pr merge" not in "\n".join(runs)
