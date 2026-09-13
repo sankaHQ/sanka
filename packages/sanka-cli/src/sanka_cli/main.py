@@ -8,6 +8,7 @@ from sanka_cli.commands.ai import ai
 from sanka_cli.commands.auth import auth, auth_login, auth_logout, auth_status
 from sanka_cli.commands.cloud import cloud
 from sanka_cli.commands.code import code
+from sanka_cli.commands.doctor import doctor
 from sanka_cli.commands.functions import functions
 from sanka_cli.commands.migrate import register_migration_passthroughs
 from sanka_cli.commands.profiles import profiles
@@ -49,6 +50,7 @@ cli.add_command(functions)
 cli.add_command(code)
 cli.add_command(cloud)
 cli.add_command(skill)
+cli.add_command(doctor)
 
 attach_resource_group(cli, "companies", "/v2/public/companies")
 attach_resource_group(cli, "contacts", "/v2/public/contacts")

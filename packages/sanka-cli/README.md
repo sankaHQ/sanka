@@ -12,10 +12,29 @@ Python 3.12 or newer is required.
 
 ## Install
 
+On macOS/Linux, use the Sanka installer, which manages Python for you:
+
 ```bash
-uv tool install sanka-cli
+curl -fLsS https://github.com/sankaHQ/sanka/releases/latest/download/install.sh -o /tmp/sanka-install.sh
+sh /tmp/sanka-install.sh
+sanka --help
+sanka doctor
+```
+
+With [uv installed](https://docs.astral.sh/uv/getting-started/installation/),
+including on Windows, explicitly select the supported Python runtime:
+
+```bash
+uv tool install --python 3.12 sanka-cli
 sanka --help
 ```
+
+The macOS/Linux uv prerequisite is `curl -LsSf https://astral.sh/uv/install.sh | sh`;
+follow its printed shell setup instructions. Advanced pip users should use a
+Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
+Bare `pip` can select an older system interpreter and report “No matching distribution found.”
+The installer first ships with CLI 0.2.11. See [installation and recovery](https://github.com/sankaHQ/sanka/blob/main/docs/install.md)
+for Homebrew upgrades, PATH conflicts, and project environments.
 
 For AI agents using MCP, connect to the hosted Sanka MCP server at
 `https://mcp.sanka.com/mcp`. No local MCP package is required.

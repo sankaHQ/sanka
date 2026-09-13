@@ -19,7 +19,7 @@ both. Installing an extension never implies successful endpoint authentication.
 See [the naming contract](docs/public-naming.md) and [compatibility map](docs/naming-compatibility.md).
 
 The shared Extension SDK includes `sanka_extensions.data`,
-`sanka_extensions.flow` and `sanka_extensions.code`. The 0.2.10 candidate embeds
+`sanka_extensions.flow` and `sanka_extensions.code`. The runtime embeds
 published SDK a4 with Blueprint v1/v2 and a typed Flow generator protocol. The
 shared runtime can load an explicitly installed Flow generator in an isolated
 process and validate its output. Native Workflows compilation and runnable business
@@ -33,10 +33,29 @@ developer API token; the hosted service must be enabled separately.
 
 ## Install
 
+On macOS/Linux, use the Sanka installer, which manages Python for you:
+
 ```bash
-uv tool install sanka-cli
+curl -fLsS https://github.com/sankaHQ/sanka/releases/latest/download/install.sh -o /tmp/sanka-install.sh
+sh /tmp/sanka-install.sh
+sanka --help
+sanka doctor
+```
+
+With [uv installed](https://docs.astral.sh/uv/getting-started/installation/),
+including on Windows, explicitly select the supported Python runtime:
+
+```bash
+uv tool install --python 3.12 sanka-cli
 sanka --help
 ```
+
+The macOS/Linux uv prerequisite is `curl -LsSf https://astral.sh/uv/install.sh | sh`;
+follow its printed shell setup instructions. Advanced pip users should use a
+Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
+Bare `pip` can select an older system interpreter and report “No matching distribution found.”
+The installer first ships with CLI 0.2.11. See [installation and recovery](docs/install.md)
+for Homebrew upgrades, PATH conflicts, and project environments.
 
 For AI agents using MCP, connect to the hosted Sanka MCP server at
 `https://mcp.sanka.com/mcp`. No local MCP package is required.

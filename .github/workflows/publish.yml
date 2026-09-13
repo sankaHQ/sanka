@@ -67,3 +67,82 @@ jobs:
         with:
           packages-dir: release/
           print-hash: true
+
+  installer:
+    name: Publish installer for the verified PyPI release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sanka-cli-${{ github.ref_name }}
+          path: release/
+      - name: Test public package installation without system Python
+        run: python3 scripts/smoke_installer.py --version "${GITHUB_REF_NAME#v}" --upgrade-from 0.2.9 --report installer-smoke.json
+      - name: Verify and publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(cat release/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          (cd release && sha256sum --check SHA256SUMS)
+          grep -F "    version=${GITHUB_REF_NAME#v}" install.sh
+          cp install.sh release/install.sh
+          (cd release && sha256sum install.sh >> SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
+            --title "Sanka CLI $GITHUB_REF_NAME" --notes-file docs/install.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: published-installer-acceptance
+          path: installer-smoke.json
+          retention-days: 10
+
+  homebrew:
+    name: Prepare and test the matching Homebrew update
+    needs: publish
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sankaHQ/homebrew-cli
+          persist-credentials: false
+      - uses: Homebrew/actions/setup-homebrew@1e34f2e2acaa766b7efacb8c26352e6abbb023f9
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sanka-cli-${{ github.ref_name }}
+          path: release/
+      - name: Prepare from verified public source bytes
+        run: |
+          test "$(cat release/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          (cd release && shasum -a 256 --check SHA256SUMS)
+          brew tap sankaHQ/cli
+          SOURCE_HASH=$(awk '/\.tar\.gz$/ {print $1}' release/SHA256SUMS)
+          python3 scripts/prepare_release.py --version "${GITHUB_REF_NAME#v}" \
+            --expected-sha256 "$SOURCE_HASH"
+      - name: Build and test without replacing another installation
+        run: sh scripts/check_formula.sh
+      - name: Record channel completion separately
+        run: |
+          mkdir -p handoff
+          git diff --binary -- Formula/sanka.rb > handoff/homebrew.patch
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          report = json.loads(Path("release-status.json").read_text())
+          report.update(homebrew="review_required", homebrew_validation="passed-macos",
+                        homebrew_base_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                        linux_validation="required by the Homebrew PR CI before merge")
+          Path("handoff/release-status.json").write_text(json.dumps(report, indent=2) + "\n")
+          PY
+          cat handoff/release-status.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: homebrew-${{ github.ref_name }}-review
+          path: handoff/
+          retention-days: 10
