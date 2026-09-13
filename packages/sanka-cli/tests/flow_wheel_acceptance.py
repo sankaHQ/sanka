@@ -15,8 +15,8 @@ from sanka.runtime.extensions.model import ExtensionError
 from sanka.runtime.extensions.store import ExtensionStore
 from sanka.runtime.flow.extension import FlowExtensionRunner
 
-# This child explicitly loads the supplied SDK wheel, not the embedded SDK whose
-# protocol has intentionally not advanced before the upstream publication gate.
+# The parent selects either the embedded SDK or the independently published SDK.
+# Dynamic import keeps this test able to validate either distribution boundary.
 flow = importlib.import_module("sanka_extensions.flow")
 
 GENERATOR = """import json
@@ -52,10 +52,19 @@ def verify(release: Path, root: Path, version: str, mode: str) -> None:
         "template-tamper": "output['blueprint']['origin']['identity']['revision'] = 'changed'",
         "schema-tamper": "output['blueprint']['schema_version'] = 'sanka-flow-blueprint/unknown'",
     }[mode]
+    generator_source = GENERATOR.replace("MUTATION", mutation)
+    if mode == "missing-identity":
+        # A generator may ignore target admission. The host must still reject its
+        # well-formed, correlated output for a capability the target cannot honor.
+        generator_source = generator_source.replace(
+            "flow.BlueprintResponse.success(request, blueprint)",
+            "flow.BlueprintResponse(request.request_id, request.digest, "
+            "request.extension, 'success', blueprint)",
+        )
     source, generator = _marketplace(
         root / "source",
         requires=("sanka-extension-sdk==0.1.0a4",),
-        cli_source=GENERATOR.replace("MUTATION", mutation),
+        cli_source=generator_source,
         extra_members=(("example_demo/blueprint.json", fixture_text),),
     )
     manifest_path = source / "example-demo.json"
@@ -114,6 +123,8 @@ def verify(release: Path, root: Path, version: str, mode: str) -> None:
         except ExtensionError as error:
             assert mode != "success", str(error) + ": " + str(error.__cause__)
             assert error.code == "SANKA_FLOW_EXTENSION_PROTOCOL", error.code
+            if mode == "missing-identity":
+                assert "Target lacks required Flow capabilities" in str(error.__cause__)
         else:
             assert mode == "success", "Rejected input unexpectedly produced a Blueprint"
             assert isinstance(result, flow.Blueprint)

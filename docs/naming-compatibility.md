@@ -25,8 +25,10 @@ The public SDK is named **Sanka Extension SDK**, with one `sanka_extensions` nam
 
 `sanka_extensions.flow` adds the declarative business contract. The earlier
 `sanka_extensions.blueprints` suggestion was not implemented or published and
-does not need an alias. This adds no new executable manifest kind, CLI command or
-hosted API route; see [Flow status and ownership](flow.md).
+does not need an alias. Isolated generators use their own `kind="flow"` manifest
+and `sanka-flow-extension/v1` protocol; existing Data/Code protocols retain their
+meanings. Native compilation and hosted routes remain separate from generation;
+see [Flow status and ownership](flow.md).
 
 ## Published compatibility contracts
 

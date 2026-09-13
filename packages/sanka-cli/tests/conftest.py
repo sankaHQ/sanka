@@ -17,6 +17,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--extension-release",
         help="absolute or working-directory-relative path to built extension wheels",
     )
+    parser.addoption(
+        "--cli-wheel",
+        help="built CLI wheel to use instead of source in Flow wheel acceptance",
+    )
 
 
 @pytest.fixture

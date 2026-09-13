@@ -57,9 +57,9 @@ from sanka_extensions.data import ENTRY_POINT_GROUP, ExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
-# Published extensions-v0.1.0a18. Advance only after verifying its release wheels.
+# Published extensions-v0.1.0a20. Advance only after verifying its release wheels.
 # The development catalog can refer to artifacts that have not been published yet.
-OFFICIAL_REVISION = "1a8c9450243b1cc25096396244dac5ed3cf7abfd"
+OFFICIAL_REVISION = "b52bf22f60b2a3704bf0414d609c3e3f767bcd41"
 DEFAULT_EXTENSION_ID = "sanka/drf-to-fastapi"
 MAX_WHEEL_BYTES = 128 * 1024 * 1024
 MAX_WHEEL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024

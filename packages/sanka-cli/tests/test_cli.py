@@ -622,7 +622,7 @@ def test_research_client_uses_public_branded_base_and_unwraps_data() -> None:
         "after": ["2027-01"],
         "locale": ["ja"],
     }
-    assert request.get_header("User-agent") == "sanka-cli/0.2.9"
+    assert request.get_header("User-agent") == "sanka-cli/0.2.10"
     assert timeout == 10.0
 
 
