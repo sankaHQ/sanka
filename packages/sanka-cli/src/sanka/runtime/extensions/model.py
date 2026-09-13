@@ -51,6 +51,59 @@ class EndpointSupport:
 
 
 @dataclass(frozen=True)
+class FlowReferenceRole:
+    id: str
+    kind: str
+    parent_id: str | None
+    related_object_id: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "parent_id": self.parent_id,
+            "related_object_id": self.related_object_id,
+        }
+
+
+@dataclass(frozen=True)
+class FlowValueRole:
+    id: str
+    types: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "types": list(self.types)}
+
+
+@dataclass(frozen=True)
+class FlowTemplateIdentity:
+    id: str
+    revision: str
+    digest: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"id": self.id, "revision": self.revision, "digest": self.digest}
+
+
+@dataclass(frozen=True)
+class FlowCapability:
+    type: str
+    references: tuple[FlowReferenceRole, ...]
+    values: tuple[FlowValueRole, ...]
+    template: FlowTemplateIdentity
+    output_schema: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "references": [item.to_dict() for item in self.references],
+            "values": [item.to_dict() for item in self.values],
+            "template": self.template.to_dict(),
+            "output_schema": self.output_schema,
+        }
+
+
+@dataclass(frozen=True)
 class Fingerprint:
     languages: tuple[str, ...]
     frameworks: tuple[str, ...]
@@ -64,7 +117,7 @@ class Manifest:
     id: str
     version: str
     marketplace: str
-    kind: Literal["migration", "connector"]
+    kind: Literal["migration", "connector", "flow"]
     protocol_version: str
     distribution: str
     distribution_version: str
@@ -78,6 +131,7 @@ class Manifest:
     runtime_sanka_cli: str
     wheels: tuple[Wheel, ...]
     digest: str
+    capabilities: tuple[FlowCapability, ...] = ()
 
 
 @dataclass(frozen=True)

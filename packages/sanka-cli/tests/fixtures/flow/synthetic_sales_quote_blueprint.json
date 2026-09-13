@@ -1,0 +1,325 @@
+{
+  "schema_version": "sanka-flow-blueprint/v1",
+  "id": "synthetic.sales-quote",
+  "revision": "1",
+  "origin": {
+    "kind": "template",
+    "identity": {
+      "id": "example/sales-quote",
+      "revision": "1",
+      "digest": "sha256:7f4bcea420d90e150e71c5e4858eccdc261954cf0c2061d9419f4a5b00d405fc"
+    }
+  },
+  "extension": {
+    "id": "example-flow-extension",
+    "revision": "0.0.0",
+    "digest": "sha256:fe7a8b95a783ce524741a43c15769027257cd4e69eb4f51cf3afe95e535b3839"
+  },
+  "parameters": {
+    "description": "Synthetic contract fixture; no installed extension, live API mapping or source equivalence is claimed.",
+    "fixture_only": true
+  },
+  "policies": {
+    "reapply": {
+      "user_changes": "preserve",
+      "conflicts": "require_resolution",
+      "ownership": "installation",
+      "removals": "explicit_plan"
+    },
+    "lifecycle": {
+      "stages": [
+        "construct",
+        "verify",
+        "activate"
+      ],
+      "new_automations": "disabled_until_activation",
+      "activation": "explicit_verified_revision"
+    }
+  },
+  "resources": [
+    {
+      "id": "sales.quote",
+      "kind": "workflow",
+      "spec": {
+        "edges": [
+          {
+            "source": "deal.updated",
+            "target": "stage.is-quote",
+            "when": "always"
+          },
+          {
+            "source": "stage.is-quote",
+            "target": "quote.create",
+            "when": "true"
+          }
+        ],
+        "id": "sales.quote",
+        "nodes": [
+          {
+            "id": "deal.updated",
+            "kind": "trigger",
+            "spec": {
+              "changed_fields": [
+                "deal.stage"
+              ],
+              "object_ref": "deal",
+              "operation": "record.updated"
+            }
+          },
+          {
+            "id": "quote.create",
+            "kind": "action",
+            "spec": {
+              "associations": [
+                {
+                  "record": {
+                    "kind": "event_record"
+                  },
+                  "relationship_ref": "quote.deal",
+                  "required": true
+                }
+              ],
+              "fields": [
+                {
+                  "field_ref": "quote.status",
+                  "value": {
+                    "kind": "literal",
+                    "value": "draft"
+                  }
+                },
+                {
+                  "field_ref": "quote.title",
+                  "value": {
+                    "field_ref": "deal.title",
+                    "kind": "event_field",
+                    "phase": "after"
+                  }
+                }
+              ],
+              "identity": {
+                "on_existing": "preserve",
+                "on_missing": "conflict",
+                "scope": "installation_workflow_action_event_record"
+              },
+              "object_ref": "quote",
+              "operation": "record.create"
+            }
+          },
+          {
+            "id": "stage.is-quote",
+            "kind": "condition",
+            "spec": {
+              "left": {
+                "field_ref": "deal.stage",
+                "kind": "event_field",
+                "phase": "after"
+              },
+              "operator": "equals",
+              "right": {
+                "kind": "literal",
+                "value": "Quote"
+              }
+            }
+          }
+        ]
+      },
+      "depends_on": []
+    }
+  ],
+  "references": [
+    {
+      "id": "deal",
+      "kind": "object",
+      "key": "synthetic.deal",
+      "parent_id": null,
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "deal.stage",
+      "kind": "property",
+      "key": "stage",
+      "parent_id": "deal",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "deal.title",
+      "kind": "property",
+      "key": "title",
+      "parent_id": "deal",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "quote",
+      "kind": "object",
+      "key": "synthetic.quote",
+      "parent_id": null,
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "quote.deal",
+      "kind": "relationship",
+      "key": "deal",
+      "parent_id": "quote",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": "deal"
+    },
+    {
+      "id": "quote.status",
+      "kind": "property",
+      "key": "status",
+      "parent_id": "quote",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    },
+    {
+      "id": "quote.title",
+      "kind": "property",
+      "key": "title",
+      "parent_id": "quote",
+      "scope": "target",
+      "binding": "existing",
+      "related_object_id": null
+    }
+  ],
+  "mappings": [],
+  "scenarios": [
+    {
+      "id": "sales.match",
+      "workflow_id": "sales.quote",
+      "case": "match",
+      "events": [
+        {
+          "id": "synthetic.quote-event",
+          "record_id": "synthetic.deal-1",
+          "before": {
+            "deal.stage": "Negotiation",
+            "deal.title": "Synthetic deal"
+          },
+          "after": {
+            "deal.stage": "Quote",
+            "deal.title": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_created_count": 1,
+      "expected_fields": [
+        {
+          "field_ref": "quote.status",
+          "value": {
+            "kind": "literal",
+            "value": "draft"
+          }
+        },
+        {
+          "field_ref": "quote.title",
+          "value": {
+            "kind": "literal",
+            "value": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_associations": [
+        {
+          "relationship_ref": "quote.deal",
+          "record": {
+            "kind": "event_record"
+          },
+          "required": true
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "sales.no-match",
+      "workflow_id": "sales.quote",
+      "case": "no_match",
+      "events": [
+        {
+          "id": "synthetic.no-match-event",
+          "record_id": "synthetic.deal-1",
+          "before": {
+            "deal.stage": "Discovery",
+            "deal.title": "Synthetic deal"
+          },
+          "after": {
+            "deal.stage": "Negotiation",
+            "deal.title": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_created_count": 0,
+      "expected_fields": [],
+      "expected_associations": [],
+      "required": true
+    },
+    {
+      "id": "sales.retry",
+      "workflow_id": "sales.quote",
+      "case": "retry",
+      "events": [
+        {
+          "id": "synthetic.quote-event",
+          "record_id": "synthetic.deal-1",
+          "before": {
+            "deal.stage": "Negotiation",
+            "deal.title": "Synthetic deal"
+          },
+          "after": {
+            "deal.stage": "Quote",
+            "deal.title": "Synthetic deal"
+          }
+        },
+        {
+          "id": "synthetic.quote-event",
+          "record_id": "synthetic.deal-1",
+          "before": {
+            "deal.stage": "Negotiation",
+            "deal.title": "Synthetic deal"
+          },
+          "after": {
+            "deal.stage": "Quote",
+            "deal.title": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_created_count": 1,
+      "expected_fields": [
+        {
+          "field_ref": "quote.status",
+          "value": {
+            "kind": "literal",
+            "value": "draft"
+          }
+        },
+        {
+          "field_ref": "quote.title",
+          "value": {
+            "kind": "literal",
+            "value": "Synthetic deal"
+          }
+        }
+      ],
+      "expected_associations": [
+        {
+          "relationship_ref": "quote.deal",
+          "record": {
+            "kind": "event_record"
+          },
+          "required": true
+        }
+      ],
+      "required": true
+    }
+  ],
+  "unsupported": []
+}

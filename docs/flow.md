@@ -145,3 +145,51 @@ The canonical contract lives in the
 [Extensions repository](https://github.com/sankaHQ/extensions/blob/main/docs/flow.md).
 SDK publication, runtime dependency upgrades and cloud deployment remain separate
 release steps.
+
+## Verified generator loading
+
+`sanka.runtime.flow.extension.FlowExtensionRunner` prepares the generator loading
+boundary. A `kind="flow"` manifest lives in the existing marketplace and exposes
+only `blueprint` over `sanka-flow-extension/v1`. It declares a selector, exact
+template ID/revision/digest, Blueprint v1 or v2 output, reference roles and scalar
+value types. Discovery reads this static declaration without importing a provider.
+Data/Code listing payloads and their protocol meanings remain unchanged.
+
+Generation requires an explicitly selected installed extension. The store verifies
+the project lock, immutable marketplace snapshot, wheel closure and environment.
+The runner uses the canonical host SDK to validate the request against the
+capability, then runs the verified console-script inode with isolated Python flags,
+a private working directory and environment, a deadline and bounded output.
+Credentials and the caller's environment are not inherited. This process isolation
+is not an OS/filesystem/network sandbox and does not make arbitrary packages safe.
+
+Before accepting output, the runner checks the process result, exact request
+digest, extension/template identity, output schema, native references and target
+revision/capabilities, then verifies the lock and environment again. The SDK checks
+the full Blueprint, mandatory scenario assertions and independently supplied target
+capabilities. Hosts must derive capabilities from their native adapter and recheck
+the target before mutation; the extension cannot grant itself a capability.
+
+This change does **not** advance the embedded SDK or default marketplace revision.
+`SDKFlowCodec` fails with `SANKA_FLOW_SDK_REQUIRED` before starting extension code
+when the host SDK lacks the protocol. SDK a4 is prepared in Extensions and must be
+reviewed and published before runtime provenance/pins advance. A host may supply
+the `FlowCodec` port from its separately installed canonical SDK. The codec is
+trusted host code, never selected from extension output.
+
+Boundary tests cover installed fixture wheels, deadline enforcement, environment
+mutation, response tampering, and missing host SDK. The explicit wheel conformance
+test uses the actual SDK/compatibility wheels for both host validation and the
+generator's isolated environment:
+
+```bash
+uv run python -m pytest packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
+  --extension-release /absolute/path/to/extensions/dist
+```
+
+The synthetic v1/v2 fixtures validate artifact generation, not native business
+execution. This command requires the a4 candidate/released SDK bundle and is
+separate from `make check`, like the existing Code wheel acceptance suite. Run it
+when changing this boundary or adopting the SDK. Native Workflows compilation,
+durable Estimate identity, Save/reload preservation and native scenario verification
+remain the next adapter slice. No separate installation/history UI is introduced.

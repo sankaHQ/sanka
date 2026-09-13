@@ -17,7 +17,8 @@ typecheck:
 
 test:
 	$(UV) run -- python -m pytest \
-		--ignore=packages/sanka-cli/tests/test_extension_wheel_acceptance.py
+		--ignore=packages/sanka-cli/tests/test_extension_wheel_acceptance.py \
+		--ignore=packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py
 
 boundaries:
 	$(UV) run python scripts/check_import_boundaries.py
