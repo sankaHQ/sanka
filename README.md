@@ -70,7 +70,14 @@ sanka extension add sanka/sqlite
 
 Sanka verifies each manifest, URL, SHA-256 digest, runtime constraint, and
 wheel identity before installing it in an isolated environment. PyPI is not a
-extension fallback. Project pins live in `.sanka/extensions.lock`; marketplace
+extension fallback. The official catalog defaults to the published bundle pinned by this
+CLI release, never the development branch. Upgrade the CLI, then run
+`sanka extension marketplace upgrade` to adopt its catalog without changing project
+pins. To inspect a candidate or retain a particular catalog, add a separately named
+marketplace with `--revision FULL_COMMIT_SHA`; upgrades retain that exact revision.
+Explicit revisions may refer to unpublished artifacts, which still fail installation.
+
+Project pins live in `.sanka/extensions.lock`; marketplace
 snapshots and verified artifacts live under `~/.sanka/extensions` or
 `$SANKA_HOME/extensions`.
 

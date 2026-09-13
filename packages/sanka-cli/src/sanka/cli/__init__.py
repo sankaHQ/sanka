@@ -628,6 +628,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     marketplace_add.add_argument("source")
     marketplace_add.add_argument("--name")
     marketplace_add.add_argument(
+        "--revision", help="pin an explicit full Git commit instead of the default catalog"
+    )
+    marketplace_add.add_argument(
         "--trust", action="store_true", help="explicitly trust a third-party source"
     )
     presentation(marketplace_add)
@@ -782,6 +785,7 @@ async def _cmd_extension_marketplace_add(args: argparse.Namespace) -> int:
         args.source,
         name=args.name,
         trust=args.trust,
+        revision=args.revision,
     )
     return _extension_result(args, "marketplace_add", [record.to_dict()])
 

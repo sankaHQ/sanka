@@ -76,8 +76,10 @@ def test_extension_management_uses_stable_json_envelopes(
             calls.append(("marketplace_list", None))
             return (Record("marketplace"),)
 
-        def add_marketplace(self, source: str, *, name: str | None, trust: bool) -> Record:
-            calls.append(("marketplace_add", (source, name, trust)))
+        def add_marketplace(
+            self, source: str, *, name: str | None, trust: bool, revision: str | None
+        ) -> Record:
+            calls.append(("marketplace_add", (source, name, trust, revision)))
             return Record("marketplace")
 
         def upgrade_marketplace(self, name: str | None) -> tuple[Record, ...]:
@@ -118,6 +120,8 @@ def test_extension_management_uses_stable_json_envelopes(
                 "--name",
                 "fixtures",
                 "--trust",
+                "--revision",
+                "a" * 40,
                 "--json",
             ],
             "marketplace_add",
@@ -155,7 +159,7 @@ def test_extension_management_uses_stable_json_envelopes(
         ("remove", "example/demo"),
         (
             "marketplace_add",
-            ("https://example.invalid/extensions.git", "fixtures", True),
+            ("https://example.invalid/extensions.git", "fixtures", True, "a" * 40),
         ),
         ("marketplace_list", None),
         ("marketplace_upgrade", "fixtures"),
