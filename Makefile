@@ -1,6 +1,6 @@
 UV ?= uv
 
-.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release
+.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release quickstart-acceptance
 
 check: lint typecheck test boundaries headers naming licenses connector-sdk-sync
 
@@ -41,3 +41,7 @@ build-release:
 	$(UV) run python scripts/check_release_artifacts.py dist
 	$(UV) run python -m scripts.stage_release_artifacts dist release
 	$(UV) publish --dry-run --trusted-publishing never dist/*
+
+# Run after build-release; install its wheel, without any development imports.
+quickstart-acceptance:
+	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.11 --report quickstart-acceptance.json

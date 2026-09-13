@@ -11,3 +11,4 @@ build/
 .coverage
 .DS_Store
 .sanka/
+quickstart-acceptance.json

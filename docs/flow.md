@@ -170,9 +170,10 @@ the full Blueprint, mandatory scenario assertions and independently supplied tar
 capabilities. Hosts must derive capabilities from their native adapter and recheck
 the target before mutation; the extension cannot grant itself a capability.
 
-The 0.2.10 candidate embeds the published SDK a4 from Extensions commit
+The 0.2.12 candidate embeds the published SDK a4 from Extensions commit
 `b52bf22f60b2a3704bf0414d609c3e3f767bcd41`, verified byte-for-byte by the provenance
-guard. Its default marketplace is the immutable `extensions-v0.1.0a20` snapshot;
+guard. Its default marketplace is the immutable `extensions-v0.1.0a22` snapshot
+at `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`;
 existing project locks retain their selected artifacts. A host may also supply
 `FlowCodec` from its separately installed canonical SDK. The codec is trusted host
 code, never selected from extension output. Older hosts without the protocol fail
@@ -186,7 +187,7 @@ with the published SDK wheels installed in the generator environment:
 ```bash
 uv run python -m pytest packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
   --extension-release /absolute/path/to/published/sdk/wheels \
-  --cli-wheel dist/sanka_cli-0.2.10-py3-none-any.whl
+  --cli-wheel dist/sanka_cli-0.2.12-py3-none-any.whl
 ```
 
 The synthetic v1/v2 fixtures validate artifact generation, not native business
