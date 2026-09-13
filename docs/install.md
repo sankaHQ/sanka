@@ -32,6 +32,7 @@ future terminals. `sanka doctor --json` also reports these conflicts.
 ## Homebrew
 
 ```bash
+brew trust --formula sankahq/cli/sanka
 brew install sankaHQ/cli/sanka
 sanka --help
 ```
@@ -59,7 +60,9 @@ sanka --help
 sanka doctor
 ```
 
-Use `uv tool upgrade sanka-cli --python 3.12` for upgrades. Avoid maintaining both
+Use `uv tool upgrade sanka-cli --python 3.12` for upgrades. If uv reports an exact
+version pin, use `uv tool install --python 3.12 sanka-cli@latest` to replace the pin.
+Avoid maintaining both
 a Homebrew and uv installation on the same PATH.
 
 ## pip in an existing Python environment

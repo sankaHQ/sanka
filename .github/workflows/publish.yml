@@ -68,9 +68,33 @@ jobs:
           packages-dir: release/
           print-hash: true
 
+  ready:
+    name: Verify public PyPI availability
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sanka-cli-${{ github.ref_name }}
+          path: release/
+      - name: Wait for both metadata and the install index
+        run: |
+          python3 scripts/wait_for_pypi.py --version "${GITHUB_REF_NAME#v}" \
+            --source-commit "$GITHUB_SHA" --release-dir release \
+            --timeout 300 --report pypi-readiness.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pypi-readiness
+          path: pypi-readiness.json
+
   installer:
     name: Publish installer for the verified PyPI release
-    needs: publish
+    needs: ready
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -92,9 +116,15 @@ jobs:
           (cd release && sha256sum --check SHA256SUMS)
           grep -F "    version=${GITHUB_REF_NAME#v}" install.sh
           cp install.sh release/install.sh
-          (cd release && sha256sum install.sh >> SHA256SUMS)
+          cp docs/install.md release/install.md
+          (cd release && sha256sum install.sh install.md >> SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
             --title "Sanka CLI $GITHUB_REF_NAME" --notes-file docs/install.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sanka-cli-installer-${{ github.ref_name }}
+          path: release/
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: published-installer-acceptance
@@ -103,7 +133,7 @@ jobs:
 
   homebrew:
     name: Prepare and test the matching Homebrew update
-    needs: publish
+    needs: installer
     runs-on: macos-latest
     permissions:
       contents: read
@@ -115,29 +145,39 @@ jobs:
       - uses: Homebrew/actions/setup-homebrew@1e34f2e2acaa766b7efacb8c26352e6abbb023f9
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: sanka-cli-${{ github.ref_name }}
+          name: sanka-cli-installer-${{ github.ref_name }}
           path: release/
       - name: Prepare from verified public source bytes
         run: |
           test "$(cat release/SOURCE_COMMIT)" = "$GITHUB_SHA"
           (cd release && shasum -a 256 --check SHA256SUMS)
+          brew trust --formula sankahq/cli/sanka
           brew tap sankaHQ/cli
           SOURCE_HASH=$(awk '/\.tar\.gz$/ {print $1}' release/SHA256SUMS)
           python3 scripts/prepare_release.py --version "${GITHUB_REF_NAME#v}" \
             --expected-sha256 "$SOURCE_HASH"
+          cp release/install.sh install.sh
+          mkdir -p docs
+          cp release/install.md docs/install.md
+          grep -F "    version=${GITHUB_REF_NAME#v}" install.sh
       - name: Build and test without replacing another installation
         run: sh scripts/check_formula.sh
       - name: Record channel completion separately
         run: |
           mkdir -p handoff
-          git diff --binary -- Formula/sanka.rb > handoff/homebrew.patch
+          git add --intent-to-add install.sh docs/install.md
+          git diff --binary -- Formula/sanka.rb install.sh docs/install.md > handoff/homebrew.patch
           python3 - <<'PY'
           import json, subprocess
           from pathlib import Path
           report = json.loads(Path("release-status.json").read_text())
           report.update(homebrew="review_required", homebrew_validation="passed-macos",
                         homebrew_base_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-                        linux_validation="required by the Homebrew PR CI before merge")
+                        linux_validation="required by the Homebrew PR CI before merge",
+                        installer="published with the CLI release",
+                        installer_mirror="public after the Homebrew PR merges",
+                        installer_url="https://github.com/sankaHQ/sanka/releases/latest/download/install.sh",
+                        installer_mirror_url="https://raw.githubusercontent.com/sankaHQ/homebrew-cli/main/install.sh")
           Path("handoff/release-status.json").write_text(json.dumps(report, indent=2) + "\n")
           PY
           cat handoff/release-status.json >> "$GITHUB_STEP_SUMMARY"
