@@ -28,12 +28,14 @@ def validate_report(report: dict[str, Any], wheel_hash: str) -> None:
     if (
         not isinstance(before, str)
         or len(before) != 64
+        or any(character not in "0123456789abcdef" for character in before)
         or before != report.get("lock_sha256_after")
     ):
         raise ValueError("Acceptance report does not prove unchanged extension lock bytes")
     if report.get("upgrade_from") != BASELINE_VERSION:
         raise ValueError("Acceptance report uses the wrong upgrade baseline")
-    if report.get("installed_cli") != report.get("candidate", {}).get("version"):
+    version = report.get("candidate", {}).get("version")
+    if not isinstance(version, str) or not version or report.get("installed_cli") != version:
         raise ValueError("Acceptance report does not identify the installed candidate version")
 
 

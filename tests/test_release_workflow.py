@@ -31,7 +31,15 @@ def test_publish_workflow_has_one_package_and_job_scoped_oidc() -> None:
     jobs = workflow["jobs"]
 
     assert set(inputs) == {"confirmation"}
-    assert set(jobs) == {"build", "publish", "ready", "installer", "homebrew"}
+    assert set(jobs) == {
+        "build",
+        "extension-compatibility",
+        "publish",
+        "ready",
+        "installer",
+        "homebrew",
+    }
+    assert "id-token" not in jobs["extension-compatibility"].get("permissions", {})
     assert "id-token" not in jobs["build"].get("permissions", {})
     assert jobs["publish"]["permissions"] == {"id-token": "write"}
     assert jobs["publish"]["environment"] == "pypi"

@@ -32,6 +32,8 @@ def test_acceptance_requires_exact_candidate_and_preserved_lock() -> None:
         {"lock_sha256_before": None, "lock_sha256_after": None},
         {"upgrade_from": "0.0.1"},
         {"installed_cli": "0.2.12"},
+        {"candidate": {"sha256": "a" * 64}, "installed_cli": None},
+        {"lock_sha256_before": "z" * 64, "lock_sha256_after": "z" * 64},
     ]
     for changed in mutations:
         report = copy.deepcopy(original) | changed
