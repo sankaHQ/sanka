@@ -148,8 +148,14 @@ def check_quickstart(
     assert extension["marketplace_identity"] == "github.com/sankaHQ/extensions", extension
     report["extension"] = extension
     if previous_lock is not None:
-        assert extension["version"] != report["previous_extensions"][0]["version"]
-        report["explicit_extension_upgrade"] = "passed"
+        previous = next(
+            item for item in report["previous_extensions"] if item["id"] == extension["id"]
+        )
+        if extension["version"] == previous["version"]:
+            assert lock_bytes == previous_lock, "Reinstalling the same extension must preserve pins"
+            report["explicit_extension_upgrade"] = "already_current"
+        else:
+            report["explicit_extension_upgrade"] = "passed"
     scans = []
     for name in ("scan with source activated", "scan without activation"):
         scans.append(json.loads(run(name, ["sanka", "scan", ".", "--json"], project)))
@@ -212,6 +218,9 @@ def main() -> None:
             report["upgrade"] = upgrade
             with tempfile.TemporaryDirectory(prefix="sanka-quickstart-upgrade-") as temporary:
                 check_quickstart(requirement, Path(temporary).resolve(), upgrade, args.upgrade_from)
+            assert upgrade["extension"] == report["extension"], (
+                "Fresh and upgraded installations must resolve the same exact extension artifacts"
+            )
         report["status"] = "passed"
     except Exception as error:
         report["failure_reason"] = str(error)
