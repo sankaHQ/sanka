@@ -403,3 +403,26 @@ async def test_activation_cannot_rewrite_configuration(tmp_path: Path) -> None:
         )
     assert await store.evidence(plan.digest, "activation") is None
     await store.close()
+
+
+@pytest.mark.parametrize("schema", ["sanka-flow-blueprint/v3", "unknown-profile/v99"])
+async def test_unimplemented_verification_profile_never_runs_or_activates(
+    tmp_path: Path, schema: str
+) -> None:
+    store, target, plan, lifecycle = await setup(tmp_path)
+    payload = plan.to_dict()
+    payload["blueprint"]["schema_version"] = schema
+    candidate = FlowPlan(Document(payload))
+    # This check must run before claims, store writes or target scenario calls.
+    # In particular, a saved/fabricated legacy success receipt cannot promote
+    # a native scheduled/batch profile into a verified installation.
+    with pytest.raises(FlowError) as verification:
+        await lifecycle.verify(candidate, attempt_id="native-verify")
+    assert verification.value.code == "FLOW_VERIFICATION_PROFILE_UNSUPPORTED"
+    with pytest.raises(FlowError) as activation:
+        await lifecycle.activate(
+            candidate, approved_verification_digest="legacy-success", attempt_id="native-activate"
+        )
+    assert activation.value.code == "FLOW_VERIFICATION_PROFILE_UNSUPPORTED"
+    assert target.scenarios == target.activations == target.writes == 0
+    assert await store.evidence(candidate.digest, "verification") is None

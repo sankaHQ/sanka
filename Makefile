@@ -1,6 +1,6 @@
 UV ?= uv
 
-.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release quickstart-acceptance
+.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release quickstart-acceptance flow-wheel-acceptance
 
 check: lint typecheck test boundaries headers naming licenses connector-sdk-sync
 
@@ -18,7 +18,8 @@ typecheck:
 test:
 	$(UV) run -- python -m pytest \
 		--ignore=packages/sanka-cli/tests/test_extension_wheel_acceptance.py \
-		--ignore=packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py
+		--ignore=packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
+		--ignore=packages/sanka-cli/tests/test_business_flow_extension_acceptance.py
 
 boundaries:
 	$(UV) run python scripts/check_import_boundaries.py
@@ -44,7 +45,16 @@ build-release:
 
 # Run after build-release; install its wheel, without any development imports.
 quickstart-acceptance:
-	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.11 --report quickstart-acceptance.json
+	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.12 --report quickstart-acceptance.json
+
+# Run after build-release; verify original v1/v2 and native v3 published SDK wheels.
+flow-wheel-acceptance:
+	$(UV) run python scripts/check_flow_wheels.py --cli-wheel dist/sanka_cli-*-py3-none-any.whl
+
+.PHONY: business-flow-acceptance
+# Publication uses public assets; local PR review can supply the exact candidate.
+business-flow-acceptance:
+	$(UV) run python scripts/check_business_flow.py --cli-wheel dist/sanka_cli-*-py3-none-any.whl $(if $(BUSINESS_FLOW_RELEASE),--release-dir "$(BUSINESS_FLOW_RELEASE)")
 
 # Independent third-party contract and upgrade check; no source imports.
 CLI_WHEEL ?= dist/sanka_cli-*-py3-none-any.whl

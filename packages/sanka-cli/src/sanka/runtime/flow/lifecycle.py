@@ -24,6 +24,16 @@ def _same(expected: Document, actual: Document) -> None:
         raise FlowError("FLOW_TARGET_STALE", "Target configuration or reference revision changed")
 
 
+def _require_verification_profile(plan: FlowPlan) -> None:
+    version = plan.to_dict()["blueprint"].get("schema_version")
+    if version not in {"sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2"}:
+        raise FlowError(
+            "FLOW_VERIFICATION_PROFILE_UNSUPPORTED",
+            "This Flow profile has no native scenario verifier; "
+            "verification and activation are unavailable",
+        )
+
+
 def _resource_ids(observation: Document) -> tuple[str, ...]:
     return tuple(r["target_id"] for r in observation.to_dict()["resources"])
 
@@ -163,6 +173,7 @@ class FlowLifecycle:
             await _release(self.store, claim)
 
     async def verify(self, plan: FlowPlan, *, attempt_id: str) -> Document:
+        _require_verification_profile(plan)
         self._check(plan, plan.digest)
         claim = await self.store.claim(plan.digest, attempt_id)
         try:
@@ -244,6 +255,7 @@ class FlowLifecycle:
         approved_verification_digest: str,
         attempt_id: str,
     ) -> Document:
+        _require_verification_profile(plan)
         self._check(plan, plan.digest)
         claim = await self.store.claim(plan.digest, attempt_id)
         try:

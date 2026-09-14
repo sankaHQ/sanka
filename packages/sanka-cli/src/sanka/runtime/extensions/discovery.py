@@ -455,7 +455,8 @@ def _flow_capabilities(value: Any, code: str, path: Path) -> tuple[FlowCapabilit
                 r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)?", flow_type
             )
             is None
-            or item["output_schema"] not in ("sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2")
+            or item["output_schema"]
+            not in ("sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2", "sanka-flow-blueprint/v3")
             or not isinstance(item["references"], list)
             or not isinstance(item["values"], list)
         ):

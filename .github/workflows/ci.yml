@@ -27,6 +27,7 @@ jobs:
       - run: uv sync --frozen --all-packages --all-extras
       - run: make check
       - run: make build-release
+      - run: make flow-wheel-acceptance
       - run: make quickstart-acceptance
       - run: make extension-acceptance
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

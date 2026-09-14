@@ -17,6 +17,17 @@ The SDK snapshot and marketplace snapshot have different responsibilities and
 need not have matching versions. Do not upgrade the embedded SDK by manually
 installing a separate SDK into the isolated CLI environment.
 
+The source tree now embeds SDK `0.1.0a5` from published Extensions commit
+`878b416898dd5c19b61b818a34b9a12443ebdc31`. CLI 0.2.13 is the candidate for this
+adoption, not a change to the published 0.2.12 combination above. Its conformance tests retain
+the original a4 v1/v2 generator wheels and add a5 native v3 generation. Native
+v3 verification and activation remain unavailable.
+
+The separate `sanka/business-flows` 0.1.0a1 candidate requires CLI 0.2.13. Its
+real-wheel acceptance covers HubSpot order/billing definition generation and
+inactive planning. It does not install a native provider adapter or migrate
+existing Studio workflows. The default Data/Code marketplace remains unchanged.
+
 The CLI rejects unsupported protocols, invalid locks and mismatched artifact
 identities. A version number alone does not prove compatibility. Keep project
 locks unchanged during ordinary CLI upgrades, and explicitly adopt an extension

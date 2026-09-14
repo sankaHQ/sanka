@@ -151,7 +151,7 @@ release steps.
 `sanka.runtime.flow.extension.FlowExtensionRunner` provides the generator loading
 boundary. A `kind="flow"` manifest lives in the existing marketplace and exposes
 only `blueprint` over `sanka-flow-extension/v1`. It declares a selector, exact
-template ID/revision/digest, Blueprint v1 or v2 output, reference roles and scalar
+template ID/revision/digest, Blueprint v1/v2/v3 output, reference roles and scalar
 value types. Discovery reads this static declaration without importing a provider.
 Data/Code listing payloads and their protocol meanings remain unchanged.
 
@@ -170,9 +170,10 @@ the full Blueprint, mandatory scenario assertions and independently supplied tar
 capabilities. Hosts must derive capabilities from their native adapter and recheck
 the target before mutation; the extension cannot grant itself a capability.
 
-The 0.2.12 candidate embeds the published SDK a4 from Extensions commit
-`b52bf22f60b2a3704bf0414d609c3e3f767bcd41`, verified byte-for-byte by the provenance
-guard. Its default marketplace is the immutable `extensions-v0.1.0a22` snapshot
+This source tree embeds published SDK a5 from Extensions commit
+`878b416898dd5c19b61b818a34b9a12443ebdc31`, verified byte-for-byte by the provenance
+guard. SDK publication is `sdk-v0.1.0a5`; CLI publication is a separate release.
+The default marketplace remains the immutable `extensions-v0.1.0a22` snapshot
 at `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`;
 existing project locks retain their selected artifacts. A host may also supply
 `FlowCodec` from its separately installed canonical SDK. The codec is trusted host
@@ -182,17 +183,41 @@ with `SANKA_FLOW_SDK_REQUIRED` before starting extension code.
 Boundary tests cover installed fixture wheels, deadline enforcement, environment
 mutation, response tampering, and missing host SDK. The explicit wheel conformance
 test covers both the embedded SDK and the standalone published SDK host paths,
-with the published SDK wheels installed in the generator environment:
+with the published SDK wheels installed in the generator environment. After
+`make build-release`, run the same target used by CI:
 
 ```bash
-uv run python -m pytest packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
-  --extension-release /absolute/path/to/published/sdk/wheels \
-  --cli-wheel dist/sanka_cli-0.2.12-py3-none-any.whl
+make flow-wheel-acceptance
 ```
 
-The synthetic v1/v2 fixtures validate artifact generation, not native business
-execution. This command requires the published a4 SDK and a12 compatibility wheels and is
+The synthetic v1/v2/v3 fixtures validate artifact generation, not native business
+execution. This command downloads the published a4 and a5 SDK wheels and the a12
+compatibility wheel and verifies their exact size and SHA-256 before testing.
+V1/v2 generators still install a4, proving that the new
+embedded SDK continues to accept their original protocol. V3 generators install
+a5; both embedded and standalone hosts reject substituted executable settings
+even when a generator preserves the echoed request metadata. The command is
 separate from `make check`, like the existing Code wheel acceptance suite. Run it
 when changing this boundary or adopting the SDK. Native Workflows compilation,
 durable Estimate identity, Save/reload preservation and native scenario verification
 remain the next adapter slice. No separate installation/history UI is introduced.
+
+## Native profile admission preparation
+
+The manifest reader and embedded SDK recognize Blueprint v3. The host SDK parses
+and validates its typed native profile before any generator process starts. The
+embedded source was synchronized only after SDK a5 publication and public wheel
+hash/install verification. Older hosts reject v3. This source change does not
+publish a CLI or upgrade the hosted API.
+
+The structural planner and inactive-construction machinery remain reusable by a
+host supplying a validated v3 artifact and independently checked capabilities.
+The current native adapter and scenario comparator do not support scheduled order
+imports or batch billing. `verify` and `activate` explicitly reject v3 and unknown
+Blueprint versions before acquiring a claim or invoking the host. In particular,
+legacy verification receipts cannot activate a new profile. There is no fallback
+that interprets a batch import as a single record-created scenario.
+
+This supports verified artifact generation and planning. A runnable business
+extension, hosted adapter and native scenario verification still require separate
+implementation. Existing portable v1/v2 behavior remains covered.

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("version", ["v1", "v2", "v3"])
 @pytest.mark.parametrize("host_sdk", ["embedded", "standalone"])
 @pytest.mark.parametrize(
     "mode", ["success", "missing-identity", "template-tamper", "schema-tamper"]
@@ -35,8 +35,9 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
     assert cli.is_file() if selected else cli.is_dir()
     imports = [str(cli), str(tests)]
     if host_sdk == "standalone":
+        sdk_version = "0.1.0a5" if version == "v3" else "0.1.0a4"
         imports[:0] = [
-            str(extension_release / "sanka_extension_sdk-0.1.0a4-py3-none-any.whl"),
+            str(extension_release / f"sanka_extension_sdk-{sdk_version}-py3-none-any.whl"),
             str(extension_release / "sanka_connector_sdk-0.1.0a12-py3-none-any.whl"),
         ]
     result = subprocess.run(
@@ -63,3 +64,15 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("host_sdk", ["embedded", "standalone"])
+def test_native_generator_cannot_substitute_endpoint_with_unchanged_request_metadata(
+    extension_release: Path,
+    tmp_path: Path,
+    host_sdk: str,
+    request: pytest.FixtureRequest,
+) -> None:
+    test_canonical_sdk_accepts_only_exact_supported_generation(
+        extension_release, tmp_path, "v3", "configuration-tamper", host_sdk, request
+    )
