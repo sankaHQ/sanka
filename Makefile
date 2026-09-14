@@ -45,3 +45,9 @@ build-release:
 # Run after build-release; install its wheel, without any development imports.
 quickstart-acceptance:
 	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.11 --report quickstart-acceptance.json
+
+# Independent third-party contract and upgrade check; no source imports.
+CLI_WHEEL ?= dist/sanka_cli-*-py3-none-any.whl
+.PHONY: extension-acceptance
+extension-acceptance:
+	$(UV) run --no-project --python 3.12 python scripts/check_extension_compatibility.py --cli-wheel $(CLI_WHEEL) --report extension-acceptance.json
