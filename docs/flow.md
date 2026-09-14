@@ -196,3 +196,24 @@ separate from `make check`, like the existing Code wheel acceptance suite. Run i
 when changing this boundary or adopting the SDK. Native Workflows compilation,
 durable Estimate identity, Save/reload preservation and native scenario verification
 remain the next adapter slice. No separate installation/history UI is introduced.
+
+## Native profile admission preparation
+
+The manifest reader now recognizes candidate Blueprint v3. The installed host
+SDK must still parse and validate its typed native profile before any generator
+process starts. This change does not synchronize or advance the embedded SDK;
+an older SDK rejects v3. Publish the canonical SDK first, then synchronize it
+from that immutable published source and validate the released consumer.
+
+The structural planner and inactive-construction machinery remain reusable by a
+host supplying a validated v3 artifact and independently checked capabilities.
+The current native adapter and scenario comparator do not support scheduled order
+imports or batch billing. `verify` and `activate` explicitly reject v3 and unknown
+Blueprint versions before acquiring a claim or invoking the host. In particular,
+legacy verification receipts cannot activate a new profile. There is no fallback
+that interprets a batch import as a single record-created scenario.
+
+This is admission preparation, not a runnable business extension, a hosted
+Studio migration, native execution evidence or a package release. The extension
+package, version pin, hosted adapter and native scenario verification follow in
+that dependency order. Existing portable v1/v2 behavior remains covered.
