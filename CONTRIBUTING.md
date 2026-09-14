@@ -3,6 +3,43 @@
 Thanks for your interest! Please keep changes focused, include tests where
 behavior changes, and follow the repository's license boundaries.
 
+## Start with an issue
+
+1. Search the [issues](https://github.com/sankaHQ/sanka/issues) and open PRs.
+   Reuse an existing issue when it describes the same problem.
+2. Open an issue before submitting a PR. Describe the problem, expected behavior,
+   proposed scope and how the change can be checked. For bugs, include the Sanka
+   version or commit, environment and a minimal reproduction with secrets removed.
+3. For new features, dependencies, public interfaces or changes to migration
+   behavior, compatibility or isolation, wait for a maintainer to agree on the
+   approach before implementing. Small documentation fixes still need a linked
+   issue but do not need advance scope approval.
+4. Fork the repository, create a focused branch and open a PR against `main`.
+   Include `Closes #123` in the PR description when it resolves the issue, or
+   `Refs #123` when it addresses only part of it.
+
+Maintainers triage issues before substantive PR review. PRs without a linked
+issue may be returned for an issue first. Scope agreement does not guarantee
+acceptance. Draft PRs are welcome for feedback after triage.
+
+## Review and acceptance
+
+Keep one problem per PR. Explain the resulting behavior, list the checks run and
+update documentation when a public contract changes. Include a regression test
+for behavior fixes, preserve compatibility, and explain checks that were not run.
+Passing CI alone does not guarantee acceptance; maintainers review correctness,
+migration safety, compatibility and maintenance cost before approving a merge.
+
+AI-assisted contributions follow the same process. Contributors are responsible
+for understanding and validating their changes. External contributors use normal
+forks and PRs; Sanka's internal bot workflow does not require them to obtain
+internal credentials.
+
+Never include customer data, credentials or private hosted implementations in
+issues, PRs or test fixtures. Do not disclose exploitable security details in a
+public issue; use private vulnerability reporting when available on the Security
+tab, or request a private reporting channel without including sensitive details.
+
 ## 1. Licensing contributions
 
 No Contributor License Agreement is required. A contribution is licensed under
