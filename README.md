@@ -1,35 +1,65 @@
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/sankaHQ/sanka/main/docs/assets/sanka-logo.png" alt="Sanka" width="120" height="120">
+
 # Sanka
 
 The open source runtime to migrate DRF to FastAPI (and more to come): scan the
 source, review an immutable plan, apply that exact plan, and verify the result.
-Everything you need for your next migration project, behind one `sanka`
-executable: the hosted command dispatcher, local migration engine, extension
-manager, and extension host.
+One `sanka` executable covers everything you need for migration projects - Open source and available as a [hosted service](https://sanka.com/developer/). Python 3.12 or newer is required.
 
-Sanka handles data migrations, including schemas, relationships and attachments.
-Sanka Flow handles workflow migrations: automations, triggers, actions and conditions.
-Sanka Code handles code migrations, including application code, SQL dialects, ORM
-and dbt transformations. This repository owns their shared CLI
-and OSS runtime; repository and executable names do not define product boundaries.
+[![PyPI](https://img.shields.io/pypi/v/sanka-cli)](https://pypi.org/project/sanka-cli/)
+[![Python](https://img.shields.io/pypi/pyversions/sanka-cli)](https://pypi.org/project/sanka-cli/)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20AND%20AGPL--3.0-blue)](LICENSE)
+[![Benchmarks](https://img.shields.io/badge/benchmarks-sanka.com%2Fbench-ff5a1f)](https://sanka.com/bench)
 
-Extensions are installable capability packages. Data endpoints are the configured
-databases, files or SaaS accounts used in a migration. Moving PostgreSQL records belongs to
-Sanka; adapting an application's SQL/ORM belongs to Sanka Code. A project may need
-both. Installing an extension never implies successful endpoint authentication.
-See [the naming contract](docs/public-naming.md) and [compatibility map](docs/naming-compatibility.md).
+</div>
 
-The shared Extension SDK includes `sanka_extensions.data`,
-`sanka_extensions.flow` and `sanka_extensions.code`. The runtime embeds
-published SDK a4 with Blueprint v1/v2 and a typed Flow generator protocol. The
-shared runtime can load an explicitly installed Flow generator in an isolated
-process and validate its output. Native Workflows compilation and runnable business
-templates remain separate; see [Flow runtime ownership](docs/flow.md).
+---
 
-Python 3.12 or newer is required.
-
-For optional hosted repository execution with a credit limit, see
+For the hosted repository execution with a credit limit, see
 [Cloud Runs](docs/cloud-runs.md). The `sanka cloud` commands use the workspace's
 developer API token; the hosted service must be enabled separately.
+
+## Why Sanka?
+
+- **The migration actually finishes**: `verify` reconciles the generated result against the source — an exit code alone is never treated as completion evidence
+- **Review once, apply exactly that**: `apply` requires the exact reviewed plan hash, so nothing drifts between what you approved and what ran
+- **Measurably better than the model alone**: +11 points aggregate across eight frontier models on 17 matched migrations — the weaker the model, the bigger the gain ([see benchmarks](#benchmarks))
+- **Local by default**: `scan`, `plan`, `apply`, `test` and `verify` never require a Sanka token
+- **Verified extensions, isolated execution**: every wheel is checked against its manifest, URL, SHA-256 digest and runtime constraint, then run in an isolated child environment — PyPI is not a fallback
+- **Built for agents**: add `--json` to any command for one machine-readable `sanka-cli/v1` document — no scraping human output
+- **Open source**: Apache-2.0 tooling around an AGPL-3.0 migration engine
+
+## Benchmarks
+
+Every model gets better at migrations with Sanka, and the models that need the
+most help gain the most. Same 17 migrations, same prompts, isolated workspaces —
+the only difference is the CLI.
+
+| Model | Model only | + Sanka CLI | Δ |
+| --- | --- | --- | --- |
+| GPT-6 Astra (high) | 16/17 · 94.1% | **17/17 · 100.0%** | +5.9 |
+| Claude Opus 5 (high) | 17/17 · 100.0% | 17/17 · 100.0% | — |
+| Claude Sonnet 5 (high) | 12/17 · 70.6% | **16/17 · 94.1%** | +23.5 |
+| GPT-5.6 Terra (high) | 12/17 · 70.6% | **15/17 · 88.2%** | +17.6 |
+| GPT-5.6 Sol (high) | 15/17 · 88.2% | 15/17 · 88.2% | — |
+| GLM 5.3 Flash (high) | 11/17 · 64.7% | **14/17 · 82.4%** | +17.6 |
+| GPT-5.6 Luna (high) | 13/17 · 76.5% | 13/17 · 76.5% | — |
+| DeepSeek V4 Flash (high) | 5/17 · 29.4% | **9/17 · 52.9%** | +23.5 |
+| **Aggregate** | **101/136 · 74.3%** | **116/136 · 85.3%** | **+11.0** |
+
+The suite is 17 migrations — 11 Django REST Framework to FastAPI and 6 to Flask —
+run at high reasoning effort. A pass requires all eight grading gates. These are
+synthetic repository fixtures, not production migrations. Measured on
+`sanka-cli` 0.2.7 with extensions 0.1.0a16; the latest set substitutes the eight
+CLI upload-task reruns, so it is not a fresh full-suite pass@1 run.
+
+Full leaderboard, per-task results, cost and token efficiency, and the raw JSON:
+**[sanka.com/bench](https://sanka.com/bench)**. The evaluator, tasks and baselines
+are open source at [sankaHQ/bench](https://github.com/sankaHQ/bench).
+
+---
 
 ## Install
 
@@ -57,20 +87,7 @@ Bare `pip` can select an older system interpreter and report “No matching dist
 The installer first ships with CLI 0.2.11. See [installation and recovery](docs/install.md)
 for Homebrew upgrades, PATH conflicts, and project environments.
 
-Install Sanka's AI skill into Claude Code or Codex. Without `--scope`, the CLI
-prompts for a project or global installation; automation should pass the scope
-explicitly. Omitting the harness installs into every detected supported CLI.
-
-```bash
-sanka skill install claude
-sanka skill install codex --scope project
-sanka skill install --scope global
-```
-
-Project skills go under `.claude/skills/` or `.codex/skills/`. Global installs
-respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, falling back to `~/.claude` and
-`~/.codex`. Repeated installs are idempotent; use `--force` only to replace a
-different installed `SKILL.md`.
+## Extensions
 
 The base installation contains no provider or framework implementation.
 Official extensions are immutable GitHub release wheels described by the
@@ -81,8 +98,6 @@ migration:
 ```bash
 sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name sanka
 sanka extension add sanka/drf-to-fastapi
-sanka extension add sanka/markdown
-sanka extension add sanka/sqlite
 ```
 
 Sanka verifies each manifest, URL, SHA-256 digest, runtime constraint, and
@@ -100,7 +115,7 @@ snapshots and verified artifacts live under `~/.sanka/extensions` or
 
 ## Local lifecycle
 
-Application migrations use the same five commands:
+A migration runs in five steps:
 
 ```bash
 cd my-django-app
@@ -116,32 +131,10 @@ reviewed plan hash. `verify` reconciles the generated or transferred result;
 an exit code alone is not completion evidence. Add `--json` for one
 `sanka-cli/v1` machine-readable document.
 
-Data migrations use the default `sanka.yaml` specification:
-
-```yaml
-source:
-  type: postgres
-  connection: $POSTGRES_URL
-target:
-  type: clickhouse
-  connection: $CLICKHOUSE_URL
-```
-
-```bash
-sanka extension add sanka/postgres
-sanka extension add sanka/clickhouse
-sanka plan
-sanka apply --plan-hash sha256:<hash-from-plan>
-sanka verify
-sanka status
-```
-
-Specifications keep secrets as environment references. Literal
-password-bearing connection URLs and secret-looking option values are
-rejected, and the plan hash is computed over the unresolved specification.
-
-See the [DRF to FastAPI guide](docs/django-to-fastapi.md) for the supported
-native and compatibility envelopes.
+New to the CLI? Start with the
+[quickstart](https://sanka.com/docs/developers/quickstart/cli/). See the
+[DRF to FastAPI guide](docs/django-to-fastapi.md) for the supported native and
+compatibility envelopes.
 
 ## Local and hosted commands
 
@@ -162,62 +155,12 @@ clients. They invoke `sanka <command> ... --json`; they do not install the CLI,
 reimplement migration behavior, or silently switch local commands to the
 hosted API.
 
-## Extensions and data endpoints
+## SDKs
 
-The official component IDs are:
+Drive the same lifecycle from your own code:
 
-| ID | Kind | Role |
-|---|---|---|
-| `sanka/drf-to-fastapi` | Code | DRF application to FastAPI |
-| `sanka/drf-to-flask` | Code | DRF application to Flask |
-| `sanka/markdown` | Data | source |
-| `sanka/csv` | Data | source |
-| `sanka/sqlite` | Data | source and destination |
-| `sanka/postgres` | Data | source and destination |
-| `sanka/clickhouse` | Data | destination |
-
-Code extensions run through `sanka-extension/v1`. Extension wheels keep
-the typed `sanka.connectors` interface but load only inside a verified child
-environment; the main CLI process talks to one persistent host over
-`sanka-connector/v1`. Hosted providers such as HubSpot, Salesforce, and
-SendGrid remain in Sanka's managed service and are not local extensions.
-
-Custom functions use `sanka functions init|push|pull|diff|deploy|rollback`.
-The old `sanka code` group remains a compatibility alias with its existing behavior;
-Sanka Code application migrations use `scan`, `plan`, `apply`, `test`, and `verify`.
-
-The global `--base-url` override applies to anonymous research and assessment too:
-`sanka --base-url https://staging.example research eol --json`. It takes precedence
-over `SANKA_MIGRATE_API_BASE`; the global option accepts an API origin/path prefix,
-while that compatibility environment variable names the full migration-service URL.
-
-## Python API
-
-The unified wheel also exposes the local facade:
-
-```python
-import asyncio
-
-from sanka import Sanka
-
-
-async def main() -> None:
-    with Sanka() as sanka:
-        source = sanka.configure_endpoint("markdown", "./content")
-        target = sanka.configure_endpoint("sqlite", "content.db")
-        migration = sanka.migrate(source=source, target=target)
-        plan = await migration.plan()
-        await migration.apply(plan_hash=plan.plan_hash)
-        report = await migration.verify()
-
-    assert report.ok
-
-
-asyncio.run(main())
-```
-
-`Sanka.configure_endpoint` is write-free; `Sanka.connect` remains a compatibility alias. `Sanka.migrate` creates or resumes a lifecycle
-handle; destination writes remain behind `apply`.
+- **Python** — `pip install sanka-sdk` · [SDK reference](https://sanka.com/docs/developers/sdk-python/) · [quickstart](https://sanka.com/docs/developers/quickstart/python/)
+- **Node.js** — `npm install sanka-sdk` · [SDK reference](https://sanka.com/docs/developers/sdk-node/) · [quickstart](https://sanka.com/docs/developers/quickstart/nodejs/)
 
 ## Licensing
 
