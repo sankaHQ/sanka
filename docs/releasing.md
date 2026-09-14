@@ -38,6 +38,9 @@ explicitly updates the extension and repeats scan/plan checks. No development
 imports, private marketplace overrides or source dependencies in the CLI can
 mask the installation problem. The report records package identity, extension
 lock, scan/plan hashes and any failure in `quickstart-acceptance.json`.
+When both CLI versions select the same extension, explicit installation must
+preserve its lock byte-for-byte. Fresh and upgraded installations must resolve
+the same exact extension artifacts; an extension version change is not required.
 
 Run Flow wheel acceptance against the built CLI artifact. The maintained helper
 downloads the a4 and a5 SDK wheels and the a12 compatibility wheel and verifies
