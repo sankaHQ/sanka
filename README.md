@@ -272,3 +272,10 @@ make build-release
 the immutable `extensions` commit recorded in `scripts/check_connector_sdk_sync.py`.
 The check validates both the canonical facade and compatibility implementation;
 `--upstream-repo` can point to an existing clone containing the pinned commit.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR. Open or reuse an
+issue first, agree on the scope of substantial changes with a maintainer, then
+link your PR to that issue. The guide also explains development checks and the
+repository's license boundaries.
