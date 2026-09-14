@@ -116,3 +116,37 @@ JSON uses `sanka-doctor/v1`. Errors (unsupported runtime or unexpected version)
 exit 1. PATH warnings exit 0 and remain explicit in `status` and `checks`. A child
 process cannot inspect the parent shell's command cache or aliases; the report
 states this limitation and supplies shell refresh commands.
+
+### The upgraded CLI still has an old version or no doctor command
+
+Installing or upgrading with uv changes uv's copy, not a separate Homebrew copy.
+Your shell profile can put that older executable first even after uv succeeds.
+Compare the command selected by your shell with uv's installed command:
+
+```bash
+command -v sanka
+sanka --version
+"$(uv tool dir --bin)/sanka" --version
+"$(uv tool dir --bin)/sanka" doctor
+```
+
+If you intend to use uv, select its executable directory before other copies:
+
+```bash
+export PATH="$(uv tool dir --bin):$PATH"
+rehash  # zsh; use hash -r in bash
+sanka --version
+sanka doctor
+```
+
+For new terminals, keep the same PATH order after other PATH changes in your
+shell profile. In zsh, `.zshrc` is read after `.zshenv`, so an earlier setting
+alone may be overridden. If `sanka` is an alias or function, inspect it with
+`type sanka` and update that definition too; doctor cannot inspect its parent
+shell's aliases or cached commands.
+
+A duplicate-installation warning means doctor selected the current CLI but found
+another copy on PATH. If you keep uv, remove the redundant Homebrew formula
+through `brew uninstall sanka`, then clear the shell cache and run doctor again.
+Do not delete package-manager files manually. Keeping both copies is supported,
+but each must be upgraded through its own package manager.
