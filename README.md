@@ -1,10 +1,10 @@
 # Sanka
 
-Sanka is a migration runtime with a finish line: inspect the source, review an
-immutable plan, apply that exact plan, and verify the result. The
-`sanka-cli` distribution contains the hosted command dispatcher, local
-migration engine, extension manager, and extension host behind one `sanka`
-executable. MCP clients connect to the separate hosted Sanka MCP service.
+The open source runtime to migrate DRF to FastAPI (and more to come): scan the
+source, review an immutable plan, apply that exact plan, and verify the result.
+Everything you need for your next migration project, behind one `sanka`
+executable: the hosted command dispatcher, local migration engine, extension
+manager, and extension host.
 
 Sanka handles data migrations, including schemas, relationships and attachments.
 Sanka Flow handles workflow migrations: automations, triggers, actions and conditions.
@@ -56,9 +56,6 @@ Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
 Bare `pip` can select an older system interpreter and report “No matching distribution found.”
 The installer first ships with CLI 0.2.11. See [installation and recovery](docs/install.md)
 for Homebrew upgrades, PATH conflicts, and project environments.
-
-For AI agents using MCP, connect to the hosted Sanka MCP server at
-`https://mcp.sanka.com/mcp`. No local MCP package is required.
 
 Install Sanka's AI skill into Claude Code or Codex. Without `--scope`, the CLI
 prompts for a project or global installation; automation should pass the scope
@@ -221,27 +218,6 @@ asyncio.run(main())
 
 `Sanka.configure_endpoint` is write-free; `Sanka.connect` remains a compatibility alias. `Sanka.migrate` creates or resumes a lifecycle
 handle; destination writes remain behind `apply`.
-
-## Hosted MCP
-
-Configure an MCP client with the hosted server:
-
-```json
-{
-  "mcpServers": {
-    "sanka": { "url": "https://mcp.sanka.com/mcp" }
-  }
-}
-```
-
-Connect your Sanka account when prompted. Hosted operations follow their
-normal permissions and usage pricing.
-
-The local research MCP server and the `mcp` installation extra were removed
-in `sanka-cli` 0.2.9. Replace any `command: "sanka", args: ["mcp"]`
-configuration with the hosted URL above. The old command exits with a
-retirement message; it does not start a server or make a network request.
-Local migration commands and SDK adapters continue to use the CLI.
 
 ## Licensing
 
