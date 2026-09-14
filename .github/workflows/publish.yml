@@ -118,6 +118,8 @@ jobs:
         with:
           name: sanka-cli-${{ github.ref_name }}
           path: release/
+      - name: Install interactive shell acceptance dependency
+        run: sudo apt-get update && sudo apt-get install -y zsh
       - name: Test public package installation without system Python
         run: python3 scripts/smoke_installer.py --version "${GITHUB_REF_NAME#v}" --upgrade-from 0.2.9 --report installer-smoke.json
       - name: Verify the public PyPI quickstart
