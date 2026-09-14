@@ -2,38 +2,29 @@
 
 ## Candidate and published prerequisites
 
-The 0.2.12 instructions below describe the previous release preparation. The
-source tree has since adopted published SDK a5 from Extensions commit
-`878b416898dd5c19b61b818a34b9a12443ebdc31`. Before publishing these source changes,
-prepare and review a new CLI version and its publication workflow; do not reuse
-0.2.12 or alter the compatibility table for that already published release.
+The release candidate is `sanka-cli==0.2.13`. It embeds published Extension SDK
+`0.1.0a5` from `878b416898dd5c19b61b818a34b9a12443ebdc31` and supports isolated
+native Blueprint v3 generation and shared inactive construction planning. Native
+v3 verification and activation remain unavailable; this release does not provide
+a hosted HubSpot adapter or execute a business workflow.
 
-The release candidate is `sanka-cli==0.2.12`. Its default marketplace requires
-`extensions-v0.1.0a22` at `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`, including
-DRF-to-FastAPI 0.1.0a10. That extension discovers the source project's Python
-environment when Sanka runs in an isolated tool environment and preserves modern
-DRF bigint field behavior. Require successful
-converter regression at that exact Extensions commit and verify the published
-tag and wheel hashes before advancing the CLI marketplace pin.
+The default Data/Code marketplace stays at `extensions-v0.1.0a22`, source
+`37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`. Existing project locks, published SDK
+wheels and CLI 0.2.12 remain unchanged. The business-flow candidate is distributed
+separately; publishing the CLI does not install or activate it for users.
 
-That 0.2.12 release embeds SDK 0.1.0a4 from
-`b52bf22f60b2a3704bf0414d609c3e3f767bcd41`; the marketplace revision and SDK source
-revision are independent. Do not republish the SDK or earlier extension wheels.
-It and all earlier releases remain immutable.
-
-The managed installer and doctor shipped in 0.2.11. This candidate adds fresh
-quickstart and upgrade acceptance before and after PyPI publication. Existing
-project locks remain unchanged until the user explicitly updates an extension.
-The release does not add a native Workflows adapter or a runnable official Sales
-extension. Data/Code interfaces and hosted command routes retain their meanings.
-Local MCP remains retired as of 0.2.9.
+Run original a4 v1/v2 and a5 v3 generator conformance against the built CLI. The
+quickstart gate installs the public Code extension and checks fresh setup and
+upgrade from the published 0.2.12 without changing existing project locks. No full
+migration or live provider operation is performed. Local MCP remains retired.
 
 ## Local preparation and review
 
 Use `uv sync --frozen --all-packages`. Run focused tests while editing and review
 source changes before final broad validation. Let the workspace PR helper own
-`make check build-release flow-wheel-acceptance quickstart-acceptance` through the shared local resource
-guard. The final gate checks imports, licensing, immutable SDK provenance, tests
+`make check build-release flow-wheel-acceptance quickstart-acceptance` through the
+shared local resource guard, plus `make business-flow-acceptance` as described
+below. The final gate checks imports, licensing, immutable SDK provenance, tests
 and both package artifacts.
 It stages `SOURCE_COMMIT` and `SHA256SUMS` in `release/` and performs only a dry-run
 upload. It does not publish, tag or push packages.
@@ -41,7 +32,7 @@ upload. It does not publish, tag or push packages.
 Quickstart acceptance installs the built CLI wheel and the public example into
 separate Python 3.12 environments. It installs the official public DRF extension,
 checks source scans with and without activation, and creates a bounded native
-FastAPI plan. It also upgrades an isolated 0.2.11 installation, confirms that
+FastAPI plan. It also upgrades an isolated 0.2.12 installation, confirms that
 upgrading the CLI and refreshing the catalog preserve the project lock, then
 explicitly updates the extension and repeats scan/plan checks. No development
 imports, private marketplace overrides or source dependencies in the CLI can
@@ -60,28 +51,47 @@ This verifies the embedded and standalone SDK paths, all three Blueprint schemas
 capability rejection even when a generator ignores it, template/schema tampering,
 and native endpoint substitution with unchanged echoed request metadata.
 The synthetic generator verifies artifact transport, not native business execution.
+
+Business Flow acceptance installs the actual `sanka/business-flows` package,
+runs its isolated generator, and feeds its result to the shared planner. It checks
+inactive construction, stable configuration, unchanged extension locks, missing
+host capability rejection, wheel tampering, and refusal by CLI 0.2.12. All five
+package release assets have pinned hashes and sizes in `scripts/check_business_flow.py`.
+Before the package is published, local review uses its exact candidate directory:
+
+```bash
+make business-flow-acceptance BUSINESS_FLOW_RELEASE=/absolute/path/to/extensions/release/business-flows
+```
+
+The CLI publication workflow always downloads public assets from
+`business-flows-v0.1.0a1`; it has no local candidate override. Merge and publish
+that reviewed Extensions package before publishing CLI 0.2.13. Ordinary source
+CI does not require this new public release while both PRs are under review.
+These checks prove real package loading and planning, not provider execution.
+
 Also clean-install the candidate, resolve the official public marketplace, install
 Data/Code extensions, exercise a bounded data plan and code scan, and verify that a
 catalog refresh does not rewrite project locks. Do not run a full local migration.
 
 ## Publication
 
-The commands below target the reviewed 0.2.12 candidate. Check that its tag and
+The commands below target the reviewed 0.2.13 candidate. Check that its tag and
 package version do not already exist before publication. Never recreate a tag or
 upload an existing package again.
 
 1. Merge the exact human-approved final head through `sanka-pr-flow`. Do not append
    unreviewed SDK, packaging or version changes after approval.
-2. With user authorization, create and push `v0.2.12` at the reviewed merge. Never
+2. Verify the reviewed `business-flows-v0.1.0a1` assets are public. With user
+   authorization, create and push `v0.2.13` at the reviewed merge. Never
    move an existing release tag or republish an existing package version.
-3. Dispatch `publish.yml` at that tag with confirmation `publish-v0.2.12`.
+3. Dispatch `publish.yml` at that tag with confirmation `publish-v0.2.13`.
 4. The unprivileged build job validates the tag, runs checks, builds the wheel/sdist
    and stages their source identity and hashes. Fresh and upgrade quickstart
    acceptance must pass against the built wheel. The protected `pypi` job downloads
    that exact artifact, verifies the selected SHA and hashes, and publishes through
    job-scoped OIDC. No long-lived PyPI token is used.
 5. Read back the published PyPI version, filenames and hashes. Clean-install
-   `sanka-cli==0.2.12` from PyPI and repeat the package acceptance checks against
+   `sanka-cli==0.2.13` from PyPI and repeat the package acceptance checks against
    public extension wheels. Record what was exercised and its source/artifact IDs.
 
 A successful SDK upload is not a CLI upload, and a successful package test is not
@@ -110,8 +120,8 @@ The public PyPI quickstart must also pass fresh installation and upgrade checks
 before publishing the GitHub installer assets or preparing the Homebrew update:
 
 ```bash
-uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.2.12 \
-  --upgrade-from 0.2.11 --report /tmp/public-quickstart.json
+uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.2.13 \
+  --upgrade-from 0.2.12 --report /tmp/public-quickstart.json
 ```
 
 The workflow stages the reviewed `install.sh`, wheel, source archive, source

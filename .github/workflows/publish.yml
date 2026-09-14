@@ -37,6 +37,10 @@ jobs:
         run: make check
       - name: Build and stage release
         run: make build-release
+      - name: Verify published Flow SDK compatibility
+        run: make flow-wheel-acceptance
+      - name: Verify the published Business Flow package
+        run: make business-flow-acceptance
       - name: Verify the built wheel against the public quickstart
         run: make quickstart-acceptance
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -123,7 +127,7 @@ jobs:
       - name: Test public package installation without system Python
         run: python3 scripts/smoke_installer.py --version "${GITHUB_REF_NAME#v}" --upgrade-from 0.2.9 --report installer-smoke.json
       - name: Verify the public PyPI quickstart
-        run: python3 scripts/smoke_quickstart.py --cli "sanka-cli==${GITHUB_REF_NAME#v}" --upgrade-from 0.2.11 --report quickstart-acceptance.json
+        run: python3 scripts/smoke_quickstart.py --cli "sanka-cli==${GITHUB_REF_NAME#v}" --upgrade-from 0.2.12 --report quickstart-acceptance.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
