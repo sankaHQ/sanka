@@ -1,0 +1,88 @@
+{
+  "schema_version": "sanka-flow-blueprint/v3",
+  "id": "billing",
+  "revision": "1",
+  "origin": {
+    "kind": "template",
+    "identity": {
+      "id": "sanka/hubspot-deal-invoices",
+      "revision": "1",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  "extension": {
+    "id": "sanka/business-flows",
+    "revision": "1",
+    "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "parameters": {},
+  "policies": {
+    "reapply": {
+      "user_changes": "preserve",
+      "conflicts": "require_resolution",
+      "ownership": "installation",
+      "removals": "explicit_plan"
+    },
+    "lifecycle": {
+      "stages": [
+        "construct",
+        "verify",
+        "activate"
+      ],
+      "new_automations": "disabled_until_activation",
+      "activation": "explicit_verified_revision"
+    }
+  },
+  "resources": [
+    {
+      "id": "billing",
+      "kind": "workflow",
+      "spec": {
+        "deal_stage_ids": [
+          "closedwon"
+        ],
+        "id": "billing",
+        "interval_minutes": 30,
+        "invoice_due_days": 30,
+        "mapping": {
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "id": "saved-order-mapping",
+          "revision": "7"
+        },
+        "node_ids": [
+          "billing/schedule",
+          "billing/import-orders",
+          "billing/draft-invoices"
+        ],
+        "pipeline_id": "default",
+        "policies": {
+          "construction": "inactive",
+          "existing_invoice": "preserve",
+          "import_completion": "complete_only",
+          "import_target": "order",
+          "invoice_grouping": "one_per_order",
+          "invoice_source": "imported_orders_only",
+          "invoice_status": "draft"
+        },
+        "schema_version": "sanka-flow-native-order-billing/v1",
+        "source_endpoint_id": "11111111-1111-4111-8111-111111111111",
+        "updated_since": "2026-09-01"
+      },
+      "depends_on": []
+    }
+  ],
+  "references": [],
+  "mappings": [],
+  "scenarios": [],
+  "unsupported": [],
+  "required_capabilities": [
+    "flow.native.complete-import-output/v1",
+    "flow.native.draft-invoices-from-orders/v1",
+    "flow.native.hubspot-deals-to-orders/v1",
+    "flow.native.interval-minutes/v1",
+    "flow.native.preserve-existing-invoices/v1",
+    "flow.resource.workflow/v1",
+    "sanka-flow-blueprint/v3",
+    "sanka-flow-native-order-billing/v1"
+  ]
+}

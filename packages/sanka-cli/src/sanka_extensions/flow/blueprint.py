@@ -38,10 +38,12 @@ from sanka_extensions.flow.identity import (
     reference_index,
     require_reference,
 )
+from sanka_extensions.flow.native import NATIVE_ORDER_BILLING_SCHEMA, NativeOrderBillingWorkflow
 from sanka_extensions.flow.scenario import Scenario
 
 BLUEPRINT_SCHEMA_VERSION = "sanka-flow-blueprint/v1"
 BLUEPRINT_V2_SCHEMA_VERSION = "sanka-flow-blueprint/v2"
+BLUEPRINT_V3_SCHEMA_VERSION = "sanka-flow-blueprint/v3"
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -66,7 +68,11 @@ class Resource(WireRecord):
         if id in depends_on:
             raise ValueError("resource cannot depend on itself")
         if kind == "workflow":
-            graph = WorkflowGraph.from_dict(spec)
+            graph = (
+                NativeOrderBillingWorkflow.from_dict(spec)
+                if type(spec) is dict and spec.get("schema_version") == NATIVE_ORDER_BILLING_SCHEMA
+                else WorkflowGraph.from_dict(spec)
+            )
             if graph.id != id:
                 raise ValueError("workflow graph identity must match its resource identity")
             spec = graph.to_dict()
@@ -189,7 +195,7 @@ class Blueprint(WireRecord):
     ) -> None:
         choice(
             schema_version,
-            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION),
+            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION, BLUEPRINT_V3_SCHEMA_VERSION),
             "Blueprint schema_version",
         )
         identifier(id, "blueprint id")
@@ -244,7 +250,12 @@ class Blueprint(WireRecord):
         for resource in self.resources:
             capabilities.add(f"flow.resource.{resource.kind}/v1")
             if resource.kind == "workflow":
-                capabilities.update(WorkflowGraph.from_dict(resource.spec).required_capabilities)
+                workflow = (
+                    NativeOrderBillingWorkflow.from_dict(resource.spec)
+                    if self.schema_version == BLUEPRINT_V3_SCHEMA_VERSION
+                    else WorkflowGraph.from_dict(resource.spec)
+                )
+                capabilities.update(workflow.required_capabilities)
         return tuple(sorted(capabilities))
 
     def require_supported(self, *, capabilities: frozenset[str] | None = None) -> None:
@@ -253,7 +264,7 @@ class Blueprint(WireRecord):
                 "Blueprint contains unsupported semantics: "
                 + ", ".join(f.code for f in self.unsupported)
             )
-        if self.schema_version == BLUEPRINT_V2_SCHEMA_VERSION or capabilities is not None:
+        if self.schema_version != BLUEPRINT_SCHEMA_VERSION or capabilities is not None:
             missing = set(self.required_capabilities) - (capabilities or frozenset())
             if missing:
                 raise ValueError(
@@ -262,6 +273,19 @@ class Blueprint(WireRecord):
 
     def _validate(self) -> None:
         _dependencies(self.resources)
+        if self.schema_version == BLUEPRINT_V3_SCHEMA_VERSION:
+            if (
+                len(self.resources) != 1
+                or self.resources[0].kind != "workflow"
+                or self.resources[0].depends_on
+            ):
+                raise ValueError("native v3 requires exactly one independent workflow")
+            if self.origin.kind != "template":
+                raise ValueError("native v3 supports explicit template generation only")
+            if self.references or self.mappings or self.scenarios:
+                raise ValueError("native v3 has no portable graph references or scenario evidence")
+            NativeOrderBillingWorkflow.from_dict(self.resources[0].spec)
+            return
         references = reference_index(self.references)
         resources = {resource.id: resource for resource in self.resources}
         for reference in self.references:
@@ -426,7 +450,7 @@ class Blueprint(WireRecord):
             "scenarios": [scenario.to_dict() for scenario in self.scenarios],
             "unsupported": [finding.to_dict() for finding in self.unsupported],
         }
-        if self.schema_version == BLUEPRINT_V2_SCHEMA_VERSION:
+        if self.schema_version != BLUEPRINT_SCHEMA_VERSION:
             result["required_capabilities"] = list(self.required_capabilities)
         return result
 
@@ -437,7 +461,7 @@ class Blueprint(WireRecord):
         version = value.get("schema_version") if type(value) is dict else None
         choice(
             version,
-            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION),
+            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION, BLUEPRINT_V3_SCHEMA_VERSION),
             "Blueprint schema_version",
         )
         payload = object_fields(
@@ -456,7 +480,7 @@ class Blueprint(WireRecord):
                 "scenarios",
                 "unsupported",
             }
-            | ({"required_capabilities"} if version == BLUEPRINT_V2_SCHEMA_VERSION else set()),
+            | ({"required_capabilities"} if version != BLUEPRINT_SCHEMA_VERSION else set()),
             "Blueprint",
         )
         if payload["policies"] != _policies():
@@ -476,7 +500,7 @@ class Blueprint(WireRecord):
             scenarios=array(payload["scenarios"], Scenario.from_dict, "scenarios"),
             unsupported=array(payload["unsupported"], UnsupportedFinding.from_dict, "unsupported"),
         )
-        if version == BLUEPRINT_V2_SCHEMA_VERSION and payload["required_capabilities"] != list(
+        if version != BLUEPRINT_SCHEMA_VERSION and payload["required_capabilities"] != list(
             result.required_capabilities
         ):
             raise ValueError("required_capabilities must exactly describe the Blueprint semantics")

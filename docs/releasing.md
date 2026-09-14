@@ -2,6 +2,12 @@
 
 ## Candidate and published prerequisites
 
+The 0.2.12 instructions below describe the previous release preparation. The
+source tree has since adopted published SDK a5 from Extensions commit
+`878b416898dd5c19b61b818a34b9a12443ebdc31`. Before publishing these source changes,
+prepare and review a new CLI version and its publication workflow; do not reuse
+0.2.12 or alter the compatibility table for that already published release.
+
 The release candidate is `sanka-cli==0.2.12`. Its default marketplace requires
 `extensions-v0.1.0a22` at `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`, including
 DRF-to-FastAPI 0.1.0a10. That extension discovers the source project's Python
@@ -10,10 +16,10 @@ DRF bigint field behavior. Require successful
 converter regression at that exact Extensions commit and verify the published
 tag and wheel hashes before advancing the CLI marketplace pin.
 
-The embedded SDK remains 0.1.0a4 from
+That 0.2.12 release embeds SDK 0.1.0a4 from
 `b52bf22f60b2a3704bf0414d609c3e3f767bcd41`; the marketplace revision and SDK source
 revision are independent. Do not republish the SDK or earlier extension wheels.
-The latest published CLI is 0.2.11. It and all earlier releases remain immutable.
+It and all earlier releases remain immutable.
 
 The managed installer and doctor shipped in 0.2.11. This candidate adds fresh
 quickstart and upgrade acceptance before and after PyPI publication. Existing
@@ -26,7 +32,7 @@ Local MCP remains retired as of 0.2.9.
 
 Use `uv sync --frozen --all-packages`. Run focused tests while editing and review
 source changes before final broad validation. Let the workspace PR helper own
-`make check build-release quickstart-acceptance` through the shared local resource
+`make check build-release flow-wheel-acceptance quickstart-acceptance` through the shared local resource
 guard. The final gate checks imports, licensing, immutable SDK provenance, tests
 and both package artifacts.
 It stages `SOURCE_COMMIT` and `SHA256SUMS` in `release/` and performs only a dry-run
@@ -42,17 +48,17 @@ imports, private marketplace overrides or source dependencies in the CLI can
 mask the installation problem. The report records package identity, extension
 lock, scan/plan hashes and any failure in `quickstart-acceptance.json`.
 
-Download the two published SDK wheels and independently verify their release hashes.
-Run Flow wheel acceptance against the built CLI artifact:
+Run Flow wheel acceptance against the built CLI artifact. The maintained helper
+downloads the a4 and a5 SDK wheels and the a12 compatibility wheel and verifies
+their pinned sizes and hashes before starting the tests:
 
 ```bash
-uv run python -m pytest packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
-  --extension-release /absolute/path/to/published/sdk/wheels \
-  --cli-wheel dist/sanka_cli-0.2.12-py3-none-any.whl
+make flow-wheel-acceptance
 ```
 
-This verifies the embedded and standalone SDK paths, both Blueprint schemas,
-capability rejection even when a generator ignores it, and template/schema tampering.
+This verifies the embedded and standalone SDK paths, all three Blueprint schemas,
+capability rejection even when a generator ignores it, template/schema tampering,
+and native endpoint substitution with unchanged echoed request metadata.
 The synthetic generator verifies artifact transport, not native business execution.
 Also clean-install the candidate, resolve the official public marketplace, install
 Data/Code extensions, exercise a bounded data plan and code scan, and verify that a
