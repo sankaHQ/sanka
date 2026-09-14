@@ -56,10 +56,44 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  extension-compatibility:
+    name: Extension compatibility (${{ matrix.os }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sanka-cli-${{ github.ref_name }}
+          path: release/
+      - name: Verify selected source and exact staged artifact hashes
+        run: |
+          test "$(cat release/SOURCE_COMMIT)" = "$GITHUB_SHA"
+          (cd release && shasum -a 256 --check SHA256SUMS)
+      - name: Test candidate with existing independent extension lock
+        run: make extension-acceptance CLI_WHEEL='release/sanka_cli-*-py3-none-any.whl'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: extension-acceptance-${{ matrix.os }}
+          path: extension-acceptance.json
+          if-no-files-found: error
+
   publish:
     name: Publish exact artifacts to PyPI
     if: inputs.confirmation == format('publish-{0}', github.ref_name)
-    needs: build
+    needs: [build, extension-compatibility]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

@@ -55,3 +55,9 @@ flow-wheel-acceptance:
 # Publication uses public assets; local PR review can supply the exact candidate.
 business-flow-acceptance:
 	$(UV) run python scripts/check_business_flow.py --cli-wheel dist/sanka_cli-*-py3-none-any.whl $(if $(BUSINESS_FLOW_RELEASE),--release-dir "$(BUSINESS_FLOW_RELEASE)")
+
+# Independent third-party contract and upgrade check; no source imports.
+CLI_WHEEL ?= dist/sanka_cli-*-py3-none-any.whl
+.PHONY: extension-acceptance
+extension-acceptance:
+	$(UV) run --no-project --python 3.12 python scripts/check_extension_compatibility.py --cli-wheel $(CLI_WHEEL) --report extension-acceptance.json
