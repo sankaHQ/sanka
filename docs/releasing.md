@@ -170,3 +170,31 @@ first run, then an unusable Python 3.9 command on the second. All runtime and bi
 directories are temporary. CI repeats this on macOS and Linux. After publication,
 repeat against the newly published version and verify the downloaded installer
 asset hash. Windows users use the documented explicit uv installation path.
+
+## Independent extension compatibility gate
+
+After building, run `make extension-acceptance` to test the exact candidate wheel
+against the independently maintained Config upgrade starter. The wrapper pins the
+examples commit and installs its published SDK wheel dependencies; it never imports
+runtime source into the consumer. `CLI_WHEEL=/absolute/path/to/candidate.whl`
+selects an explicitly staged wheel.
+
+The check installs baseline CLI 0.2.12, installs and runs the extension, then
+replaces only the CLI with the candidate. It checks lock bytes immediately after
+installation and after scan/plan, verifies identical extension plan contents and
+checks invalid input and tampered wheel rejection. The fixture admits the explicit
+baseline/candidate pair before baseline installation; no installed lock is repaired.
+Same-version candidates exercise replacement rather than a version increase.
+
+PR CI runs this gate on Linux. Publication downloads the same staged artifacts on
+Linux and macOS, verifies `SOURCE_COMMIT` and `SHA256SUMS`, and requires both jobs
+to pass before the PyPI job can start. Network failure, missing evidence, a wrong
+candidate identity or changed lock blocks publication. No publication is performed
+by the acceptance command itself.
+
+`extension-acceptance.json` records the candidate SHA-256, immutable consumer
+revision, baseline and installed versions, lock hashes and the failing stage when
+applicable. Failure reports are retained by CI. When changing the baseline or
+consumer pin, review and rerun the complete gate; do not weaken checks to force a
+release through. This supplements the official-extension quickstart checks and
+covers this bounded Code consumer, not every Data/Flow extension.

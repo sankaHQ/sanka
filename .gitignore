@@ -12,3 +12,5 @@ build/
 .DS_Store
 .sanka/
 quickstart-acceptance.json
+
+extension-acceptance.json
