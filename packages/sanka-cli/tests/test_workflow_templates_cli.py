@@ -23,7 +23,7 @@ def template_request(tmp_path, monkeypatch):
     config = tmp_path / "billing.json"
     config.write_text(json.dumps({"invoice_due_days": 45}), encoding="utf-8")
     calls = []
-    override = {}
+    override: dict[str, object] = {}
 
     def request(state, method, path, *, json_body):
         calls.append((method, path, json_body))
