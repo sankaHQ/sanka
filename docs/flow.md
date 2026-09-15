@@ -170,9 +170,12 @@ the full Blueprint, mandatory scenario assertions and independently supplied tar
 capabilities. Hosts must derive capabilities from their native adapter and recheck
 the target before mutation; the extension cannot grant itself a capability.
 
-This source tree embeds published SDK a5 from Extensions commit
-`878b416898dd5c19b61b818a34b9a12443ebdc31`, verified byte-for-byte by the provenance
-guard. SDK publication is `sdk-v0.1.0a5`; CLI publication is a separate release.
+This source tree embeds published SDK a7 from Extensions commit
+`78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`, verified byte-for-byte by the provenance
+guard. SDK publication is `sdk-v0.1.0a7`; CLI publication is a separate release.
+The SDK also declares Blueprint v4 verification and v5 business-family contracts.
+This runtime still admits only v1/v2/v3 generators; adopting those newer execution
+profiles requires their separate runtime and hosted adapters.
 The default marketplace remains the immutable `extensions-v0.1.0a22` snapshot
 at `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`;
 existing project locks retain their selected artifacts. A host may also supply
@@ -182,8 +185,8 @@ with `SANKA_FLOW_SDK_REQUIRED` before starting extension code.
 
 Boundary tests cover installed fixture wheels, deadline enforcement, environment
 mutation, response tampering, and missing host SDK. The explicit wheel conformance
-test covers both the embedded SDK and the standalone published SDK host paths,
-with the published SDK wheels installed in the generator environment. After
+test covers the embedded SDK, original standalone SDKs, standalone a7, and a7
+generators, with published SDK wheels installed in the generator environment. After
 `make build-release`, run the same target used by CI:
 
 ```bash

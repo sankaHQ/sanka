@@ -1,19 +1,26 @@
 # Sanka release procedure
 
-## Candidate and published prerequisites
+## Published release and current source
 
-The release candidate is `sanka-cli==0.2.13`. It embeds published Extension SDK
+Published `sanka-cli==0.2.13` embeds Extension SDK
 `0.1.0a5` from `878b416898dd5c19b61b818a34b9a12443ebdc31` and supports isolated
 native Blueprint v3 generation and shared inactive construction planning. Native
 v3 verification and activation remain unavailable; this release does not provide
 a hosted HubSpot adapter or execute a business workflow.
+
+The current source embeds published SDK `0.1.0a7` from
+`78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`. Its new v4/v5 declarations do not
+enable additional runtime execution profiles. A future CLI publication requires
+a new package version and a separately reviewed release change; the 0.2.13
+publication commands below document the existing release and must not be rerun
+for this source upgrade.
 
 The default Data/Code marketplace stays at `extensions-v0.1.0a22`, source
 `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`. Existing project locks, published SDK
 wheels and CLI 0.2.12 remain unchanged. The business-flow candidate is distributed
 separately; publishing the CLI does not install or activate it for users.
 
-Run original a4 v1/v2 and a5 v3 generator conformance against the built CLI. The
+Run original a4 v1/v2, a5 v3 and a7 generator conformance against the built CLI. The
 quickstart gate installs the public Code extension and checks fresh setup and
 upgrade from the published 0.2.12 without changing existing project locks. No full
 migration or live provider operation is performed. Local MCP remains retired.
@@ -43,15 +50,15 @@ preserve its lock byte-for-byte. Fresh and upgraded installations must resolve
 the same exact extension artifacts; an extension version change is not required.
 
 Run Flow wheel acceptance against the built CLI artifact. The maintained helper
-downloads the a4 and a5 SDK wheels and the a12 compatibility wheel and verifies
+downloads the a4, a5 and a7 SDK wheels and the a12 compatibility wheel and verifies
 their pinned sizes and hashes before starting the tests:
 
 ```bash
 make flow-wheel-acceptance
 ```
 
-This verifies the embedded and standalone SDK paths, all three Blueprint schemas,
-capability rejection even when a generator ignores it, template/schema tampering,
+This verifies embedded, original standalone and a7 SDK paths, all three admitted
+Blueprint schemas, capability rejection even when a generator ignores it, template/schema tampering,
 and native endpoint substitution with unchanged echoed request metadata.
 The synthetic generator verifies artifact transport, not native business execution.
 

@@ -26,6 +26,12 @@ SDK_WHEELS = (
         49163,
     ),
     (
+        "sdk-v0.1.0a7",
+        "sanka_extension_sdk-0.1.0a7-py3-none-any.whl",
+        "c9ce9d6d54c6adc6112ca6025a0a776b4984e4e0a4203c9806e13310f0deb22a",
+        68541,
+    ),
+    (
         "sdk-v0.1.0a5",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
         "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e",

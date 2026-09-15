@@ -28,6 +28,8 @@ from sanka_extensions.flow.blueprint import (
     BLUEPRINT_SCHEMA_VERSION,
     BLUEPRINT_V2_SCHEMA_VERSION,
     BLUEPRINT_V3_SCHEMA_VERSION,
+    BLUEPRINT_V4_SCHEMA_VERSION,
+    BLUEPRINT_V5_SCHEMA_VERSION,
     Blueprint,
 )
 from sanka_extensions.flow.definition import (
@@ -38,18 +40,29 @@ from sanka_extensions.flow.definition import (
 )
 from sanka_extensions.flow.identity import ArtifactIdentity, Reference, reference_index
 from sanka_extensions.flow.native import NativeOrderBillingWorkflow
+from sanka_extensions.flow.native_profiles import decode_native_workflow
+from sanka_extensions.flow.native_verification import (
+    NativeBillingScenario,
+    validate_billing_scenarios,
+)
 
 PROTOCOL_VERSION = "sanka-flow-extension/v1"
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 type JsonScalar = str | int | float | bool | None
 type ScalarType = Literal["string", "number", "boolean", "null"]
 type OutputSchema = Literal[
-    "sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2", "sanka-flow-blueprint/v3"
+    "sanka-flow-blueprint/v1",
+    "sanka-flow-blueprint/v2",
+    "sanka-flow-blueprint/v3",
+    "sanka-flow-blueprint/v4",
+    "sanka-flow-blueprint/v5",
 ]
 OUTPUT_SCHEMAS = (
     BLUEPRINT_SCHEMA_VERSION,
     BLUEPRINT_V2_SCHEMA_VERSION,
     BLUEPRINT_V3_SCHEMA_VERSION,
+    BLUEPRINT_V4_SCHEMA_VERSION,
+    BLUEPRINT_V5_SCHEMA_VERSION,
 )
 
 
@@ -295,15 +308,40 @@ class BlueprintRequest(WireRecord):
         for name, value in values.items():
             identifier(name, "selected value name")
             _scalar_type(value)
-        if output_schema == BLUEPRINT_V3_SCHEMA_VERSION:
+        if output_schema == BLUEPRINT_V5_SCHEMA_VERSION:
             if references or values:
-                raise ValueError("native v3 uses only its typed definition configuration")
+                raise ValueError("native recipes use only their typed workflow configuration")
+            selected_recipe = object_fields(
+                definition.parameters, {"native_workflow"}, "native recipe parameters"
+            )
+            native_recipe = decode_native_workflow(selected_recipe["native_workflow"])
+            if isinstance(native_recipe, NativeOrderBillingWorkflow):
+                raise ValueError("order billing retains its v3/v4 contracts")
+        elif output_schema in {BLUEPRINT_V3_SCHEMA_VERSION, BLUEPRINT_V4_SCHEMA_VERSION}:
+            if references or values:
+                raise ValueError("native generation uses only its typed definition configuration")
             selected = object_fields(
-                definition.parameters, {"native_configuration"}, "native definition parameters"
+                definition.parameters,
+                {"native_configuration", "native_verification"}
+                if output_schema == BLUEPRINT_V4_SCHEMA_VERSION
+                else {"native_configuration"},
+                "native definition parameters",
             )
             NativeOrderBillingWorkflow.from_configuration(
                 "selection", selected["native_configuration"]
             )
+            if output_schema == BLUEPRINT_V4_SCHEMA_VERSION:
+                scenarios = array(
+                    selected["native_verification"],
+                    NativeBillingScenario.from_dict,
+                    "native verification",
+                )
+                if not scenarios:
+                    raise ValueError("native verification coverage is required")
+                profile = NativeOrderBillingWorkflow.from_configuration(
+                    scenarios[0].workflow_id, selected["native_configuration"]
+                )
+                validate_billing_scenarios(profile, scenarios)
         for attribute, assigned in (
             ("request_id", request_id),
             ("extension", extension),
@@ -449,7 +487,14 @@ class BlueprintResponse(WireRecord):
             raise ValueError("Flow output changed the requested target references")
         if FrozenJson(self.blueprint.parameters) != FrozenJson(request.blueprint_parameters):
             raise ValueError("Flow output changed the requested target, values or parameters")
-        if request.output_schema == BLUEPRINT_V3_SCHEMA_VERSION:
+        if request.output_schema == BLUEPRINT_V5_SCHEMA_VERSION:
+            selected_recipe = decode_native_workflow(
+                request.definition.parameters["native_workflow"]
+            )
+            generated_recipe = decode_native_workflow(self.blueprint.resources[0].spec)
+            if FrozenJson(generated_recipe.to_dict()) != FrozenJson(selected_recipe.to_dict()):
+                raise ValueError("Native recipe output changed its requested executable workflow")
+        elif request.output_schema in {BLUEPRINT_V3_SCHEMA_VERSION, BLUEPRINT_V4_SCHEMA_VERSION}:
             selected = NativeOrderBillingWorkflow.from_configuration(
                 "selection", request.definition.parameters["native_configuration"]
             )
@@ -458,6 +503,22 @@ class BlueprintResponse(WireRecord):
                 raise ValueError(
                     "Native Flow output changed the requested executable configuration"
                 )
+            if request.output_schema == BLUEPRINT_V4_SCHEMA_VERSION and FrozenJson(
+                [s.to_dict() for s in self.blueprint.scenarios]
+            ) != FrozenJson(
+                [
+                    s.to_dict()
+                    for s in sorted(
+                        array(
+                            request.definition.parameters["native_verification"],
+                            NativeBillingScenario.from_dict,
+                            "native verification",
+                        ),
+                        key=lambda s: s.id,
+                    )
+                ]
+            ):
+                raise ValueError("Native Flow output changed the admitted verification fixtures")
         self.blueprint.require_supported(capabilities=frozenset(request.target.capabilities))
 
     def to_dict(self) -> dict[str, JsonValue]:

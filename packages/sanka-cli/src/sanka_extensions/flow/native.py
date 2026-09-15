@@ -14,7 +14,14 @@ from datetime import date
 from typing import Self
 from uuid import UUID
 
-from sanka_extensions.flow._wire import WireRecord, array, identifier, object_fields, text
+from sanka_extensions.flow._wire import (
+    WireRecord,
+    array,
+    artifact_digest,
+    identifier,
+    object_fields,
+    text,
+)
 from sanka_extensions.flow.definition import JsonValue
 from sanka_extensions.flow.identity import ArtifactIdentity
 
@@ -107,6 +114,10 @@ class NativeOrderBillingWorkflow(WireRecord):
             payload["updated_since"],
             payload["invoice_due_days"],
         )
+
+    @property
+    def configuration_digest(self) -> str:
+        return artifact_digest(self.configuration)
 
     @property
     def node_ids(self) -> tuple[str, str, str]:

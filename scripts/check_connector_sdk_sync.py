@@ -11,8 +11,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-EMBEDDED_SHA256 = "38f871e5c8ff85e4d7cae2c0dd6e3a8105c2a3a0f6aca1880f83eec52168e1ca"
-EXTENSIONS_REVISION = "878b416898dd5c19b61b818a34b9a12443ebdc31"
+EMBEDDED_SHA256 = "a78a734b17cca084045aec67daa7b67b88410b22b33faedfba077ae46a836f6e"
+EXTENSIONS_REVISION = "78dbdc6b6e1b73c1486abb404e8858b2c9756ae8"
 SDK_SOURCES = {
     "sanka_connector": "packages/sanka-connector-sdk/src",
     "sanka_extensions": "packages/sanka-extension-sdk/src",
