@@ -221,3 +221,50 @@ that interprets a batch import as a single record-created scenario.
 This supports verified artifact generation and planning. A runnable business
 extension, hosted adapter and native scenario verification still require separate
 implementation. Existing portable v1/v2 behavior remains covered.
+
+## Create an inactive hosted workflow from a reviewed template
+
+This entrypoint uses the public Flow plan/use API. It requires a host release
+with that capability and a developer credential scoped to the target workspace.
+It does not execute the workflow or activate its schedule.
+
+Save the selected template parameters in `billing.json`:
+
+```json
+{
+  "source_endpoint_id": "YOUR_HUBSPOT_ENDPOINT_UUID",
+  "mapping_template_id": "YOUR_ORDER_IMPORT_MAPPING_UUID",
+  "pipeline_id": "default",
+  "deal_stage_ids": ["closedwon"],
+  "updated_since": "2026-09-01",
+  "interval_minutes": 30,
+  "invoice_due_days": 30
+}
+```
+
+Review the exact host plan:
+
+```bash
+sanka workflows create --template billing.hubspot-deal-invoices \
+  --config billing.json --plan-only
+```
+
+The response includes a `request_id` and `plan_digest`. After reviewing the
+settings, capabilities and blockers, repeat with those exact values:
+
+```bash
+sanka workflows create --template billing.hubspot-deal-invoices \
+  --config billing.json --request-id REQUEST_UUID --approve-plan sha256:PLAN_DIGEST
+```
+
+Without an approval digest, interactive terminals show the plan and ask before
+construction. JSON output and noninteractive invocations return the plan only.
+`--template-version` defaults to version 1. Keep the request UUID, configuration
+and digest unchanged when retrying a lost response. Changed input requires a new
+UUID and a fresh review; an existing workflow is never adopted by name.
+
+The public host resolves endpoint ownership and immutable mapping revisions,
+constructs an inactive native workflow and returns its stable ID. A receipt keeps
+the definition digest committed by that operation; the managed status route
+reports any later native edits. Verification and activation are separate host
+capabilities. Existing `workflows create --data ...` behavior stays compatible.
