@@ -145,7 +145,7 @@ Authentication is selected after command routing:
 | `scan`, `plan`, `validate`, `apply`, `test`, `verify`, `status`, `migrate`, `connect`, `extension` | local runtime or verified extension | never |
 | `plan`, `apply`, or `verify` with an explicit cloud selector | hosted migration API | required |
 | `auth`, resources, workflows, AI, `functions` (custom functions) | hosted Sanka API | required where the command already requires it |
-| research and assessment | public hosted API | not required |
+| assessment | public hosted API | not required |
 
 Missing hosted credentials do not block local help, inspection, planning,
 extension management, testing, or verification.

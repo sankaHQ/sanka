@@ -96,7 +96,7 @@ Custom functions use `sanka functions`; the old `sanka code` group keeps its ori
 function operations as a compatibility alias. Sanka Code migration commands remain
 `scan`, `plan`, `apply`, `test`, and `verify`.
 
-`--base-url` also selects the API origin for anonymous research/assessment. A full
+`--base-url` also selects the API origin for the anonymous assessment. A full
 migration-service URL in `SANKA_MIGRATE_API_BASE` is retained as a fallback.
 
 ## Hosted repository runs

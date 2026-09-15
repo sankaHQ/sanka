@@ -35,7 +35,7 @@ authentication:
 | local lifecycle, `connect`, and `extension` | in-process runtime or verified child component | no Sanka token |
 | explicit cloud migration selectors | hosted migration API | existing hosted token |
 | hosted resources, workflows, AI, `functions` (custom functions) | hosted API | existing command rule |
-| public research and assessment | public API | credential-free |
+| public assessment | public API | credential-free |
 | Hosted MCP at `https://mcp.sanka.com/mcp` | hosted service, separate from the CLI | Connect Sanka account |
 
 Local lifecycle arguments are forwarded directly to the mature parser. The
