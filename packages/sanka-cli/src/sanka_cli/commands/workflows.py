@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
+from uuid import UUID
 
 import click
 
 import sanka_cli.runtime as runtime
+from sanka_cli.commands.workflow_templates import create_from_template
 from sanka_cli.state import CLIState
 
 
@@ -41,9 +44,47 @@ def workflows_get(state: CLIState, workflow_ref: str) -> None:
 
 
 @workflows.command("create")
-@click.option("--data", required=True, help="JSON string or @path/to/file.json")
+@click.option("--data", help="Existing raw workflow JSON string or @path/to/file.json")
+@click.option("--template", "template_id", help="Shared business template ID")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Template parameters as a JSON file",
+)
+@click.option("--template-version", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option("--request-id", type=click.UUID, help="Keep this UUID for plan and create retries")
+@click.option("--approve-plan", help="Exact approved plan digest; requires --request-id")
+@click.option("--plan-only", is_flag=True, help="Review without creating a workflow")
 @click.pass_obj
-def workflows_create(state: CLIState, data: str) -> None:
+def workflows_create(
+    state: CLIState,
+    data: str | None,
+    template_id: str | None,
+    config: Path | None,
+    template_version: int,
+    request_id: UUID | None,
+    approve_plan: str | None,
+    plan_only: bool,
+) -> None:
+    if template_id is not None:
+        if data is not None:
+            raise click.UsageError("Use either --data or --template with --config")
+        if config is None:
+            raise click.UsageError("--template requires --config")
+        create_from_template(
+            state,
+            template_id=template_id,
+            config=config,
+            template_version=template_version,
+            request_id=request_id,
+            approve_plan=approve_plan,
+            plan_only=plan_only,
+        )
+        return
+    if config is not None or request_id is not None or approve_plan is not None or plan_only:
+        raise click.UsageError("Template options require --template")
+    if data is None:
+        raise click.UsageError("Provide --data or --template with --config")
     payload = runtime.request_json(
         state,
         "POST",
