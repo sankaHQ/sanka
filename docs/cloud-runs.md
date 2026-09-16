@@ -220,3 +220,84 @@ this command. Original receipts stay unchanged. For an uncertain create or retry
 response, repeat the identical request with the same idempotency key; a new
 intentional attempt requires a new key. The console provides the same repository
 review, aggregate limits, partial receipts, cancellation and selective retry flow.
+
+
+## Code migrations: Scan → Plan → Apply → Test → Verify
+
+Code stages use the same workspace-scoped operations as Sanka Code. Authenticate
+with `sanka auth login` using a token for the intended workspace. Named-scope tokens
+need `migrate:cloud:read` and `migrate:cloud:write`; existing cloud access and workspace
+permissions still apply. Always pass the eight-digit workspace code explicitly.
+
+```sh
+# Directory (defaults to .); choose fastapi or flask.
+sanka scan --cloud . --workspace 10483816 --to flask \
+  --max-credits 1000 --idempotency-key project-scan-001 --yes --wait
+
+# Inspect the returned preparation run and review its plan/hash.
+sanka plan --cloud --workspace 10483816 --run PREPARE_RUN_ID
+
+# Substitute the exact reviewed plan hash. This starts conversion.
+sanka apply --cloud --workspace 10483816 --run PREPARE_RUN_ID \
+  --plan-hash PLAN_SHA256 --max-credits 1000 \
+  --idempotency-key project-apply-001 --yes --wait
+
+sanka test --cloud --workspace 10483816 --run EXECUTION_RUN_ID
+sanka verify --cloud --workspace 10483816 --run EXECUTION_RUN_ID
+```
+
+`scan` runs **Scan + Plan** together and stops for approval. `apply` runs
+**Apply + Test + deterministic Verify** together against that approved source and
+plan. `plan`, `test`, and `verify` read the corresponding operation's evidence;
+they never start another paid operation. Without `--cloud`, local behavior is
+unchanged. Existing data migration commands with `--program` are separate and
+cannot be combined with these Code flags. Sanka Fix remains an optional follow-up
+through `sanka fix --cloud --run EXECUTION_RUN_ID` with its own consent and budget.
+
+### Source selection
+
+Replace `.` in the scan command with a ZIP path, or use one of:
+
+```sh
+sanka cloud github connect --workspace 10483816 --open
+sanka cloud github repositories --workspace 10483816
+sanka scan --cloud --github hira29/sanka-code-drf-test --ref main \
+  --workspace 10483816 --to fastapi --max-credits 1000 \
+  --idempotency-key github-scan-001 --yes --wait
+```
+
+Connect GitHub in Sanka Code as the **same user who owns the CLI token**. Grant the
+Sanka Code GitHub App access to the repository. No GitHub client secret or personal
+access token belongs in CLI configuration. Imports resolve the selected branch
+and pin its commit; subsequent branch changes cannot silently change a retry.
+The connection command opens the production Sanka Code site.
+
+An existing hosted source can instead use `--source-id SOURCE_ID --sha256 SHA256`.
+For Django projects, pass `--settings-module project.settings` when needed.
+
+Directory packaging excludes `.env`, `.env.*`, `.git`, `.ssh`, `.aws`, `.venv`,
+`venv`, `node_modules`, `__pycache__`, `.sanka`, and `.next`. It does not execute
+project files or apply `.gitignore`; inspect other files before consenting to an
+upload. ZIPs containing excluded files, unsafe paths, links, or special files are
+rejected. Limits are 8 MiB compressed, 64 MiB expanded, and 20,000 entries. Uploaded
+sources follow Sanka Code's seven-day retention. `--yes` consents to upload and the
+explicit credit cap; it is required for noninteractive submissions.
+
+### Retry and results
+
+Scan and Apply require an idempotency key. The CLI saves the exact request in its
+private config directory **before** submitting paid work. After a timeout, retry
+with identical inputs and the same key; do not use a new key for an uncertain
+request. Changed source bytes or approval inputs require a new, deliberate intent.
+
+`--wait` polls without starting more work. Interrupting it detaches the CLI and
+leaves the cloud run intact. Use `sanka cloud status`, `events`, `receipt`, `cancel`,
+and `download` with the returned run ID for follow-up (see their `--help`).
+Review/wait exit codes are: 0 completed, 3 evidence missing or review required,
+4 failed, 5 cancelled, 6 still queued/running. A background Scan/Apply returns 0
+when accepted, not when the operation is complete. Verify only reports `passed`
+when nonempty HTTP scenarios all match; a successful worker alone is insufficient.
+
+These commands require an API release exposing `/v2/migrate/code-plans` and
+`/v2/migrate/code-sources`. They do not fall back to another server or local execution
+when the configured API lacks these endpoints.
