@@ -1,5 +1,7 @@
 # Sanka Fix
 
+The `fix --cloud` command is available in Sanka CLI 0.2.14 and later.
+
 Sanka Fix is optional paid cloud verification and repair of a retained Sanka Code
 migration candidate. It requires an eligible Code migration run ID, including one
 created in the UI. It does not import arbitrary local folders or execute agents locally.

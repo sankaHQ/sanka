@@ -81,8 +81,8 @@ def test_install_does_not_use_system_python(
         python.chmod(0o755)
     result = invoke(environment)
     assert result.returncode == 0, result.stderr + result.stdout
-    assert (bindir / "sanka").resolve() == root / "versions/0.2.13/bin/sanka"
-    assert "sanka, version 0.2.13" in result.stdout
+    assert (bindir / "sanka").resolve() == root / "versions/0.2.14/bin/sanka"
+    assert "sanka, version 0.2.14" in result.stdout
     assert not (root / "install.lock").exists()
 
 
@@ -132,7 +132,7 @@ def test_upgrade_and_repeat_install_switch_only_the_owned_link(
     for _ in range(2):
         result = invoke(environment)
         assert result.returncode == 0, result.stderr + result.stdout
-        assert (root / "current").resolve() == root / "versions/0.2.13"
+        assert (root / "current").resolve() == root / "versions/0.2.14"
         assert (old / "bin/sanka").read_text() == "old version"
         assert not (old / "current").exists()
 
@@ -195,7 +195,7 @@ def test_target_changed_during_install_is_not_overwritten(
     assert not (root / "current").exists()
 
 
-@pytest.mark.parametrize("version", ["../x", "1;echo bad", "", "-e", "0.2.13/evil"])
+@pytest.mark.parametrize("version", ["../x", "1;echo bad", "", "-e", "0.2.14/evil"])
 def test_invalid_version_fails_before_mutation(
     sandbox: tuple[Path, Path, dict[str, str]],
     version: str,
