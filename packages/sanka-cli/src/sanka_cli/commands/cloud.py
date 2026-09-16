@@ -64,7 +64,7 @@ def _read(state: CLIState, workspace: str, path: str, **params: Any) -> dict[str
 
 @click.group()
 def cloud() -> None:
-    """Hosted DRF-to-FastAPI runs, credit receipts, and artifacts (when enabled)."""
+    """Hosted migration and Sanka Fix runs, credit receipts, and artifacts."""
 
 
 cloud.add_command(fleet)
@@ -518,7 +518,7 @@ def cancel(state: CLIState, workspace: str, run_id: Any) -> None:
 @RUN
 @click.option(
     "--artifact",
-    type=click.Choice(["output.zip", "logs.txt", "repair-response.json"]),
+    help="Exact name from the run artifact manifest (including Sanka Code/Fix artifacts).",
     default="output.zip",
 )
 @click.option("--to", "destination", required=True, type=click.Path(dir_okay=False, path_type=Path))
@@ -527,6 +527,8 @@ def download(
     state: CLIState, workspace: str, run_id: Any, artifact: str, destination: Path
 ) -> None:
     """Verify a retained artifact's digest and save a new file; existing files are preserved."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", artifact):
+        raise click.BadParameter("must be an artifact filename", param_hint="--artifact")
     if destination.exists() or destination.is_symlink():
         raise click.ClickException("Destination already exists; choose a new file")
     manifest = _data(_read(state, workspace, f"{ROOT}/{run_id}/artifacts"))

@@ -198,3 +198,5 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR. Open or reuse an
 issue first, agree on the scope of substantial changes with a maintainer, then
 link your PR to that issue. The guide also explains development checks and the
 repository's license boundaries.
+
+See [Sanka Fix](docs/fix.md) for optional cloud verification and repair of existing Sanka Code runs.

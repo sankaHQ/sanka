@@ -14,7 +14,12 @@ def auth() -> None:
 
 
 @auth.command("login")
-@click.option("--access-token", required=True, help="Developer API access token.")
+@click.option(
+    "--access-token",
+    prompt="Developer API access token",
+    hide_input=True,
+    help="Developer API access token (hidden prompt when omitted).",
+)
 @click.option(
     "--refresh-token",
     default=None,
