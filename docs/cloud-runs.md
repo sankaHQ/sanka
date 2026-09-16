@@ -224,7 +224,8 @@ review, aggregate limits, partial receipts, cancellation and selective retry flo
 
 ## Code migrations: Scan → Plan → Apply → Test → Verify
 
-Code stages use the same workspace-scoped operations as Sanka Code. Authenticate
+Available in Sanka CLI 0.2.15 and later, Code stages use the same workspace-scoped
+operations as Sanka Code. Authenticate
 with `sanka auth login` using a token for the intended workspace. Named-scope tokens
 need `migrate:cloud:read` and `migrate:cloud:write`; existing cloud access and workspace
 permissions still apply. Always pass the eight-digit workspace code explicitly.

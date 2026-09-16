@@ -2,7 +2,9 @@
 
 ## Candidate and published prerequisites
 
-The release candidate is `sanka-cli==0.2.13`. It embeds published Extension SDK
+The release candidate is `sanka-cli==0.2.15`. It adds the approved cloud Code
+lifecycle commands and directory, ZIP, and GitHub source intake. Deploy the
+companion API from PR #4132 before publication. It embeds published Extension SDK
 `0.1.0a5` from `878b416898dd5c19b61b818a34b9a12443ebdc31` and supports isolated
 native Blueprint v3 generation and shared inactive construction planning. Native
 v3 verification and activation remain unavailable; this release does not provide
@@ -68,7 +70,7 @@ make business-flow-acceptance BUSINESS_FLOW_RELEASE=/absolute/path/to/extensions
 
 The CLI publication workflow always downloads public assets from
 `business-flows-v0.1.0a1`; it has no local candidate override. Merge and publish
-that reviewed Extensions package before publishing CLI 0.2.13. Ordinary source
+that reviewed Extensions package before publishing CLI 0.2.15. Ordinary source
 CI does not require this new public release while both PRs are under review.
 These checks prove real package loading and planning, not provider execution.
 
@@ -78,23 +80,23 @@ catalog refresh does not rewrite project locks. Do not run a full local migratio
 
 ## Publication
 
-The commands below target the reviewed 0.2.13 candidate. Check that its tag and
+The commands below target the reviewed 0.2.15 candidate. Check that its tag and
 package version do not already exist before publication. Never recreate a tag or
 upload an existing package again.
 
 1. Merge the exact human-approved final head through `sanka-pr-flow`. Do not append
    unreviewed SDK, packaging or version changes after approval.
 2. Verify the reviewed `business-flows-v0.1.0a1` assets are public. With user
-   authorization, create and push `v0.2.13` at the reviewed merge. Never
+   authorization, create and push `v0.2.15` at the reviewed merge. Never
    move an existing release tag or republish an existing package version.
-3. Dispatch `publish.yml` at that tag with confirmation `publish-v0.2.13`.
+3. Dispatch `publish.yml` at that tag with confirmation `publish-v0.2.15`.
 4. The unprivileged build job validates the tag, runs checks, builds the wheel/sdist
    and stages their source identity and hashes. Fresh and upgrade quickstart
    acceptance must pass against the built wheel. The protected `pypi` job downloads
    that exact artifact, verifies the selected SHA and hashes, and publishes through
    job-scoped OIDC. No long-lived PyPI token is used.
 5. Read back the published PyPI version, filenames and hashes. Clean-install
-   `sanka-cli==0.2.13` from PyPI and repeat the package acceptance checks against
+   `sanka-cli==0.2.15` from PyPI and repeat the package acceptance checks against
    public extension wheels. Record what was exercised and its source/artifact IDs.
 
 A successful SDK upload is not a CLI upload, and a successful package test is not
@@ -123,7 +125,7 @@ The public PyPI quickstart must also pass fresh installation and upgrade checks
 before publishing the GitHub installer assets or preparing the Homebrew update:
 
 ```bash
-uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.2.13 \
+uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.2.15 \
   --upgrade-from 0.2.12 --report /tmp/public-quickstart.json
 ```
 

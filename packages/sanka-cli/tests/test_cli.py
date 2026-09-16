@@ -609,7 +609,7 @@ def test_api_client_uses_public_branded_base_and_unwraps_data() -> None:
     assert request.get_method() == "POST"
     assert isinstance(request.data, bytes)
     assert json.loads(request.data) == {"source": "SAP ECC", "lang": "ja"}
-    assert request.get_header("User-agent") == "sanka-cli/0.2.14"
+    assert request.get_header("User-agent") == "sanka-cli/0.2.15"
     assert request.get_header("Content-type") == "application/json"
     assert timeout == 10.0
 
