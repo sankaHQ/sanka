@@ -6,6 +6,7 @@ from typing import NoReturn
 import click
 
 from sanka_cli.commands.cloud_migrate import run_cloud_command
+from sanka_cli.commands.code_cloud import STAGES, invoke
 from sanka_cli.state import CLIState
 
 # Top-level local migration verbs. Kept flat so `sanka scan` and
@@ -36,6 +37,23 @@ CLOUD_ONLY_COMMANDS: dict[str, str] = {
 
 class _ForwardingCommand(click.Command):
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if (
+            self.name in STAGES
+            and "--cloud" in args[: args.index("--") if "--" in args else len(args)]
+        ):
+            if any(
+                a == "--program"
+                or a.startswith("--program=")
+                or a == "--migration"
+                or a.startswith("--migration=")
+                for a in args
+            ):
+                raise click.UsageError(
+                    "--cloud Code stages cannot be combined with --program or --migration"
+                )
+            ctx.meta["sanka.code_cloud"] = True
+            args = list(args)
+            args.remove("--cloud")
         ctx.meta["sanka.raw_args"] = tuple(args)
         return super().parse_args(ctx, args)
 
@@ -65,6 +83,9 @@ def _build_passthrough(name: str, help_text: str) -> click.Command:
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
     def passthrough(ctx: click.Context, args: tuple[str, ...]) -> None:
+        if ctx.meta.get("sanka.code_cloud"):
+            invoke(name, ctx.obj, ctx.meta["sanka.raw_args"])
+            return
         _run_local(name, ctx.meta["sanka.raw_args"], api_base=ctx.obj.base_url)
 
     return passthrough
@@ -99,6 +120,9 @@ def _build_hybrid(name: str, help_text: str) -> click.Command:
                 migration_id=migration_id,
                 args=args,
             )
+            return
+        if ctx.meta.get("sanka.code_cloud"):
+            invoke(name, ctx.obj, ctx.meta["sanka.raw_args"])
             return
         _run_local(name, ctx.meta["sanka.raw_args"], api_base=ctx.obj.base_url)
 
