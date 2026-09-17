@@ -503,3 +503,65 @@ def test_value_map_entry_normalizes_predicate_field_names() -> None:
         ValueMapEntry(when={"   ": "Discovery"}, value="stage-1")
     with pytest.raises(ValueError, match="must be unique"):
         ValueMapEntry(when={"StageName": "a", " StageName ": "b"}, value="stage-1")
+
+
+@pytest.mark.parametrize("value", ["", " \t ", None])
+def test_omit_empty_does_not_clear_destination(value: object) -> None:
+    field = MigrationMappingField(
+        source_field="Contact.name",
+        target_object="contacts",
+        target_field="name",
+        empty_value_policy="omit",
+    )
+    assert destination_properties({"name": value}, [field]) == {}
+
+
+@pytest.mark.parametrize("value", [0, False, "Ada"])
+def test_omit_empty_preserves_nonempty_values(value: object) -> None:
+    field = MigrationMappingField(
+        source_field="Contact.name",
+        target_object="contacts",
+        target_field="name",
+        empty_value_policy="omit",
+    )
+    assert destination_properties({"name": value}, [field]) == {"name": value}
+
+
+def test_required_empty_is_rejected_with_omit() -> None:
+    field = MigrationMappingField(
+        source_field="Contact.name",
+        target_object="contacts",
+        target_field="name",
+        empty_value_policy="omit",
+        required=True,
+    )
+    with pytest.raises(MappingError, match="Required"):
+        destination_properties({"name": "  "}, [field])
+
+
+def test_preserve_empty_remains_default() -> None:
+    field = MigrationMappingField(
+        source_field="Contact.name", target_object="contacts", target_field="name"
+    )
+    assert destination_properties({"name": ""}, [field]) == {"name": ""}
+
+
+@pytest.mark.parametrize(
+    ("rule", "value", "expected"),
+    [
+        ("normalize_email", " Demo@EXAMPLE.COM ", "demo@example.com"),
+        ("normalize_domain", " https://WWW.Example.COM/path?q=1 ", "www.example.com"),
+        ("normalize_domain", "Example.COM.", "example.com"),
+    ],
+)
+def test_normalization_is_idempotent(rule: str, value: str, expected: str) -> None:
+    assert apply_transform(value, rule) == expected
+    assert apply_transform(expected, rule) == expected
+
+
+@pytest.mark.parametrize(
+    "value", ["", "https://", "bad domain", "https://user:pass@example.com", "ftp://example.com"]
+)
+def test_normalize_domain_rejects_malformed_values(value: str) -> None:
+    with pytest.raises(ValueError):
+        apply_transform(value, "normalize_domain")

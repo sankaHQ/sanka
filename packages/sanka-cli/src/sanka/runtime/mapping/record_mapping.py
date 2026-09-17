@@ -20,6 +20,7 @@ import re
 from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.model import MigrationMappingField
@@ -152,7 +153,9 @@ def destination_properties(
             continue
         source_key = field.source_field.split(".", 1)[-1]
         value = record.get(source_key)
-        if value is None:
+        if value is None or (
+            field.empty_value_policy == "omit" and isinstance(value, str) and not value.strip()
+        ):
             if field.required:
                 raise MappingError(
                     "Required source field is empty.",
@@ -171,6 +174,17 @@ def destination_properties(
                     field=field,
                     original_value=mapped_value,
                 )
+            if (
+                field.empty_value_policy == "omit"
+                and isinstance(mapped_value, str)
+                and not mapped_value.strip()
+            ):
+                if field.required:
+                    raise MappingError(
+                        "Required mapped field is empty.",
+                        code="SANKA_MIGRATE_REQUIRED_SOURCE_FIELD_EMPTY",
+                    )
+                continue
             if mapped_value is not _OMIT_MAPPED_VALUE:
                 properties[field.target_field] = mapped_value
         except MappingError as exc:
@@ -252,6 +266,30 @@ def apply_transform(value: Any, transform_rule: str | None) -> Any:
         return value
     if rule == "trim":
         return str(value).strip()
+    if rule == "normalize_email":
+        # Normalization is explicit and is not an email deliverability check.
+        return str(value).strip().lower()
+    if rule == "normalize_domain":
+        text = str(value).strip()
+        parsed_url = urlsplit(text if "://" in text else "//" + text)
+        hostname = parsed_url.hostname
+        if (
+            not hostname
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or (parsed_url.scheme and parsed_url.scheme not in {"http", "https"})
+            or any(character.isspace() for character in hostname)
+        ):
+            raise ValueError("Domain must be a hostname or HTTP(S) URL")
+        # Accessing port also rejects malformed ports.
+        _ = parsed_url.port
+        normalized = hostname.rstrip(".").encode("idna").decode("ascii").lower()
+        if len(normalized) > 253 or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in normalized.split(".")
+        ):
+            raise ValueError("Domain contains an invalid hostname")
+        return normalized
     if rule == "number_parse":
         normalized = str(value).strip().replace(",", "")
         parsed = float(normalized)
