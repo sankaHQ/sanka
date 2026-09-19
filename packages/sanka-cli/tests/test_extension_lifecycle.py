@@ -833,3 +833,55 @@ def test_verify_without_scenarios_still_requires_the_reviewed_plan(tmp_path: Pat
         lifecycle.verify()
 
     assert raised.value.code == "SANKA_EXTENSION_IDENTITY"
+
+
+def test_plan_forwards_the_selected_target_to_the_plan_and_later_stages(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    lifecycle.scan(configuration={"settings_module": "config.settings"})
+
+    planned = lifecycle.plan(
+        target="fastapi",
+        configuration={"settings_module": "config.settings"},
+    )
+
+    scan_request, plan_request = runner.calls[0][1], runner.calls[1][1]
+    assert scan_request["command"] == "scan"
+    assert "target" not in scan_request["configuration"]
+    assert plan_request["command"] == "plan"
+    assert plan_request["configuration"] == {
+        "settings_module": "config.settings",
+        "target": "fastapi",
+    }
+    plan = json.loads((project / ".sanka" / "plan.json").read_text())
+    assert plan["configuration"]["target"] == "fastapi"
+
+    lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+
+    apply_request = runner.calls[-1][1]
+    assert apply_request["command"] == "apply"
+    assert apply_request["configuration"]["target"] == "fastapi"
+    assert apply_request["configuration"]["extension_plan_hash"] == "sha256:extension-plan"
+
+
+def test_plan_rejects_a_conflicting_configured_target(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    lifecycle.scan()
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.plan(target="fastapi", configuration={"target": "flask"})
+
+    assert raised.value.code == "SANKA_EXTENSION_TARGET_MISMATCH"
+    # The changed configuration refreshes the read-only scan before target selection;
+    # no plan request is sent.
+    assert [request["command"] for _lock, request in runner.calls] == ["scan", "scan"]
+
+    planned = lifecycle.plan(target="fastapi", configuration={"target": "fastapi"})
+
+    assert planned.outcome == "success"
+    assert runner.calls[-1][1]["configuration"] == {"target": "fastapi"}

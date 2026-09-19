@@ -79,6 +79,16 @@ issuance. A stopped planning result is not a resumable token: continuing require
 a fresh lifecycle and approval. The host owns claim/lease fencing and must reject
 duplicate execution; it must not silently retry an uncertain apply.
 
+## Target selection
+
+`sanka plan --to <target>` selects the enabled extension whose manifest advertises
+that target. The runtime then adds the selection to the plan request as
+`configuration.target` and records it in the reviewed core plan, so `apply`,
+`test` and `verify` receive the same value. An extension that advertises several
+targets reads `configuration.target` to choose its emitter; a single-target
+extension may ignore it. A `target` supplied through `--extension-config` must
+match the selected target. `scan` runs before selection and does not carry it.
+
 ## One repair attempt
 
 `sanka.runtime.extensions.code_repair.CodeRepairLifecycle` revalidates an existing
