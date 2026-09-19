@@ -43,13 +43,24 @@ def main():
 def verify(
     release: Path, root: Path, version: str, mode: str, generator_sdk: str | None = None
 ) -> None:
-    fixture = {
-        "v1": "synthetic_sales_quote_blueprint.json",
-        "v2": "synthetic_sales_created_estimate_blueprint.json",
-        "v3": "synthetic_native_order_billing_blueprint.json",
-    }[version]
-    sdk_version = generator_sdk or ("0.1.0a5" if version == "v3" else "0.1.0a4")
-    fixture_text = (Path(__file__).parent / "fixtures" / "flow" / fixture).read_text()
+    if version == "v4":
+        from test_flow_native_lifecycle import make_blueprint
+        from test_flow_native_verification import ArtifactReader
+        from test_flow_native_verification import profile as native_profile
+
+        candidate, _ = make_blueprint(ArtifactReader(), native_profile())
+        fixture_text = json.dumps(candidate.to_dict())
+    else:
+        fixture = {
+            "v1": "synthetic_sales_quote_blueprint.json",
+            "v2": "synthetic_sales_created_estimate_blueprint.json",
+            "v3": "synthetic_native_order_billing_blueprint.json",
+        }[version]
+        fixture_text = (Path(__file__).parent / "fixtures" / "flow" / fixture).read_text()
+    sdk_version = (
+        generator_sdk
+        or {"v1": "0.1.0a4", "v2": "0.1.0a4", "v3": "0.1.0a5", "v4": "0.1.0a7"}[version]
+    )
     blueprint = flow.Blueprint.from_dict(json.loads(fixture_text))
     mutation = {
         "success": "pass",
@@ -59,6 +70,9 @@ def verify(
         "configuration-tamper": (
             "output['blueprint']['resources'][0]['spec']['source_endpoint_id'] = "
             "'22222222-2222-4222-8222-222222222222'"
+        ),
+        "fixture-tamper": (
+            "output['blueprint']['scenarios'][0]['fixture']['digest'] = 'sha256:' + 'c' * 64"
         ),
     }[mode]
     generator_source = GENERATOR.replace("MUTATION", mutation)
@@ -114,14 +128,25 @@ def verify(
     capabilities = list(reversed(blueprint.required_capabilities))
     if mode == "missing-identity":
         capabilities.remove(
-            "flow.native.interval-minutes/v1" if version == "v3" else "flow.record-identity/v1"
+            "flow.native.order-billing-verification/v1"
+            if version == "v4"
+            else "flow.native.interval-minutes/v1"
+            if version == "v3"
+            else "flow.record-identity/v1"
         )
     definition = flow.create(type=blueprint.origin.identity.id)
-    if version == "v3":
+    if version in {"v3", "v4"}:
         profile = flow.NativeOrderBillingWorkflow.from_dict(blueprint.resources[0].spec)
         definition = flow.FlowDefinition(
             type=blueprint.origin.identity.id,
-            parameters={"native_configuration": profile.configuration},
+            parameters={
+                "native_configuration": profile.configuration,
+                **(
+                    {"native_verification": [s.to_dict() for s in blueprint.scenarios]}
+                    if version == "v4"
+                    else {}
+                ),
+            },
         )
     with pytest.MonkeyPatch.context() as patch:
         _responses(patch, wheels)
@@ -150,7 +175,7 @@ def verify(
             assert result.resources == blueprint.resources
             assert result.scenarios == blueprint.scenarios
             assert result.extension.digest == before.manifest_digest
-            if version == "v3":
+            if version in {"v3", "v4"}:
                 # Structural planning against a synthetic observation proves
                 # shared-runtime consumption, not native provider execution.
                 observed = TargetSnapshot(

@@ -14,6 +14,7 @@ from sanka.runtime.flow.model import (
     Installation,
     TargetSnapshot,
 )
+from sanka.runtime.flow.verification_plan import validate_effective_blueprint
 from sanka.runtime.hashing import content_hash
 
 
@@ -35,6 +36,7 @@ def plan_reconstruction(
     installation: Installation,
     observed: TargetSnapshot,
     remove: tuple[str, ...] = (),
+    verification_blueprint: BlueprintInput | None = None,
 ) -> FlowPlan:
     """Plan a validated SDK Blueprint against one host-scoped observation.
 
@@ -167,12 +169,29 @@ def plan_reconstruction(
         if target is None and not deleting:
             block("FLOW_OWNED_RESOURCE_MISSING", logical_id, target_id=owner.target_id)
 
+    effective = Document(verification_blueprint.to_dict()) if verification_blueprint else None
+    if effective is not None:
+        validate_effective_blueprint(document, effective, operations)
+        scope["verification_blueprint"] = effective.digest
+    elif serialized.get("schema_version") == "sanka-flow-blueprint/v4":
+        try:
+            validate_effective_blueprint(document, document, operations)
+        except FlowError as error:
+            blockers.append({"code": error.code, "detail": str(error)})
     for operation in operations:
         operation["id"] = content_hash({"scope": scope, "operation": operation})
     return FlowPlan(
         Document(
             {
-                "schema_version": "sanka-flow-plan/v1",
+                "schema_version": "sanka-flow-plan/v2" if effective else "sanka-flow-plan/v1",
+                **(
+                    {
+                        "verification_blueprint": effective.to_dict(),
+                        "verification_blueprint_digest": effective.digest,
+                    }
+                    if effective
+                    else {}
+                ),
                 "blueprint": serialized,
                 "blueprint_digest": document.digest,
                 "installation": installation.to_dict(),

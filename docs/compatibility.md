@@ -22,9 +22,10 @@ Published CLI 0.2.13 embeds SDK `0.1.0a5` from Extensions commit
 SDK `0.1.0a7` from `78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`; this does not
 change either published CLI release. Its conformance tests retain the original
 a4 v1/v2 and a5 v3 generator wheels and add standalone a7 host and generator
-environments. The runtime still admits only v1/v2/v3 generation. Native v3
-verification and activation remain unavailable; v4/v5 execution requires separate
-runtime and hosted adapter changes.
+environments. The runtime admits v1/v2/v3/v4 generation; v4 uses a7 and adds the
+shared native Order billing comparator and lifecycle. Its hosted executor/artifact
+adapter and live execution acceptance remain separate work. Native v3 verification
+and activation remain unavailable, and v5 execution is unsupported.
 
 The separate `sanka/business-flows` 0.1.0a1 candidate requires CLI 0.2.13. Its
 real-wheel acceptance covers HubSpot order/billing definition generation and

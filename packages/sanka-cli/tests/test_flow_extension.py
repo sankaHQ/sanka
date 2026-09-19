@@ -275,12 +275,15 @@ def test_flow_lock_cannot_reinterpret_a_code_protocol(
     assert raised.value.code == "SANKA_EXTENSION_LOCK_INVALID"
 
 
-def test_native_manifest_admission_is_explicit_and_does_not_run_code(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["v3", "v4"])
+def test_native_manifest_admission_is_explicit_and_does_not_run_code(
+    tmp_path: Path, version: str
+) -> None:
     source, _wheel = flow_marketplace(tmp_path / "source")
     manifest = source / "example-demo.json"
     payload = json.loads(manifest.read_text())
     capability = payload["capabilities"][0]
-    capability.update(output_schema="sanka-flow-blueprint/v3", references=[], values=[])
+    capability.update(output_schema=f"sanka-flow-blueprint/{version}", references=[], values=[])
     manifest.write_text(json.dumps(payload))
     load_marketplace(source)
     capability["output_schema"] = "sanka-flow-blueprint/v99"

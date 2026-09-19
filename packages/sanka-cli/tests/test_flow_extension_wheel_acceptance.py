@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("version", ["v1", "v2", "v3"])
+@pytest.mark.parametrize("version", ["v1", "v2", "v3", "v4"])
 @pytest.mark.parametrize("host_sdk", ["embedded", "standalone", "standalone-a7", "generator-a7"])
 @pytest.mark.parametrize(
     "mode", ["success", "missing-identity", "template-tamper", "schema-tamper"]
@@ -37,7 +37,7 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
     if host_sdk in {"standalone", "standalone-a7"}:
         sdk_version = (
             "0.1.0a7"
-            if host_sdk == "standalone-a7"
+            if host_sdk == "standalone-a7" or version == "v4"
             else ("0.1.0a5" if version == "v3" else "0.1.0a4")
         )
         imports[:0] = [
@@ -73,12 +73,26 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
 
 
 @pytest.mark.parametrize("host_sdk", ["embedded", "standalone", "standalone-a7", "generator-a7"])
+@pytest.mark.parametrize("version", ["v3", "v4"])
 def test_native_generator_cannot_substitute_endpoint_with_unchanged_request_metadata(
+    extension_release: Path,
+    tmp_path: Path,
+    host_sdk: str,
+    version: str,
+    request: pytest.FixtureRequest,
+) -> None:
+    test_canonical_sdk_accepts_only_exact_supported_generation(
+        extension_release, tmp_path, version, "configuration-tamper", host_sdk, request
+    )
+
+
+@pytest.mark.parametrize("host_sdk", ["embedded", "standalone-a7"])
+def test_native_generator_cannot_replace_independently_admitted_fixture(
     extension_release: Path,
     tmp_path: Path,
     host_sdk: str,
     request: pytest.FixtureRequest,
 ) -> None:
     test_canonical_sdk_accepts_only_exact_supported_generation(
-        extension_release, tmp_path, "v3", "configuration-tamper", host_sdk, request
+        extension_release, tmp_path, "v4", "fixture-tamper", host_sdk, request
     )

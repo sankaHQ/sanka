@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import math
+from contextlib import suppress
+from typing import Any, cast
 
 from sanka.runtime.flow.host import FlowTarget
 from sanka.runtime.flow.model import (
@@ -17,6 +20,7 @@ from sanka.runtime.flow.model import (
 )
 from sanka.runtime.flow.state import InstallationStore
 from sanka.runtime.flow.verification import evaluate_scenario, required_scenarios
+from sanka.runtime.flow.verification_plan import verification_blueprint
 
 
 def _same(expected: Document, actual: Document) -> None:
@@ -25,13 +29,20 @@ def _same(expected: Document, actual: Document) -> None:
 
 
 def _require_verification_profile(plan: FlowPlan) -> None:
-    version = plan.to_dict()["blueprint"].get("schema_version")
-    if version not in {"sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2"}:
+    blueprint = verification_blueprint(plan)
+    version = blueprint.get("schema_version")
+    if version not in {
+        "sanka-flow-blueprint/v1",
+        "sanka-flow-blueprint/v2",
+        "sanka-flow-blueprint/v4",
+    }:
         raise FlowError(
             "FLOW_VERIFICATION_PROFILE_UNSUPPORTED",
             "This Flow profile has no native scenario verifier; "
             "verification and activation are unavailable",
         )
+    if version == "sanka-flow-blueprint/v4":
+        required_scenarios(blueprint)
 
 
 def _resource_ids(observation: Document) -> tuple[str, ...]:
@@ -83,8 +94,23 @@ async def _release(store: InstallationStore, claim: Claim) -> None:
 
 
 class FlowLifecycle:
-    def __init__(self, store: InstallationStore, target: FlowTarget) -> None:
+    def __init__(
+        self,
+        store: InstallationStore,
+        target: FlowTarget,
+        *,
+        verification_renewal_seconds: float = 30,
+    ) -> None:
+        if (
+            type(verification_renewal_seconds) not in {int, float}
+            or not math.isfinite(verification_renewal_seconds)
+            or not 0 < verification_renewal_seconds <= 60
+        ):
+            raise ValueError(
+                "verification lease renewal interval must be finite and within (0, 60]"
+            )
         self.store, self.target = store, target
+        self._verification_renewal_seconds = verification_renewal_seconds
 
     def _check(self, plan: FlowPlan, approved_digest: str) -> None:
         if plan.digest != approved_digest:
@@ -97,6 +123,7 @@ class FlowLifecycle:
             )
         if self.target.target != plan.to_dict()["installation"]["target"]:
             raise FlowError("FLOW_TARGET_MISMATCH", "Host target differs from the reviewed plan")
+        verification_blueprint(plan)
 
     async def construct(self, plan: FlowPlan, *, approved_digest: str, attempt_id: str) -> Document:
         self._check(plan, approved_digest)
@@ -187,7 +214,8 @@ class FlowLifecycle:
             previous = await self.store.evidence(plan.digest, "verification")
             if previous is not None:
                 return previous
-            blueprint = plan.to_dict()["blueprint"]
+            blueprint = verification_blueprint(plan)
+            native = blueprint.get("schema_version") == "sanka-flow-blueprint/v4"
             scenarios = blueprint.get("scenarios", [])
             required = required_scenarios(blueprint)
             installation = Installation.from_dict(construction.to_dict()["installation"])
@@ -195,16 +223,32 @@ class FlowLifecycle:
             for raw_scenario in scenarios:
                 scenario = Document(raw_scenario)
                 claim = await self.store.claim(plan.digest, attempt_id)
-                result = await self.target.run_scenario(scenario, installation, claim)
-                evaluated = evaluate_scenario(
-                    blueprint=blueprint, scenario=scenario, installation=installation, result=result
-                )
+                if native:
+                    evaluated = await self._verify_native(blueprint, scenario, installation, claim)
+                else:
+                    result = await self.target.run_scenario(scenario, installation, claim)
+                    evaluated = evaluate_scenario(
+                        blueprint=blueprint,
+                        scenario=scenario,
+                        installation=installation,
+                        result=result,
+                    )
                 results.append(evaluated.to_dict())
                 _same(expected, await _observe(self.target, expected))
             passed = {r["scenario_id"] for r in results if r["outcome"] == "passed"}
             evidence = Document(
                 {
-                    "schema_version": "sanka-flow-verification/v1",
+                    "schema_version": "sanka-flow-verification/v2"
+                    if native
+                    else "sanka-flow-verification/v1",
+                    **(
+                        {
+                            "profile": "flow.native.order-billing-verification/v1",
+                            "verification_blueprint_digest": Document(blueprint).digest,
+                        }
+                        if native
+                        else {}
+                    ),
                     "plan_digest": plan.digest,
                     "installation": installation.to_dict(),
                     "observation_digest": expected.digest,
@@ -216,6 +260,61 @@ class FlowLifecycle:
             return evidence
         finally:
             await _release(self.store, claim)
+
+    async def _verify_native(
+        self,
+        blueprint: dict[str, Any],
+        scenario: Document,
+        installation: Installation,
+        claim: Claim,
+    ) -> Document:
+        from sanka.runtime.flow.native_verification import (
+            NativeVerificationArtifacts,
+            evaluate_native_billing_scenario,
+        )
+
+        if not callable(getattr(self.target, "read_verification_artifact", None)):
+            raise FlowError(
+                "FLOW_VERIFICATION_PROFILE_UNSUPPORTED",
+                "Native verification requires a scoped immutable artifact adapter",
+            )
+
+        async def execute() -> Document:
+            result = await self.target.run_scenario(scenario, installation, claim)
+            return await evaluate_native_billing_scenario(
+                blueprint=blueprint,
+                scenario=scenario,
+                installation=installation,
+                result=result,
+                artifacts=cast(NativeVerificationArtifacts, self.target),
+                claim=claim,
+                assert_claim=self.store.assert_claim,
+            )
+
+        task = asyncio.create_task(execute())
+        try:
+            while True:
+                completed, _ = await asyncio.wait(
+                    {task}, timeout=self._verification_renewal_seconds
+                )
+                await self.store.assert_claim(claim)
+                if completed:
+                    return await task
+                renewed = await self.store.claim(claim.plan_digest, claim.attempt_id)
+                if renewed != claim:
+                    await _release(self.store, renewed)
+                    raise FlowError(
+                        "FLOW_ATTEMPT_FENCED", "Native verification cannot resume an expired claim"
+                    )
+        finally:
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            elif not task.cancelled():
+                # Retrieve a completed exception without replacing a fencing
+                # failure raised while checking its result.
+                task.exception()
 
     async def discard(self, plan: FlowPlan, *, attempt_id: str) -> Document:
         """Allow fresh planning only when this attempt provably had no effects.
@@ -275,6 +374,8 @@ class FlowLifecycle:
                 raise FlowError(
                     "FLOW_NOT_VERIFIED", "Approval must identify this exact verified revision"
                 )
+            if plan.to_dict()["blueprint"].get("schema_version") == "sanka-flow-blueprint/v4":
+                self._validate_native_verification(plan, verified)
             previous = await self.store.evidence(plan.digest, "activation")
             if previous is not None:
                 active = Document(previous.to_dict()["observation"])
@@ -326,6 +427,82 @@ class FlowLifecycle:
             return receipt
         finally:
             await _release(self.store, claim)
+
+    @staticmethod
+    def _validate_native_verification(plan: FlowPlan, verified: dict[str, Any]) -> None:
+        from sanka_extensions.flow import ArtifactIdentity
+
+        blueprint = verification_blueprint(plan)
+        required = required_scenarios(blueprint)
+        scenarios = {s["id"]: s for s in blueprint["scenarios"]}
+        results = verified.get("results")
+        profile = "flow.native.order-billing-verification/v1"
+        if (
+            verified.get("schema_version") != "sanka-flow-verification/v2"
+            or verified.get("profile") != profile
+            or verified.get("verification_blueprint_digest") != Document(blueprint).digest
+            or type(results) is not list
+            or len(results) != len(required)
+            or any(type(r) is not dict for r in results)
+            or any(type(r.get("scenario_id")) is not str for r in results)
+            or {r.get("scenario_id") for r in results} != required
+        ):
+            raise FlowError(
+                "FLOW_NOT_VERIFIED", "Activation requires complete native verification evidence"
+            )
+        for result in results:
+            selected = scenarios[result["scenario_id"]]
+            native_result = result.get("native_result")
+            artifacts = result.get("checked_artifacts")
+            try:
+                if type(artifacts) is not list or not artifacts:
+                    raise ValueError("Missing checked artifacts")
+                checked = {ArtifactIdentity.from_dict(a) for a in artifacts}
+                if type(native_result) is not dict:
+                    raise ValueError("Missing native result")
+                deliveries = native_result.get("deliveries")
+                if type(deliveries) is not list or any(type(d) is not dict for d in deliveries):
+                    raise ValueError("Missing native deliveries")
+                required_artifacts = {
+                    ArtifactIdentity.from_dict(selected["fixture"]),
+                    ArtifactIdentity.from_dict(native_result["initial_readback"]),
+                    *(ArtifactIdentity.from_dict(d["readback"]) for d in deliveries),
+                }
+                if not required_artifacts <= checked:
+                    raise ValueError("Native readbacks were not checked")
+            except (ValueError, KeyError, TypeError) as error:
+                raise FlowError(
+                    "FLOW_NOT_VERIFIED", "Native evidence has invalid checked artifacts"
+                ) from error
+            if (
+                result.get("profile") != profile
+                or result.get("outcome") != "passed"
+                or type(result.get("mismatch_count")) is not int
+                or result.get("mismatch_count") != 0
+                or result.get("mismatches") != []
+                or type(result.get("checked_record_count")) is not int
+                or result.get("checked_record_count") != len(selected["record_keys"])
+                or native_result.get("scenario_digest") != Document(selected).digest
+                or native_result.get("scenario_id") != selected["id"]
+                or native_result.get("schema_version") != "sanka-flow-native-billing-result/v1"
+                or native_result.get("fixture") != selected["fixture"]
+                or native_result.get("mapping") != selected["mapping"]
+                or native_result.get("configuration_digest") != selected["configuration_digest"]
+                or native_result.get("isolated") is not True
+                or native_result.get("outcome") != "passed"
+                or native_result.get("installation_id") != verified["installation"]["id"]
+                or native_result.get("workflow_target_id")
+                != next(
+                    r["target_id"]
+                    for r in verified["installation"]["resources"]
+                    if r["logical_id"] == selected["workflow_id"]
+                )
+                or [d.get("id") for d in deliveries] != [d["id"] for d in selected["deliveries"]]
+            ):
+                raise FlowError(
+                    "FLOW_NOT_VERIFIED",
+                    "Native evidence is incomplete or belongs to another scenario",
+                )
 
     @staticmethod
     def _validate_activation(expected: Document, active: Document, workflow_ids: set[str]) -> None:

@@ -13,6 +13,10 @@ from sanka.runtime.flow.model import Document, FlowError, Installation
 
 
 def required_scenarios(blueprint: dict[str, Any]) -> set[str]:
+    if blueprint.get("schema_version") == "sanka-flow-blueprint/v4":
+        from sanka.runtime.flow.native_verification import required_native_scenarios
+
+        return required_native_scenarios(blueprint)
     scenarios = blueprint.get("scenarios", [])
     workflows = {r["id"] for r in blueprint["resources"] if r["kind"] == "workflow"}
     if len({s["id"] for s in scenarios}) != len(scenarios):
