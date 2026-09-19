@@ -230,6 +230,11 @@ def _mapping_field_payload(mapping: MigrationMappingField) -> dict[str, Any]:
         "sourceType": mapping.source_type,
         "targetType": mapping.target_type,
         "transformRule": mapping.transform_rule,
+        **(
+            {"emptyValuePolicy": mapping.empty_value_policy}
+            if mapping.empty_value_policy != "preserve"
+            else {}
+        ),
         "required": mapping.required,
         "identity": mapping.identity,
         "mappingKind": mapping.mapping_kind,
@@ -263,6 +268,7 @@ def _mapping_field_from_payload(payload: dict[str, Any]) -> MigrationMappingFiel
         source_type=payload.get("sourceType"),
         target_type=payload.get("targetType"),
         transform_rule=payload.get("transformRule"),
+        empty_value_policy=payload.get("emptyValuePolicy", "preserve"),
         required=bool(payload.get("required", False)),
         identity=payload.get("identity"),
         mapping_kind=cast(MappingKind, payload.get("mappingKind", "scalar")),

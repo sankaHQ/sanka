@@ -63,6 +63,7 @@ class MigrationMappingField:
     source_type: str | None = None
     target_type: str | None = None
     transform_rule: str | None = None
+    empty_value_policy: Literal["preserve", "omit"] = "preserve"
     required: bool = False
     identity: bool | None = None
     mapping_kind: MappingKind = "scalar"
@@ -76,6 +77,10 @@ class MigrationMappingField:
     unmapped_value_policy: UnmappedValuePolicy = "error"
 
     def __post_init__(self) -> None:
+        if self.empty_value_policy not in {"preserve", "omit"}:
+            raise ValueError("empty_value_policy must be preserve or omit")
+        if self.empty_value_policy != "preserve" and self.mapping_kind != "scalar":
+            raise ValueError("empty_value_policy is only valid for scalar mappings")
         if self.association_type_id is not None and self.association_type_id <= 0:
             raise ValueError("association_type_id must be greater than zero")
         if len(self.value_map) > _MAX_VALUE_MAP_ENTRIES:

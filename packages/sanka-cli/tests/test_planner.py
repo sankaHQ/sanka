@@ -150,6 +150,7 @@ def test_rich_mapping_fields_survive_the_payload_round_trip() -> None:
                         source_filter=SourceFilter(field="closed", value=True),
                         value_map=[ValueMapEntry(when={"stage": "won"}, value="closedwon")],
                         unmapped_value_policy="preserve",
+                        empty_value_policy="omit",
                     ),
                     MigrationMappingField(
                         source_field="deals.company",

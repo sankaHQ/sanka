@@ -44,7 +44,6 @@ from sanka.cli._output import TerminalOutput
 from sanka.cli._research import (
     SankaMigrateApiClient,
     SankaMigrateApiError,
-    print_research,
     signup_url,
 )
 from sanka.runtime.__about__ import __version__
@@ -557,36 +556,6 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     connect.add_argument("--json", action="store_true", help="print provider details as JSON")
     connect.set_defaults(handler=_cmd_connect)
 
-    research = commands.add_parser(
-        "research",
-        help="query cited Sanka lifecycle, cost, and comparison research",
-    )
-    research_commands = research.add_subparsers(dest="research_command", required=True)
-
-    eol = research_commands.add_parser("eol", help="query software lifecycle events")
-    eol.add_argument("product", nargs="?")
-    eol.add_argument("--category")
-    eol.add_argument(
-        "--type",
-        choices=("shutdown", "end_of_support", "maintenance_end", "version_lifecycle"),
-    )
-    eol.add_argument("--after", help="inclusive YYYY-MM lower bound")
-    eol.add_argument("--before", help="inclusive YYYY-MM upper bound")
-    _research_output_options(eol)
-    eol.set_defaults(handler=_cmd_research_eol)
-
-    tco = research_commands.add_parser("tco", help="query published cost benchmarks")
-    tco.add_argument("product", nargs="?")
-    tco.add_argument("--category")
-    _research_output_options(tco)
-    tco.set_defaults(handler=_cmd_research_tco)
-
-    compare = research_commands.add_parser("compare", help="compare migration capabilities")
-    compare.add_argument("category")
-    compare.add_argument("--platforms", help="comma-separated platform slugs (maximum 10)")
-    _research_output_options(compare)
-    compare.set_defaults(handler=_cmd_research_compare)
-
     assess = commands.add_parser("assess", help="submit a free migration assessment")
     assess.add_argument("--source")
     assess.add_argument("--destination")
@@ -665,11 +634,6 @@ def _set_json_errors(parser: argparse.ArgumentParser, enabled: bool) -> None:
         if isinstance(action, argparse._SubParsersAction):
             for child in action.choices.values():
                 _set_json_errors(child, enabled)
-
-
-def _research_output_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--lang", choices=("en", "ja"), dest="locale")
-    parser.add_argument("--json", action="store_true", help="print the API data payload as JSON")
 
 
 def _research_client(api_base: str | None = None) -> SankaMigrateApiClient:
@@ -1168,44 +1132,6 @@ async def _cmd_migrate(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
-async def _cmd_research_eol(args: argparse.Namespace) -> int:
-    data = await asyncio.to_thread(
-        _research_client(getattr(args, "api_base", None)).research_eol,
-        product=args.product,
-        category=args.category,
-        event_type=args.type,
-        after=args.after,
-        before=args.before,
-        locale=args.locale,
-    )
-    return _print_research_result(data, kind="eol", locale=args.locale, as_json=args.json)
-
-
-async def _cmd_research_tco(args: argparse.Namespace) -> int:
-    data = await asyncio.to_thread(
-        _research_client(getattr(args, "api_base", None)).research_tco,
-        product=args.product,
-        category=args.category,
-        locale=args.locale,
-    )
-    return _print_research_result(data, kind="tco", locale=args.locale, as_json=args.json)
-
-
-async def _cmd_research_compare(args: argparse.Namespace) -> int:
-    if args.platforms and len([item for item in args.platforms.split(",") if item.strip()]) > 10:
-        raise SankaMigrateApiError(
-            "SANKA_MIGRATE_INPUT_INVALID",
-            "--platforms accepts at most 10 comma-separated values.",
-        )
-    data = await asyncio.to_thread(
-        _research_client(getattr(args, "api_base", None)).research_compare,
-        category=args.category,
-        platforms=args.platforms,
-        locale=args.locale,
-    )
-    return _print_research_result(data, kind="compare", locale=args.locale, as_json=args.json)
-
-
 async def _cmd_assess(args: argparse.Namespace) -> int:
     answers = [
         args.source,
@@ -1257,33 +1183,6 @@ async def _cmd_assess(args: argparse.Namespace) -> int:
     print("next: create your workspace and Sakura will build the grounded report")
     print(f"  {signup_url(assessment_id, lang=args.lang)}")
     return 0
-
-
-def _print_research_result(
-    data: dict[str, Any],
-    *,
-    kind: str,
-    locale: str | None,
-    as_json: bool,
-) -> int:
-    if as_json:
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-        return 0 if _research_has_results(data, kind=kind) else 2
-    return print_research(data, kind=kind, locale=locale)
-
-
-def _research_has_results(data: dict[str, Any], *, kind: str) -> bool:
-    if kind == "eol":
-        if isinstance(data.get("events"), list):
-            return bool(data["events"])
-        product = data.get("product")
-        return isinstance(product, dict) and bool(product.get("events"))
-    if kind == "tco":
-        if isinstance(data.get("benchmarks"), list):
-            return bool(data["benchmarks"])
-        product = data.get("product")
-        return isinstance(product, dict) and bool(product.get("plans"))
-    return bool(data.get("platforms"))
 
 
 def _infer_endpoint(value: str, *, role: str) -> EndpointSpec:

@@ -74,7 +74,6 @@ def test_local_passthrough_preserves_double_dash(
         "migrate",
         "connect",
         "extension",
-        "research",
         "assess",
     ],
 )
@@ -1046,16 +1045,19 @@ def test_verify_access_token_warns_when_unreachable(fake_verify_client) -> None:
 @pytest.mark.parametrize(
     ("override", "expected"),
     [
-        ("https://staging.example", "https://staging.example/v2/migrate/research/eol"),
+        ("https://staging.example", "https://staging.example/v2/migrate/assessments"),
         (
             "https://staging.example/prefix/",
-            "https://staging.example/prefix/v2/migrate/research/eol",
+            "https://staging.example/prefix/v2/migrate/assessments",
         ),
-        ("https://staging.example/v2/migrate/", "https://staging.example/v2/migrate/research/eol"),
-        (None, "https://legacy.example/migration-service/research/eol"),
+        (
+            "https://staging.example/v2/migrate/",
+            "https://staging.example/v2/migrate/assessments",
+        ),
+        (None, "https://legacy.example/migration-service/assessments"),
     ],
 )
-def test_research_requests_use_global_api_override_before_legacy_environment(
+def test_assessment_requests_use_global_api_override_before_legacy_environment(
     runner: CliRunner,
     monkeypatch,
     override,
@@ -1071,7 +1073,11 @@ def test_research_requests_use_global_api_override_before_legacy_environment(
 
     def opener(request, *, timeout):
         requests.append(request)
-        return io.BytesIO(json.dumps({"success": True, "data": {"events": ["fixture"]}}).encode())
+        return io.BytesIO(
+            json.dumps(
+                {"success": True, "data": {"assessment_id": "abc-123", "status": "submitted"}}
+            ).encode()
+        )
 
     monkeypatch.setenv("SANKA_MIGRATE_API_BASE", "https://legacy.example/migration-service/")
     monkeypatch.setattr(
@@ -1079,8 +1085,11 @@ def test_research_requests_use_global_api_override_before_legacy_environment(
         "SankaMigrateApiClient",
         lambda **kwargs: SankaMigrateApiClient(opener=opener, **kwargs),
     )
+    # The assessment command pads to two seconds of form time; skip the wait.
+    monkeypatch.setattr("sanka.cli.time.time", lambda: 10_000.0)
     prefix = ["--base-url", override] if override else []
-    result = runner.invoke(cli, [*prefix, "research", "eol", "--json"])
+    result = runner.invoke(cli, [*prefix, "assess", "--source", "SAP ECC", "--json"])
     assert result.exit_code == 0, result.output
     assert requests[0].full_url == expected
+    assert requests[0].get_method() == "POST"
     assert requests[0].get_header("Authorization") is None

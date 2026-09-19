@@ -145,7 +145,7 @@ Authentication is selected after command routing:
 | `scan`, `plan`, `validate`, `apply`, `test`, `verify`, `status`, `migrate`, `connect`, `extension` | local runtime or verified extension | never |
 | `plan`, `apply`, or `verify` with an explicit cloud selector | hosted migration API | required |
 | `auth`, resources, workflows, AI, `functions` (custom functions) | hosted Sanka API | required where the command already requires it |
-| research and assessment | public hosted API | not required |
+| assessment | public hosted API | not required |
 
 Missing hosted credentials do not block local help, inspection, planning,
 extension management, testing, or verification.
@@ -198,3 +198,5 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR. Open or reuse an
 issue first, agree on the scope of substantial changes with a maintainer, then
 link your PR to that issue. The guide also explains development checks and the
 repository's license boundaries.
+
+See [Sanka Fix](docs/fix.md) for optional cloud verification and repair of existing Sanka Code runs.
