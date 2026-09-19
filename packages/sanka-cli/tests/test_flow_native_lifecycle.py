@@ -20,7 +20,14 @@ from test_flow_native_verification import (
 from test_flow_planner import snapshot
 
 from sanka.runtime.flow.lifecycle import FlowLifecycle
-from sanka.runtime.flow.model import Claim, Document, FlowError, FlowPlan, Installation
+from sanka.runtime.flow.model import (
+    Claim,
+    Document,
+    FlowError,
+    FlowPlan,
+    Installation,
+    TargetSnapshot,
+)
 from sanka.runtime.flow.planner import plan_reconstruction
 from sanka.runtime.flow.sqlite import SqliteInstallationStore
 from sanka.runtime.flow.verification_plan import (
@@ -261,6 +268,31 @@ async def test_expired_claim_cancels_native_work_without_resurrection(tmp_path: 
             await asyncio.wait_for(lifecycle.verify(plan, attempt_id="verify"), 5)
         assert error.value.code == "FLOW_ATTEMPT_FENCED"
         assert cancelled.is_set()
+        assert await store.evidence(plan.digest, "verification") is None
+    finally:
+        await store.close()
+
+
+async def test_expired_claim_between_scenarios_cannot_resume_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1000.0]
+    store, target, plan, lifecycle = await setup(tmp_path, clock=lambda: now[0])
+    original_observe = target.observe
+
+    async def slow_readback(target_ids: tuple[str, ...]) -> TargetSnapshot:
+        observed = await original_observe(target_ids)
+        if target.scenarios == 1:
+            now[0] += 121
+        return observed
+
+    monkeypatch.setattr(target, "observe", slow_readback)
+    try:
+        with pytest.raises(FlowError) as error:
+            await lifecycle.verify(plan, attempt_id="verify")
+        assert error.value.code == "FLOW_ATTEMPT_FENCED"
+        assert target.scenarios == 1
         assert await store.evidence(plan.digest, "verification") is None
     finally:
         await store.close()

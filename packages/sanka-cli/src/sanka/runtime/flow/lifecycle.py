@@ -93,6 +93,15 @@ async def _release(store: InstallationStore, claim: Claim) -> None:
             raise
 
 
+async def _renew_verification_claim(store: InstallationStore, claim: Claim) -> Claim:
+    await store.assert_claim(claim)
+    renewed = await store.claim(claim.plan_digest, claim.attempt_id)
+    if renewed != claim:
+        await _release(store, renewed)
+        raise FlowError("FLOW_ATTEMPT_FENCED", "Native verification cannot resume an expired claim")
+    return renewed
+
+
 class FlowLifecycle:
     def __init__(
         self,
@@ -222,7 +231,11 @@ class FlowLifecycle:
             results: list[dict[str, Any]] = []
             for raw_scenario in scenarios:
                 scenario = Document(raw_scenario)
-                claim = await self.store.claim(plan.digest, attempt_id)
+                claim = (
+                    await _renew_verification_claim(self.store, claim)
+                    if native
+                    else await self.store.claim(plan.digest, attempt_id)
+                )
                 if native:
                     evaluated = await self._verify_native(blueprint, scenario, installation, claim)
                 else:
@@ -300,12 +313,7 @@ class FlowLifecycle:
                 await self.store.assert_claim(claim)
                 if completed:
                     return await task
-                renewed = await self.store.claim(claim.plan_digest, claim.attempt_id)
-                if renewed != claim:
-                    await _release(self.store, renewed)
-                    raise FlowError(
-                        "FLOW_ATTEMPT_FENCED", "Native verification cannot resume an expired claim"
-                    )
+                await _renew_verification_claim(self.store, claim)
         finally:
             if not task.done():
                 task.cancel()
