@@ -113,6 +113,10 @@ Project pins live in `.sanka/extensions.lock`; marketplace
 snapshots and verified artifacts live under `~/.sanka/extensions` or
 `$SANKA_HOME/extensions`.
 
+Experimental code paths are developed in the same repository before they enter
+the catalog: see the [TypeScript to Rust guide](docs/typescript-to-rust.md) and
+the [React Native to native guide](docs/react-native-to-native.md).
+
 ## Local lifecycle
 
 A migration runs in five steps:
