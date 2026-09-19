@@ -40,13 +40,15 @@ def main():
 """
 
 
-def verify(release: Path, root: Path, version: str, mode: str) -> None:
+def verify(
+    release: Path, root: Path, version: str, mode: str, generator_sdk: str | None = None
+) -> None:
     fixture = {
         "v1": "synthetic_sales_quote_blueprint.json",
         "v2": "synthetic_sales_created_estimate_blueprint.json",
         "v3": "synthetic_native_order_billing_blueprint.json",
     }[version]
-    sdk_version = "0.1.0a5" if version == "v3" else "0.1.0a4"
+    sdk_version = generator_sdk or ("0.1.0a5" if version == "v3" else "0.1.0a4")
     fixture_text = (Path(__file__).parent / "fixtures" / "flow" / fixture).read_text()
     blueprint = flow.Blueprint.from_dict(json.loads(fixture_text))
     mutation = {

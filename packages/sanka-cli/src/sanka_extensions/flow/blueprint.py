@@ -38,12 +38,20 @@ from sanka_extensions.flow.identity import (
     reference_index,
     require_reference,
 )
-from sanka_extensions.flow.native import NATIVE_ORDER_BILLING_SCHEMA, NativeOrderBillingWorkflow
+from sanka_extensions.flow.native import NativeOrderBillingWorkflow
+from sanka_extensions.flow.native_profiles import NATIVE_PROFILE_SCHEMAS, decode_native_workflow
+from sanka_extensions.flow.native_verification import (
+    NATIVE_BILLING_VERIFICATION,
+    NativeBillingScenario,
+    validate_billing_scenarios,
+)
 from sanka_extensions.flow.scenario import Scenario
 
 BLUEPRINT_SCHEMA_VERSION = "sanka-flow-blueprint/v1"
 BLUEPRINT_V2_SCHEMA_VERSION = "sanka-flow-blueprint/v2"
 BLUEPRINT_V3_SCHEMA_VERSION = "sanka-flow-blueprint/v3"
+BLUEPRINT_V4_SCHEMA_VERSION = "sanka-flow-blueprint/v4"
+BLUEPRINT_V5_SCHEMA_VERSION = "sanka-flow-blueprint/v5"
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -69,8 +77,10 @@ class Resource(WireRecord):
             raise ValueError("resource cannot depend on itself")
         if kind == "workflow":
             graph = (
-                NativeOrderBillingWorkflow.from_dict(spec)
-                if type(spec) is dict and spec.get("schema_version") == NATIVE_ORDER_BILLING_SCHEMA
+                decode_native_workflow(spec)
+                if type(spec) is dict
+                and type(spec.get("schema_version")) is str
+                and spec["schema_version"] in NATIVE_PROFILE_SCHEMAS
                 else WorkflowGraph.from_dict(spec)
             )
             if graph.id != id:
@@ -174,7 +184,7 @@ class Blueprint(WireRecord):
     resources: tuple[Resource, ...]
     references: tuple[Reference, ...]
     mappings: tuple[Mapping, ...]
-    scenarios: tuple[Scenario, ...]
+    scenarios: tuple[Scenario | NativeBillingScenario, ...]
     unsupported: tuple[UnsupportedFinding, ...]
     _parameters: FrozenJson = field(repr=False)
     schema_version: str
@@ -188,14 +198,20 @@ class Blueprint(WireRecord):
         resources: tuple[Resource, ...],
         references: tuple[Reference, ...] = (),
         mappings: tuple[Mapping, ...] = (),
-        scenarios: tuple[Scenario, ...] = (),
+        scenarios: tuple[Scenario | NativeBillingScenario, ...] = (),
         unsupported: tuple[UnsupportedFinding, ...] = (),
         parameters: dict[str, JsonValue] | None = None,
         schema_version: str = BLUEPRINT_SCHEMA_VERSION,
     ) -> None:
         choice(
             schema_version,
-            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION, BLUEPRINT_V3_SCHEMA_VERSION),
+            (
+                BLUEPRINT_SCHEMA_VERSION,
+                BLUEPRINT_V2_SCHEMA_VERSION,
+                BLUEPRINT_V3_SCHEMA_VERSION,
+                BLUEPRINT_V4_SCHEMA_VERSION,
+                BLUEPRINT_V5_SCHEMA_VERSION,
+            ),
             "Blueprint schema_version",
         )
         identifier(id, "blueprint id")
@@ -209,7 +225,12 @@ class Blueprint(WireRecord):
         mappings = unique(
             instances(mappings, Mapping, "mappings"), lambda m: m.source_ref, "mapping sources"
         )
-        scenarios = unique(instances(scenarios, Scenario, "scenarios"), lambda s: s.id, "scenarios")
+        scenario_type = (
+            NativeBillingScenario if schema_version == BLUEPRINT_V4_SCHEMA_VERSION else Scenario
+        )
+        scenarios = unique(
+            instances(scenarios, scenario_type, "scenarios"), lambda s: s.id, "scenarios"
+        )
         instances(unsupported, UnsupportedFinding, "unsupported findings")
         if parameters is not None and type(parameters) is not dict:
             raise ValueError("Blueprint parameters must be an object")
@@ -250,12 +271,18 @@ class Blueprint(WireRecord):
         for resource in self.resources:
             capabilities.add(f"flow.resource.{resource.kind}/v1")
             if resource.kind == "workflow":
+                if self.schema_version == BLUEPRINT_V5_SCHEMA_VERSION:
+                    capabilities.update(decode_native_workflow(resource.spec).required_capabilities)
+                    continue
                 workflow = (
                     NativeOrderBillingWorkflow.from_dict(resource.spec)
-                    if self.schema_version == BLUEPRINT_V3_SCHEMA_VERSION
+                    if self.schema_version
+                    in {BLUEPRINT_V3_SCHEMA_VERSION, BLUEPRINT_V4_SCHEMA_VERSION}
                     else WorkflowGraph.from_dict(resource.spec)
                 )
                 capabilities.update(workflow.required_capabilities)
+        if self.schema_version == BLUEPRINT_V4_SCHEMA_VERSION:
+            capabilities.add(NATIVE_BILLING_VERIFICATION)
         return tuple(sorted(capabilities))
 
     def require_supported(self, *, capabilities: frozenset[str] | None = None) -> None:
@@ -273,18 +300,36 @@ class Blueprint(WireRecord):
 
     def _validate(self) -> None:
         _dependencies(self.resources)
-        if self.schema_version == BLUEPRINT_V3_SCHEMA_VERSION:
+        if self.schema_version in {
+            BLUEPRINT_V3_SCHEMA_VERSION,
+            BLUEPRINT_V4_SCHEMA_VERSION,
+            BLUEPRINT_V5_SCHEMA_VERSION,
+        }:
             if (
                 len(self.resources) != 1
                 or self.resources[0].kind != "workflow"
                 or self.resources[0].depends_on
             ):
-                raise ValueError("native v3 requires exactly one independent workflow")
+                raise ValueError("native Blueprint requires exactly one independent workflow")
             if self.origin.kind != "template":
-                raise ValueError("native v3 supports explicit template generation only")
-            if self.references or self.mappings or self.scenarios:
-                raise ValueError("native v3 has no portable graph references or scenario evidence")
-            NativeOrderBillingWorkflow.from_dict(self.resources[0].spec)
+                raise ValueError("native Blueprint supports explicit template generation only")
+            if self.references or self.mappings:
+                raise ValueError("native Blueprint has no portable graph references")
+            if self.schema_version == BLUEPRINT_V5_SCHEMA_VERSION:
+                native_recipe = decode_native_workflow(self.resources[0].spec)
+                if isinstance(native_recipe, NativeOrderBillingWorkflow):
+                    raise ValueError("order billing retains its v3/v4 contracts")
+                if self.scenarios:
+                    raise ValueError("native recipe v5 is construction-only; no scenario evidence")
+                return
+            native = NativeOrderBillingWorkflow.from_dict(self.resources[0].spec)
+            if self.schema_version == BLUEPRINT_V3_SCHEMA_VERSION:
+                if self.scenarios:
+                    raise ValueError("native v3 has no scenario evidence")
+            else:
+                validate_billing_scenarios(
+                    native, cast(tuple[NativeBillingScenario, ...], self.scenarios)
+                )
             return
         references = reference_index(self.references)
         resources = {resource.id: resource for resource in self.resources}
@@ -363,6 +408,7 @@ class Blueprint(WireRecord):
                 if reference.binding == "resource" and reference.key not in resource.depends_on:
                     raise ValueError("planned resource references require an explicit dependency")
         for scenario in self.scenarios:
+            assert isinstance(scenario, Scenario)
             if self.schema_version == BLUEPRINT_SCHEMA_VERSION and any(
                 event.operation != "record.updated" for event in scenario.events
             ):
@@ -461,7 +507,13 @@ class Blueprint(WireRecord):
         version = value.get("schema_version") if type(value) is dict else None
         choice(
             version,
-            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION, BLUEPRINT_V3_SCHEMA_VERSION),
+            (
+                BLUEPRINT_SCHEMA_VERSION,
+                BLUEPRINT_V2_SCHEMA_VERSION,
+                BLUEPRINT_V3_SCHEMA_VERSION,
+                BLUEPRINT_V4_SCHEMA_VERSION,
+                BLUEPRINT_V5_SCHEMA_VERSION,
+            ),
             "Blueprint schema_version",
         )
         payload = object_fields(
@@ -497,7 +549,13 @@ class Blueprint(WireRecord):
             resources=array(payload["resources"], Resource.from_dict, "resources"),
             references=array(payload["references"], Reference.from_dict, "references"),
             mappings=array(payload["mappings"], Mapping.from_dict, "mappings"),
-            scenarios=array(payload["scenarios"], Scenario.from_dict, "scenarios"),
+            scenarios=array(
+                payload["scenarios"],
+                NativeBillingScenario.from_dict
+                if version == BLUEPRINT_V4_SCHEMA_VERSION
+                else Scenario.from_dict,
+                "scenarios",
+            ),
             unsupported=array(payload["unsupported"], UnsupportedFinding.from_dict, "unsupported"),
         )
         if version != BLUEPRINT_SCHEMA_VERSION and payload["required_capabilities"] != list(
