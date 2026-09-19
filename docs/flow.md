@@ -64,6 +64,10 @@ repeating side effects. Construction success is not an active flow.
 
 ## Shared planning and lifecycle library
 
+The [native Order billing verification contract](flow-native-verification.md)
+defines Blueprint v4 execution evidence, paged readback, lease renewal and managed
+updates whose effective settings differ from their template ownership baseline.
+
 The AGPL `sanka.runtime.flow` package provides the host-neutral planner,
 construction/verification/activation lifecycle, and a private SQLite installation
 ledger. Hosts supply a validated executable SDK Blueprint through the structural
@@ -151,7 +155,7 @@ release steps.
 `sanka.runtime.flow.extension.FlowExtensionRunner` provides the generator loading
 boundary. A `kind="flow"` manifest lives in the existing marketplace and exposes
 only `blueprint` over `sanka-flow-extension/v1`. It declares a selector, exact
-template ID/revision/digest, Blueprint v1/v2/v3 output, reference roles and scalar
+template ID/revision/digest, Blueprint v1/v2/v3/v4 output, reference roles and scalar
 value types. Discovery reads this static declaration without importing a provider.
 Data/Code listing payloads and their protocol meanings remain unchanged.
 
@@ -174,8 +178,9 @@ This source tree embeds published SDK a7 from Extensions commit
 `78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`, verified byte-for-byte by the provenance
 guard. SDK publication is `sdk-v0.1.0a7`; CLI publication is a separate release.
 The SDK also declares Blueprint v4 verification and v5 business-family contracts.
-This runtime still admits only v1/v2/v3 generators; adopting those newer execution
-profiles requires their separate runtime and hosted adapters.
+This runtime admits v1/v2/v3/v4 generators. V4 supports the shared native Order
+billing comparator and lifecycle described above; a private host must supply the
+native executor and immutable artifact adapter. V5 execution remains unsupported.
 The default marketplace remains the immutable `extensions-v0.1.0a22` snapshot
 at `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12`;
 existing project locks retain their selected artifacts. A host may also supply
@@ -193,13 +198,14 @@ generators, with published SDK wheels installed in the generator environment. Af
 make flow-wheel-acceptance
 ```
 
-The synthetic v1/v2/v3 fixtures validate artifact generation, not native business
-execution. This command downloads the published a4 and a5 SDK wheels and the a12
+The synthetic v1/v2/v3/v4 fixtures validate artifact generation, not native business
+execution. This command downloads the published a4, a5 and a7 SDK wheels and the a12
 compatibility wheel and verifies their exact size and SHA-256 before testing.
 V1/v2 generators still install a4, proving that the new
 embedded SDK continues to accept their original protocol. V3 generators install
-a5; both embedded and standalone hosts reject substituted executable settings
-even when a generator preserves the echoed request metadata. The command is
+a5; v4 generators install a7. Both embedded and standalone hosts reject substituted
+executable settings and fixture identities even when a generator preserves the
+echoed request metadata. The command is
 separate from `make check`, like the existing Code wheel acceptance suite. Run it
 when changing this boundary or adopting the SDK. Native Workflows compilation,
 durable Estimate identity, Save/reload preservation and native scenario verification
@@ -215,15 +221,16 @@ publish a CLI or upgrade the hosted API.
 
 The structural planner and inactive-construction machinery remain reusable by a
 host supplying a validated v3 artifact and independently checked capabilities.
-The current native adapter and scenario comparator do not support scheduled order
-imports or batch billing. `verify` and `activate` explicitly reject v3 and unknown
+The v4 comparator validates complete native order import and batch billing evidence
+through a host-supplied adapter. `verify` and `activate` explicitly reject v3 and unknown
 Blueprint versions before acquiring a claim or invoking the host. In particular,
 legacy verification receipts cannot activate a new profile. There is no fallback
 that interprets a batch import as a single record-created scenario.
 
-This supports verified artifact generation and planning. A runnable business
-extension, hosted adapter and native scenario verification still require separate
-implementation. Existing portable v1/v2 behavior remains covered.
+V3 supports verified artifact generation and planning. V4 adds shared verification
+and activation control, with synthetic evidence tests. The hosted adapter, public
+verification/activation routes and real native execution acceptance still require
+separate implementation. Existing portable v1/v2 behavior remains covered.
 
 ## Create an inactive hosted workflow from a reviewed template
 

@@ -47,7 +47,7 @@ build-release:
 quickstart-acceptance:
 	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.12 --report quickstart-acceptance.json
 
-# Run after build-release; verify original v1/v2/v3 wheels and published SDK a7.
+# Run after build-release; verify original v1/v2/v3 wheels and a7 v4 generation.
 flow-wheel-acceptance:
 	$(UV) run python scripts/check_flow_wheels.py --cli-wheel dist/sanka_cli-*-py3-none-any.whl
 

@@ -9,8 +9,9 @@ v3 verification and activation remain unavailable; this release does not provide
 a hosted HubSpot adapter or execute a business workflow.
 
 The current source embeds published SDK `0.1.0a7` from
-`78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`. Its new v4/v5 declarations do not
-enable additional runtime execution profiles. A future CLI publication requires
+`78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`. Blueprint v4 adds shared native Order
+billing verification and activation control; hosted execution requires a separate
+native adapter. Blueprint v5 execution remains unsupported. A future CLI publication requires
 a new package version and a separately reviewed release change; the 0.2.13
 publication commands below document the existing release and must not be rerun
 for this source upgrade.
@@ -57,7 +58,7 @@ their pinned sizes and hashes before starting the tests:
 make flow-wheel-acceptance
 ```
 
-This verifies embedded, original standalone and a7 SDK paths, all three admitted
+This verifies embedded, original standalone and a7 SDK paths, all four admitted
 Blueprint schemas, capability rejection even when a generator ignores it, template/schema tampering,
 and native endpoint substitution with unchanged echoed request metadata.
 The synthetic generator verifies artifact transport, not native business execution.
@@ -136,7 +137,8 @@ uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.2.13 \
 
 The workflow stages the reviewed `install.sh`, wheel, source archive, source
 commit and checksums as immutable GitHub release assets and a workflow artifact.
-The CLI repository and its release assets are public. A second
+Repository visibility and release access require separate authorization; this
+procedure does not authorize making a private repository public. A second
 attempt to create an existing release fails; inspect its exact assets before any
 retry. Never overwrite an uncertain release. The default installer version must
 match the package version, and existing system/uv/Homebrew installs remain owned
