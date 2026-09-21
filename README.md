@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/sankaHQ/sanka/main/docs/assets/sanka-logo.png" alt="Sanka" width="120" height="120">
+<img src="docs/assets/sanka-logo.png" alt="Sanka" width="120" height="120">
 
 # Sanka
 
