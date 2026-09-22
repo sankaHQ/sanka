@@ -107,7 +107,7 @@ def _frame(root: str) -> ComposeResult:
     home = Path.home()
     display_path = str(Path("~") / path.relative_to(home)) if path.is_relative_to(home) else root
     with Horizontal(id="brand"):
-        yield Static("▟▀▀▀▀▀\n▀▀▀▀▀▙\n▄▄▄▄▄▛", id="brand-mark", markup=False)
+        yield Static("▀█▀▀▀▀▀▀\n ▀▀▀▀▀█ \n▀▀▀▀▀▀▀▀", id="brand-mark", markup=False)
         with Vertical(id="brand-details"):
             yield Static(f"Sanka v{__version__}", id="brand-name", markup=False)
             directory = Static(display_path, id="brand-directory", markup=False)
@@ -1605,7 +1605,7 @@ class SankaApp(App[int]):
     CSS = """
     Screen { layout: vertical; }
     #brand { dock: top; height: 5; padding: 1 2; color: $text; background: $surface; }
-    #brand-mark { width: 6; height: 3; margin-right: 2; }
+    #brand-mark { width: 8; height: 3; margin-right: 2; }
     #brand-details { width: 1fr; height: 3; }
     #brand-name { height: 1; text-style: bold; }
     #brand-directory { height: 1; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
