@@ -21,7 +21,8 @@ Run these commands from the Django repository root and from the project's
 existing Python 3.12+ environment:
 
 ```bash
-uv tool install sanka-cli
+uv tool install --python 3.12 sanka-cli
+sanka extension add sanka/drf-to-fastapi
 
 sanka scan
 sanka plan .
@@ -29,6 +30,12 @@ sanka apply --plan-hash sha256:<hash-from-plan>  # exact hash printed by plan
 sanka test
 sanka verify
 ```
+
+Keep `--python 3.12`: when uv selects a newer interpreter, `sanka scan` reports
+that `.venv` must use a different Python. Reinstall with
+`uv tool install --python 3.12 --force sanka-cli`, then run
+`sanka extension remove sanka/drf-to-fastapi` and `sanka extension add
+sanka/drf-to-fastapi` so the extension environment is rebuilt.
 
 The single `sanka-cli` distribution owns both the `sanka` command and local
 engine. These commands are tokenless. Hosted authentication is checked only
