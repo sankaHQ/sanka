@@ -41,6 +41,7 @@ from sanka.cli.tui.model import (
 )
 from sanka.cli.tui.services import TuiServices, cloud_exit_code
 from sanka.cli.tui.widgets import ActivityLog, CliLine, EmptyState, KeysBar, StageHeader
+from sanka_cli import __version__
 
 _SETTLED = frozenset({"succeeded", "failed", "cancelled"})
 _MENU = (
@@ -100,9 +101,17 @@ class AppFooter(Vertical):
         yield CliLine()
 
 
-def _frame() -> ComposeResult:
-    # Menu docks first so it owns the left edge. The footer then sits in the
-    # remaining width, instead of running under the menu and hiding its text.
+def _frame(root: str) -> ComposeResult:
+    path = Path(root)
+    home = Path.home()
+    display_path = str(Path("~") / path.relative_to(home)) if path.is_relative_to(home) else root
+    with Horizontal(id="brand"):
+        yield Static("▀████████▀\n ▀██████▄ \n▄████████▄", id="brand-mark", markup=False)
+        with Vertical(id="brand-details"):
+            yield Static(f"Sanka v{__version__}", id="brand-name", markup=False)
+            directory = Static(display_path, id="brand-directory", markup=False)
+            directory.tooltip = root
+            yield directory
     yield OptionList(*(Option(label, id=name) for name, _key, label in _MENU), id="menu")
     yield AppFooter(id="footer")
 
@@ -417,14 +426,12 @@ class MissingExtensionScreen(ModalScreen[str | None]):
 
 class StatusScreen(SankaScreen):
     def compose(self) -> ComposeResult:
-        yield from _frame()
-        with Vertical(id="main"):
-            yield Static("Sanka", classes="section-title")
-            with VerticalScroll(id="status-detail"):
-                yield Static("Loading the current project…", id="current")
-                yield Static("Recent runs", classes="section-title")
-                yield DataTable(id="recent")
-                yield Static("", id="ledger")
+        yield from _frame(self.sanka.session.project_root)
+        with Vertical(id="main"), VerticalScroll(id="status-detail"):
+            yield Static("Loading the current project…", id="current")
+            yield Static("Recent runs", classes="section-title")
+            yield DataTable(id="recent")
+            yield Static("", id="ledger")
 
     def on_mount(self) -> None:
         table = self.query_one("#recent", DataTable)
@@ -557,7 +564,7 @@ class StageScreen(SankaScreen):
         await self.sanka.action_back()
 
     def compose(self) -> ComposeResult:
-        yield from _frame()
+        yield from _frame(self.sanka.session.project_root)
         with Vertical(id="main"):
             yield StageHeader(id="stage-header")
             with Horizontal(id="actions"):
@@ -972,7 +979,7 @@ class StageScreen(SankaScreen):
 
 class ExtensionListScreen(SankaScreen):
     def compose(self) -> ComposeResult:
-        yield from _frame()
+        yield from _frame(self.sanka.session.project_root)
         with Vertical(id="main"):
             yield Static("Extensions", classes="section-title")
             yield Static("", id="catalog-status")
@@ -1106,7 +1113,7 @@ class ExtensionDetailScreen(SankaScreen):
         self.extension_id = extension_id
 
     def compose(self) -> ComposeResult:
-        yield from _frame()
+        yield from _frame(self.sanka.session.project_root)
         with Vertical(id="main"):
             yield Static("", id="detail")
             with Horizontal():
@@ -1206,7 +1213,7 @@ class ExtensionDetailScreen(SankaScreen):
 
 class MarketplaceScreen(SankaScreen):
     def compose(self) -> ComposeResult:
-        yield from _frame()
+        yield from _frame(self.sanka.session.project_root)
         with Vertical(id="main"):
             yield Static("Extension marketplace", classes="section-title")
             yield Static("", id="catalog-status")
@@ -1397,7 +1404,7 @@ class CloudMonitorScreen(SankaScreen):
         self._started: datetime | None = None
 
     def compose(self) -> ComposeResult:
-        yield from _frame()
+        yield from _frame(self.sanka.session.project_root)
         with Vertical(id="main"):
             yield StageHeader(id="job-header")
             yield ProgressBar(id="progress", total=100, show_eta=False)
@@ -1596,6 +1603,11 @@ class SankaApp(App[int]):
     ESCAPE_TO_MINIMIZE = False
     CSS = """
     Screen { layout: vertical; }
+    #brand { dock: top; height: 3; padding: 0 1; color: $text; background: $surface; }
+    #brand-mark { width: 10; height: 3; margin-right: 2; }
+    #brand-details { width: 1fr; height: 3; }
+    #brand-name { height: 1; text-style: bold; }
+    #brand-directory { height: 1; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
     #footer { dock: bottom; height: 3; }
     KeysBar { height: 2; background: $primary; color: $text; text-style: bold; padding: 0 1; }
     #trust-path { text-style: bold; padding: 1 1 0 1; text-wrap: wrap; }
@@ -1615,7 +1627,7 @@ class SankaApp(App[int]):
     #search-filters Input { width: 1fr; }
     #search-hint { color: $text-muted; padding: 0 1; }
     CliLine { height: 1; background: $boost; color: $text; padding: 0 1; }
-    #menu { dock: left; width: 18; height: 100%; border: none; border-right: solid $primary; }
+    #menu { dock: left; width: 18; height: 1fr; margin-top: 3; border: none; border-right: solid $primary; }
     #main { height: 1fr; width: 1fr; }
     #status-detail { height: 1fr; }
     #stage-header { height: auto; padding: 0 1; }

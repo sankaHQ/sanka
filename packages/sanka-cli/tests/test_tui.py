@@ -34,7 +34,30 @@ from sanka.cli.tui.model import (
 from sanka.cli.tui.widgets import CliLine, KeysBar
 from sanka.runtime.extensions.model import ExtensionError
 from sanka.runtime.extensions.store import ExtensionStore
+from sanka_cli import __version__
 from sanka_cli.main import cli
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("theme", ["textual-dark", "textual-light"])
+async def test_brand_header_stays_visible_and_renders_paths_literally(theme: str) -> None:
+    root = "/work/[bold]project[/bold]/" + "long-directory/" * 8
+    app = SankaApp(FakeServices(), Session(project_root=root), start="status")
+    app.theme = theme
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        header = app.screen.query_one("#brand")
+        assert header.region.y == 0
+        assert header.region.height == 3
+        assert f"Sanka v{__version__}" in str(app.screen.query_one("#brand-name", Static).content)
+        directory = app.screen.query_one("#brand-directory", Static)
+        assert str(directory.content) == root
+        assert directory.tooltip == root
+        assert app.screen.query_one("#menu").region.y >= header.region.bottom
+        assert app.screen.query_one("#footer").region.bottom <= 24
+        await pilot.press("s")
+        await pilot.pause()
+        assert app.screen.query_one("#brand").region.height == 3
 
 
 class FakeServices:
