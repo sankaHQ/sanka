@@ -139,7 +139,12 @@ an exit code alone is not completion evidence. Add `--json` for one
 New to the CLI? Start with the
 [quickstart](https://sanka.com/docs/developers/quickstart/cli/). See the
 [DRF to FastAPI guide](docs/django-to-fastapi.md) for the supported native and
-compatibility envelopes.
+compatibility envelopes. Native `plan` output drops DRF
+`format_suffix_patterns` aliases (`/api/orders.json/` and the
+`<drf_format_suffix:format>` form) as a disclosed contract change; see
+[Dropped format-suffix alias routes](docs/django-to-fastapi.md#dropped-format-suffix-alias-routes)
+for why, how `plan`/`verify` report it, and the manual options if a
+client still calls `.json` URLs.
 
 ## Local and hosted commands
 
