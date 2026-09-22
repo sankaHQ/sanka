@@ -48,7 +48,7 @@ async def test_brand_header_stays_visible_and_renders_paths_literally(theme: str
         await pilot.pause()
         header = app.screen.query_one("#brand")
         assert header.region.y == 0
-        assert header.region.height == 7
+        assert header.region.height == 5
         assert f"Sanka v{__version__}" in str(app.screen.query_one("#brand-name", Static).content)
         directory = app.screen.query_one("#brand-directory", Static)
         assert str(directory.content) == root
@@ -57,7 +57,7 @@ async def test_brand_header_stays_visible_and_renders_paths_literally(theme: str
         assert app.screen.query_one("#footer").region.bottom <= 24
         await pilot.press("s")
         await pilot.pause()
-        assert app.screen.query_one("#brand").region.height == 7
+        assert app.screen.query_one("#brand").region.height == 5
 
 
 class FakeServices:
