@@ -24,12 +24,18 @@ def use_human_tui(state: Any) -> bool:
     )
 
 
-def launch_dashboard(root: Path | None = None, *, state: CLIState | None = None) -> int:
+def launch_dashboard(
+    root: Path | None = None,
+    *,
+    state: CLIState | None = None,
+    explicit_env_names: tuple[str, ...] = (),
+) -> int:
     project = (root or Path(".")).expanduser().resolve()
     app = SankaApp(
         HostServices(project, cli_state=state),
         Session(
             project_root=str(project),
+            explicit_env_names=explicit_env_names,
             profile=state.profile if state else None,
             base_url=state.base_url if state else None,
         ),
@@ -77,6 +83,7 @@ def launch_local(args: Any) -> int:
         session.target = getattr(args, "to", None)
         session.plan_hash = getattr(args, "plan_hash", None)
         session.configuration = _extension_configuration(args)
+        session.explicit_env_names = tuple(getattr(args, "extension_env", ()) or ())
         session.stage = StageRun(command=command)
         session.endpoints = list(services.saved_endpoints())
         start = command

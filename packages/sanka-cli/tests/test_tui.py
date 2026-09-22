@@ -214,6 +214,7 @@ class FakeServices:
         configuration: Mapping[str, Any],
         on_activity: Any,
         endpoints: tuple[str, ...] = (),
+        explicit_env_names: tuple[str, ...] = (),
     ) -> StageOutcome:
         on_activity(f"Waiting on the {command} extension")
         self.calls.append(
@@ -223,6 +224,7 @@ class FakeServices:
                 "plan_hash": plan_hash,
                 "configuration": dict(configuration),
                 "endpoints": endpoints,
+                "explicit_env_names": explicit_env_names,
             }
         )
         data: dict[str, Any] = {"plan_hash": "sha256:planned"} if command == "plan" else {}
@@ -1132,3 +1134,94 @@ async def test_completed_cloud_close_keeps_failure_and_frozen_duration() -> None
         assert expected != 0
         await pilot.click("#detach")
     assert app.return_value == expected
+
+
+@pytest.mark.parametrize("command", ["scan", "plan", "apply", "test", "verify"])
+def test_tui_forwards_explicit_environment_to_lifecycle(
+    command: str, tmp_path: Path, monkeypatch: Any
+) -> None:
+    from sanka.cli.tui.services import HostServices
+    from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
+
+    def require_environment(self: Any, **kwargs: Any) -> Any:
+        assert kwargs["explicit_env_names"] == ("SOURCE_PYTHON", "TEST_DATABASE_URL")
+        raise ExtensionError("ENV_RECEIVED", "Environment names reached the lifecycle")
+
+    monkeypatch.setattr(ApplicationLifecycle, command, require_environment)
+    result = HostServices(tmp_path).run_local(
+        command,
+        target="gin",
+        plan_hash="sha256:reviewed",
+        configuration={},
+        explicit_env_names=("SOURCE_PYTHON", "TEST_DATABASE_URL"),
+        on_activity=lambda _: None,
+    )
+    assert result.run.error_code == "ENV_RECEIVED"
+
+
+def test_local_launch_keeps_environment_names_and_command(tmp_path: Path, monkeypatch: Any) -> None:
+    from argparse import Namespace
+
+    from sanka.cli.tui import launch
+
+    def inspect(app: SankaApp) -> int:
+        assert app.session.explicit_env_names == ("SOURCE_PYTHON", "TEST_DATABASE_URL")
+        app.session.command = "verify"
+        assert (
+            "--extension-env SOURCE_PYTHON --extension-env TEST_DATABASE_URL"
+            in app.session.footer_line()
+        )
+        return 0
+
+    monkeypatch.setattr(launch, "_run", inspect)
+    assert (
+        launch.launch_local(
+            Namespace(
+                command="scan",
+                root=str(tmp_path),
+                extension_env=["SOURCE_PYTHON", "TEST_DATABASE_URL"],
+            )
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_tui_keeps_environment_allowlist_across_stage_navigation() -> None:
+    services = FakeServices()
+    session = Session(
+        project_root="/work/demo", explicit_env_names=("SOURCE_PYTHON", "TEST_DATABASE_URL")
+    )
+    app = SankaApp(services, session, start="scan")
+    async with app.run_test(size=(120, 40)) as pilot:
+        for stage in ("scan", "test", "verify"):
+            if stage != "scan":
+                app.action_stage(stage)
+            await pilot.pause()
+            await pilot.click("#run-stage")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert services.calls[-1]["explicit_env_names"] == (
+                "SOURCE_PYTHON",
+                "TEST_DATABASE_URL",
+            )
+
+
+def test_tui_dashboard_accepts_repeatable_environment_names(monkeypatch: Any) -> None:
+    from types import SimpleNamespace
+
+    from sanka.cli.tui import launch
+
+    tty = SimpleNamespace(isatty=lambda: True)
+    monkeypatch.setattr("sanka_cli.main.sys", SimpleNamespace(stdin=tty, stdout=tty))
+
+    def inspect(app: SankaApp) -> int:
+        assert app.session.explicit_env_names == ("SOURCE_PYTHON", "TEST_DATABASE_URL")
+        return 0
+
+    monkeypatch.setattr(launch, "_run", inspect)
+    result = CliRunner().invoke(
+        cli, ["tui", "--extension-env", "SOURCE_PYTHON", "--extension-env", "TEST_DATABASE_URL"]
+    )
+    assert result.exit_code == 0, result.output

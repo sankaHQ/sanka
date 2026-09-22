@@ -77,3 +77,22 @@ runs use recorded completion timestamps for duration (or say unavailable), offer
 Close rather than Detach, and keep metadata and evidence under Run details.
 Missing hashes disable Copy hash. No verification coverage is inferred from a
 worker's successful completion.
+
+## Local extension environment
+
+Pass repeatable `--extension-env NAME` options when opening the dashboard or a
+lifecycle screen. Export the values in the launching terminal first:
+
+```bash
+sanka tui --extension-env SOURCE_PYTHON --extension-env TEST_DATABASE_URL
+# Or start directly at Scan:
+sanka scan . --extension-env SOURCE_PYTHON --extension-env TEST_DATABASE_URL
+```
+
+Use the variable names required by your extension configuration. The selection
+stays with the session through Scan, Plan, Apply, Test and Verify, including
+reruns. The Command view includes the names so the CLI equivalent is reproducible.
+Only names are kept in the TUI session; values are resolved by the existing
+extension runner and are not added to configuration or TUI history. This does
+not forward your whole shell environment or upload local variables to cloud runs.
+Re-supply the options when opening a new TUI session.

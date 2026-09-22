@@ -1270,6 +1270,7 @@ class StageScreen(SankaScreen):
             configuration=configuration,
             on_activity=on_activity,
             endpoints=endpoints,
+            explicit_env_names=self.sanka.session.explicit_env_names,
         )
         self.app.call_from_thread(self._finish, outcome)
 

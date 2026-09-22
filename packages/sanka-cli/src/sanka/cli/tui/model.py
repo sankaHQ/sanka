@@ -365,6 +365,7 @@ class Session:
     target: str | None = None
     plan_hash: str | None = None
     configuration: dict[str, Any] = field(default_factory=dict)
+    explicit_env_names: tuple[str, ...] = ()
     endpoints: list[EndpointChoice] = field(default_factory=list)
     stage: StageRun = field(default_factory=lambda: StageRun("status"))
     job: JobRef | None = None
@@ -415,6 +416,8 @@ class Session:
                     parts += ["--to", self.target]
                 if self.plan_hash and command == "apply":
                     parts += ["--plan-hash", self.plan_hash]
+                for name in self.explicit_env_names:
+                    parts += ["--extension-env", name]
                 if self.configuration:
                     parts += ["--extension-config", json.dumps(self.configuration)]
         return shlex.join([*parts, "--json"])

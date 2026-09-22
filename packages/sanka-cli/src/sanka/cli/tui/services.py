@@ -83,6 +83,7 @@ class TuiServices(Protocol):
         configuration: Mapping[str, Any],
         on_activity: Activity,
         endpoints: tuple[str, ...] = (),
+        explicit_env_names: tuple[str, ...] = (),
     ) -> StageOutcome: ...
 
     def history(self) -> tuple[HistoryEntry, ...]: ...
@@ -372,6 +373,7 @@ class HostServices:
         configuration: Mapping[str, Any],
         on_activity: Activity,
         endpoints: tuple[str, ...] = (),
+        explicit_env_names: tuple[str, ...] = (),
     ) -> StageOutcome:
         from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
         from sanka.runtime.extensions.runner import ExtensionRunner
@@ -401,7 +403,12 @@ class HostServices:
         started = datetime.now(UTC)
         try:
             result = _dispatch_lifecycle(
-                lifecycle, command, target=target, plan_hash=plan_hash, configuration=cleaned
+                lifecycle,
+                command,
+                target=target,
+                plan_hash=plan_hash,
+                configuration=cleaned,
+                explicit_env_names=explicit_env_names,
             )
         except ExtensionError as error:
             outcome = _outcome_from_error(command, error, started)
@@ -702,19 +709,26 @@ def _dispatch_lifecycle(
     target: str | None,
     plan_hash: str | None,
     configuration: Mapping[str, Any],
+    explicit_env_names: tuple[str, ...] = (),
 ) -> Any:
     if command == "scan":
-        return lifecycle.scan(configuration=configuration)
+        return lifecycle.scan(configuration=configuration, explicit_env_names=explicit_env_names)
     if command == "plan":
-        return lifecycle.plan(target=target, configuration=configuration)
+        return lifecycle.plan(
+            target=target, configuration=configuration, explicit_env_names=explicit_env_names
+        )
     if command == "apply":
         if not plan_hash:
             raise ExtensionError("SANKA_USAGE", "A reviewed plan hash is required")
-        return lifecycle.apply(reviewed_plan_hash=plan_hash, configuration=configuration)
+        return lifecycle.apply(
+            reviewed_plan_hash=plan_hash,
+            configuration=configuration,
+            explicit_env_names=explicit_env_names,
+        )
     if command == "test":
-        return lifecycle.test(configuration=configuration)
+        return lifecycle.test(configuration=configuration, explicit_env_names=explicit_env_names)
     if command == "verify":
-        return lifecycle.verify(configuration=configuration)
+        return lifecycle.verify(configuration=configuration, explicit_env_names=explicit_env_names)
     raise ExtensionError("SANKA_USAGE", f"Unsupported stage {command}")
 
 
