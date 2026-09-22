@@ -23,7 +23,9 @@ from textual.widgets import (
     Label,
     OptionList,
     ProgressBar,
+    Select,
     Static,
+    TextArea,
 )
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
@@ -53,6 +55,7 @@ _MENU = (
     ("verify", "v", "Verify"),
     ("extensions", "e", "Extensions"),
     ("marketplace", "m", "Marketplace"),
+    ("cloud", "c", "Cloud / Account"),
     ("quit", "q", "Quit"),
 )
 
@@ -79,7 +82,7 @@ def _keys_line(
     find = "/ search    " if search else ""
     return (
         f"{action}s scan    p plan    a apply    t test    v verify\n"
-        f"e extensions    m marketplace    {find}{leave}    q quit"
+        f"e extensions    m market  c cloud  {find}{leave}    q quit"
     )
 
 
@@ -163,6 +166,9 @@ class SankaScreen(Screen[None]):
         choice = str(event.option.id)
         if choice == "quit":
             self.sanka.exit(self.sanka.session.exit_code)
+            return
+        if choice == "cloud":
+            self.sanka.action_cloud()
             return
         if choice == "extensions":
             self.sanka.action_extensions()
@@ -386,10 +392,12 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
     def compose(self) -> ComposeResult:
-        yield Static(self.message, id="confirm-message")
-        with Horizontal():
-            yield Button("Confirm", id="yes")
-            yield Button("Cancel", id="no")
+        with Vertical(id="configuration-modal"):
+            with VerticalScroll():
+                yield Static(self.message, id="confirm-message", markup=False)
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Confirm", id="yes")
+                yield Button("Cancel", id="no")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")
@@ -425,6 +433,110 @@ class MissingExtensionScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
+    """Editable configuration before execution, with DRF recipe choices."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, target: str, values: dict[str, Any], *, drf: bool) -> None:
+        super().__init__()
+        self.target, self.values, self.drf = target, values, drf
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="configuration-modal"):
+            yield Label(f"Plan configuration — {self.target}")
+            with VerticalScroll():
+                if self.drf:
+                    yield Label("Output directory (inside this project)")
+                    yield Input(
+                        str(self.values.get("output", f"{self.target}-app")), id="plan-output"
+                    )
+                    if self.target == "fastapi":
+                        for name, label, options, default in (
+                            (
+                                "generation",
+                                "Generation layout",
+                                ("minimal", "full", "update"),
+                                "minimal",
+                            ),
+                            (
+                                "strategy",
+                                "Strategy: native or Django compatibility bridge",
+                                ("native", "compatibility"),
+                                "native",
+                            ),
+                            (
+                                "package_manager",
+                                "Generated project's package manager",
+                                ("uv", "pip"),
+                                "uv",
+                            ),
+                        ):
+                            yield Label(label)
+                            current = str(self.values.get(name, default))
+                            choices = options if current in options else (*options, current)
+                            yield Select(
+                                [(v, v) for v in choices],
+                                value=current,
+                                allow_blank=False,
+                                id=f"plan-{name}",
+                            )
+                    yield Label("Django settings module (optional; inferred when empty)")
+                    yield Input(str(self.values.get("settings_module", "")), id="plan-settings")
+                yield Label("Additional extension configuration (JSON object)")
+                known = {"output", "settings_module"}
+                if self.target == "fastapi":
+                    known.update({"generation", "strategy", "package_manager"})
+                extra = {k: v for k, v in self.values.items() if not self.drf or k not in known}
+                yield TextArea(json.dumps(extra, indent=2), id="plan-extra")
+            yield Static("", id="configuration-error", markup=False)
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Save", id="save-configuration")
+                yield Button("Cancel", id="cancel-configuration")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-configuration":
+            self.dismiss(None)
+        elif event.button.id == "save-configuration":
+            try:
+                values = json.loads(self.query_one("#plan-extra", TextArea).text)
+                if not isinstance(values, dict):
+                    raise ValueError("Additional configuration must be a JSON object.")
+                if self.drf:
+                    output = self.query_one("#plan-output", Input).value.strip()
+                    app = self.app
+                    assert isinstance(app, SankaApp)
+                    root = Path(app.session.project_root).resolve()
+                    destination = (root / output).resolve()
+                    if not output or destination == root or not destination.is_relative_to(root):
+                        raise ValueError("Choose an output directory inside the project.")
+                    values["output"] = output
+                    if self.target == "fastapi":
+                        for name in ("generation", "strategy", "package_manager"):
+                            values[name] = self.query_one(f"#plan-{name}", Select).value
+                        allowed = {
+                            "generation": ("minimal", "full", "update"),
+                            "strategy": ("native", "compatibility"),
+                            "package_manager": ("uv", "pip"),
+                        }
+                        for name, choices in allowed.items():
+                            if values[name] not in choices:
+                                raise ValueError(f"{name}: choose {', '.join(choices)}.")
+                    if destination.exists() and values.get("generation") != "update":
+                        raise ValueError(
+                            "Output already exists. Choose a new directory or update mode."
+                        )
+                    settings = self.query_one("#plan-settings", Input).value.strip()
+                    if settings:
+                        values["settings_module"] = settings
+                self.dismiss(values)
+            except (ValueError, OSError) as error:
+                self.query_one("#configuration-error", Static).update(str(error))
+
+
 class StatusScreen(SankaScreen):
     def compose(self) -> ComposeResult:
         yield from _frame(self.sanka.session.project_root)
@@ -440,6 +552,12 @@ class StatusScreen(SankaScreen):
         table.add_columns("When", "Result", "Migration", "Hash", "Execution")
         self.refresh_footer()
         self.query_one("#menu", OptionList).focus()
+        self.run_worker(self._load, thread=True, exclusive=True)
+
+    def on_screen_resume(self) -> None:
+        self.sanka.session.command = "status"
+        self.sanka.session.job = None
+        self.refresh_footer()
         self.run_worker(self._load, thread=True, exclusive=True)
 
     def _load(self) -> None:
@@ -520,6 +638,7 @@ class StatusScreen(SankaScreen):
             self.app.push_screen(CloudMonitorScreen())
             return
         entry = self._history[index]
+        self.sanka.session.target = entry.target
         self.sanka.session.command = entry.stage
         self.sanka.session.stage = StageRun(
             command=entry.stage,
@@ -527,6 +646,10 @@ class StatusScreen(SankaScreen):
             plan_hash=entry.plan_hash,
             message=f"{entry.stage} {entry.outcome}",
             execution=entry.execution,
+            error_code=entry.error_code,
+            error_message=entry.message if entry.error_code else "",
+            artifacts=entry.artifacts,
+            result_data={"duration": entry.duration, "configuration": entry.configuration},
         )
         self.app.push_screen(StageScreen(entry.stage, review=True))
 
@@ -544,6 +667,8 @@ class StageScreen(SankaScreen):
         self.review = review
         self._input_names: list[str] = []
         self._targets: tuple[str, ...] = ()
+        self._configured_target: str | None = None
+        self._run = StageRun(command)
 
     def action_run(self) -> None:
         if self.review or not self.query("#run-stage"):
@@ -570,11 +695,14 @@ class StageScreen(SankaScreen):
             yield StageHeader(id="stage-header")
             with Horizontal(id="actions"):
                 yield Button("Run", id="run-stage")
+                yield Button("Configure", id="configure-stage")
+                yield Button("Copy command", id="copy-command")
+                yield Button("Copy hash", id="copy-hash")
             yield ProgressBar(id="progress", total=100, show_eta=False)
             yield VerticalScroll(id="setup")
             yield DataTable(id="rows")
             with VerticalScroll(id="result-scroll"):
-                yield Static("", id="result")
+                yield Static("", id="result", markup=False)
             yield ActivityLog(id="log", wrap=True)
 
     def on_mount(self) -> None:
@@ -586,6 +714,7 @@ class StageScreen(SankaScreen):
         self.query_one("#result-scroll").display = False
         self.query_one("#log").display = False
         if self.review:
+            self._run = session.stage
             self.query_one("#setup", VerticalScroll).display = False
             self.query_one("#actions").display = False
             self.query_one("#run-stage", Button).display = False
@@ -593,8 +722,9 @@ class StageScreen(SankaScreen):
             self._set_result(_review_text(session))
             self.refresh_footer()
             return
-        if session.stage.command != self.command or session.stage.phase == "idle":
-            session.stage = StageRun(command=self.command, execution=session.stage.execution)
+        session.stage = session.stages.get(self.command, StageRun(command=self.command))
+        self._run = session.stage
+        self.query_one("#configure-stage").display = self.command == "plan"
         self.query_one(StageHeader).show_stage(session.stage, root=session.project_root)
         self.refresh_footer()
         button = self.query_one("#run-stage", Button)
@@ -618,7 +748,14 @@ class StageScreen(SankaScreen):
             self.start_catalog_refresh()
         if self.autostart and self.command not in {"plan", "apply"}:
             self._start()
+        if self._run.phase != "idle":
+            self._set_result(_result_text(StageOutcome(self._run), session.target))
         self.refresh_footer()
+
+    def on_screen_resume(self) -> None:
+        self.sanka.session.command = self.command
+        self.sanka.session.stage = self._run
+        super().on_screen_resume()
 
     def _set_result(self, text: str) -> None:
         pane = self.query_one("#result-scroll", VerticalScroll)
@@ -627,7 +764,7 @@ class StageScreen(SankaScreen):
             return
         pane.display = True
         self.query_one("#result", Static).update(text)
-        pane.scroll_end(animate=False)
+        pane.scroll_home(animate=False)
 
     def _mount_plan(self, setup: VerticalScroll) -> None:
         self._targets = self.sanka.services.targets()
@@ -671,7 +808,7 @@ class StageScreen(SankaScreen):
         setup.mount(OptionList(id="hash-list"))
         listing = self.query_one("#hash-list", OptionList)
         for value in hashes:
-            listing.add_option(Option(value, id=value))
+            listing.add_option(Option(value[:19] + "…", id=value))
         if chosen in hashes:
             listing.highlighted = hashes.index(chosen)
             button.disabled = False
@@ -768,6 +905,15 @@ class StageScreen(SankaScreen):
         self.refresh_footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "configure-stage":
+            self._configure_plan()
+            return
+        if event.button.id == "copy-command":
+            self.app.copy_to_clipboard(self.sanka.session.footer_line())
+            return
+        if event.button.id == "copy-hash":
+            self.app.copy_to_clipboard(self._run.plan_hash or self.sanka.session.plan_hash or "")
+            return
         if event.button.id == "search":
             self.open_search()
             return
@@ -777,6 +923,26 @@ class StageScreen(SankaScreen):
             self._confirm_apply()
             return
         self._start()
+
+    def _configure_plan(self) -> None:
+        target = self.sanka.session.target
+        if not target:
+            self.notify("Choose a target first.")
+            return
+        choices = self.sanka.services.extensions(target=target)
+        drf = any(item.id == f"sanka/drf-to-{target}" for item in choices)
+        self.app.push_screen(
+            PlanConfiguration(target, self.sanka.session.configuration, drf=drf),
+            lambda values: self._configured(target, values),
+        )
+
+    def _configured(self, target: str, values: dict[str, Any] | None) -> None:
+        if values is None:
+            return
+        self.sanka.session.configuration = values
+        self._configured_target = target
+        self._set_result("Configuration saved. Review the values with Configure, then run Plan.")
+        self.refresh_footer()
 
     def _confirm_apply(self) -> None:
         session = self.sanka.session
@@ -824,6 +990,13 @@ class StageScreen(SankaScreen):
             if not session.target:
                 self.notify("Choose --to.")
                 return
+            choices = self.sanka.services.extensions(target=session.target)
+            if (
+                any(item.id == f"sanka/drf-to-{session.target}" for item in choices)
+                and self._configured_target != session.target
+            ):
+                self._configure_plan()
+                return
             pending = self._needs_install(session.target)
             if pending:
                 self.app.push_screen(
@@ -843,7 +1016,12 @@ class StageScreen(SankaScreen):
             execution="local",
             started_at=_now(),
         )
+        self._run = session.stage
+        self._set_result("")
+        self.query_one("#rows").display = False
+        self.query_one(ActivityLog).clear()
         configuration = self._configuration()
+        session.configuration = configuration
         selected = (
             ()
             if self.command == "plan"
@@ -861,7 +1039,7 @@ class StageScreen(SankaScreen):
         )
 
     def _tick(self) -> None:
-        stage = self.sanka.session.stage
+        stage = self._run
         if self.sanka.session.busy:
             self.query_one(StageHeader).show_stage(stage, root=self.sanka.session.project_root)
             self._show_progress(stage.progress)
@@ -921,6 +1099,10 @@ class StageScreen(SankaScreen):
         session = self.sanka.session
         session.busy = False
         session.stage = outcome.run
+        self._run = outcome.run
+        session.stages[self.command] = outcome.run
+        self.query_one("#setup").display = bool(outcome.inputs)
+        self.query_one("#log").display = False
         session.exit_code = outcome.exit_code
         if outcome.run.plan_hash:
             session.plan_hash = outcome.run.plan_hash
@@ -937,6 +1119,7 @@ class StageScreen(SankaScreen):
             for name in outcome.inputs:
                 if name not in self._input_names:
                     self._input_names.append(name)
+                    setup.mount(Label(name))
                     setup.mount(Input(placeholder=name, id=f"cfg-{name}"))
             self.notify("The extension needs a few configuration values.")
         if outcome.missing:
@@ -1399,27 +1582,64 @@ class MarketplaceScreen(SankaScreen):
 
 
 class CloudMonitorScreen(SankaScreen):
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("r", "cloud_button('refresh')", "Refresh"),
+        Binding("a", "cloud_button('cloud-apply')", "Apply"),
+        Binding("f", "cloud_button('cloud-fix')", "Fix"),
+        Binding("b", "cloud_button('cloud-receipt')", "Receipt"),
+        Binding("d", "cloud_button('cloud-download')", "Download"),
+        Binding("l", "cloud_button('cloud-logs')", "Logs"),
+    ]
+
+    def action_cloud_button(self, name: str) -> None:
+        button = self.query_one(f"#{name}", Button)
+        if button.display and not button.disabled:
+            button.press()
+
+    def refresh_footer(self) -> None:
+        if not self.query(CliLine):
+            return
+        self.query_one(CliLine).show(self.sanka.session.footer_line())
+        actions = ["r refresh", "b receipt", "d download", "l logs"]
+        for key, name in (("a", "cloud-apply"), ("f", "cloud-fix")):
+            if self.query_one(f"#{name}").display:
+                actions.append(f"{key} {name.removeprefix('cloud-')}")
+        leave = "hosted run keeps going" if self.sanka.session.busy else "esc back"
+        self.query_one(KeysBar).update("  ".join(actions) + f"\nc cloud/account  {leave}  q quit")
+
     def __init__(self, *, timeout_seconds: int = 900) -> None:
         super().__init__()
         self.timeout_seconds = timeout_seconds
         self._started: datetime | None = None
+        self._job: JobRef | None = None
 
     def compose(self) -> ComposeResult:
         yield from _frame(self.sanka.session.project_root)
         with Vertical(id="main"):
             yield StageHeader(id="job-header")
-            yield ProgressBar(id="progress", total=100, show_eta=False)
-            yield Static("", id="job-fields")
-            yield ActivityLog(id="log", wrap=True)
-            yield Static("", id="job-error")
-            yield Static("", id="job-result")
-            with Horizontal():
+            with Horizontal(id="cloud-actions"):
                 yield Button("Refresh", id="refresh")
                 yield Button("Detach", id="detach")
                 yield Button("Cancel", id="cancel")
+                yield Button("Apply", id="cloud-apply")
+                yield Button("Fix", id="cloud-fix")
+            with Horizontal(id="cloud-evidence-actions"):
+                yield Button("Receipt", id="cloud-receipt")
+                yield Button("Download", id="cloud-download")
+                yield Button("Logs", id="cloud-logs")
+                yield Button("Copy hash", id="cloud-copy-hash")
+                yield Button("Command", id="cloud-copy-command")
+            yield ProgressBar(id="progress", total=100, show_eta=False)
+            with VerticalScroll(id="cloud-detail"):
+                yield Static("", id="job-error", markup=False)
+                yield Static("", id="job-result", markup=False)
+                yield Static("", id="job-receipt", markup=False)
+                yield Static("", id="job-fields", markup=False)
+                yield ActivityLog(id="log", wrap=True)
 
     def on_mount(self) -> None:
-        job = self.sanka.session.job
+        self._job = self.sanka.session.job
+        job = self._job
         if job is None:
             self.query_one("#job-fields", Static).update("No cloud job is selected.")
             return
@@ -1430,6 +1650,8 @@ class CloudMonitorScreen(SankaScreen):
         self.refresh_footer()
         if job.route != "cloud-run":
             self.query_one("#cancel", Button).label = "Detach only"
+        if job.route == "discover" and job.status in _SETTLED:
+            self.run_worker(self._refresh_once, thread=True)
         if job.status not in _SETTLED:
             self.sanka.session.busy = True
             self.refresh_footer()
@@ -1437,14 +1659,22 @@ class CloudMonitorScreen(SankaScreen):
             self.run_worker(self._poll, thread=True, exclusive=True)
             self.set_interval(1, self._tick_job)
 
+    def on_screen_resume(self) -> None:
+        if self._job is not None:
+            self.sanka.session.job = self._job
+            self.sanka.session.command = self._job.command
+        self.refresh_footer()
+
     def _tick_job(self) -> None:
-        job = self.sanka.session.job
+        job = self._job
         if job is None or job.status in _SETTLED:
             return
         self.query_one(StageHeader).show_job(job, elapsed=format_elapsed(self._started))
 
     def _show_job(self, job: JobRef, lines: tuple[str, ...]) -> None:
+        self._job = job
         self.sanka.session.job = job
+        self.sanka.session.command = job.command
         self.query_one(StageHeader).show_job(job, elapsed=format_elapsed(self._started))
         bar = self.query_one("#progress", ProgressBar)
         if job.progress is None:
@@ -1452,6 +1682,20 @@ class CloudMonitorScreen(SankaScreen):
         else:
             bar.display = True
             bar.update(progress=job.progress * 100)
+        self.query_one("#cloud-apply", Button).display = (
+            job.route == "code-plan"
+            and job.command in {"scan", "plan"}
+            and job.status == "succeeded"
+            and bool(job.plan_sha)
+        )
+        self.query_one("#cloud-fix", Button).display = (
+            job.status in _SETTLED and job.command not in {"scan", "plan"}
+        )
+        self.query_one("#cancel", Button).display = job.route == "cloud-run"
+        self.query_one("#cancel", Button).disabled = (
+            job.status in _SETTLED or job.route != "cloud-run"
+        )
+        self.query_one("#cloud-download", Button).disabled = job.status not in _SETTLED
         endpoints = ", ".join(job.endpoint_ids) if job.endpoint_ids else "not reported"
         self.query_one("#job-fields", Static).update(
             "\n".join(
@@ -1483,7 +1727,7 @@ class CloudMonitorScreen(SankaScreen):
             logs = (
                 "Logs are available as a download now that the run has finished."
                 if job.status == "succeeded"
-                else "Logs become a download when the hosted run finishes."
+                else "Download retained logs.txt even when verification failed."
             )
             self.query_one("#job-result", Static).update(
                 "\n".join(
@@ -1492,17 +1736,20 @@ class CloudMonitorScreen(SankaScreen):
                         f"Receipt         {job.receipt_command}",
                         f"Download        {job.download_command}",
                         f"UI              {job.ui_url or '-'}",
+                        _cloud_evidence(job),
                         logs,
                     )
                 )
             )
         else:
             self.query_one("#job-result", Static).update(
-                "Logs are not live. They can be downloaded when the run completes."
+                "Queued — waiting for a worker; active compute has not started."
+                if job.status == "queued"
+                else "Running on a hosted worker. Quit detaches; it does not cancel."
             )
 
     def _poll(self) -> None:
-        job = self.sanka.session.job
+        job = self._job
         if job is None:
             return
         cursor = 0
@@ -1532,6 +1779,7 @@ class CloudMonitorScreen(SankaScreen):
         self.sanka.session.busy = False
         self.sanka.session.exit_code = 1
         self.query_one("#job-error", Static).update(message)
+        self.refresh_footer()
 
     def _timed_out(self, job: JobRef) -> None:
         self.sanka.session.busy = False
@@ -1542,8 +1790,37 @@ class CloudMonitorScreen(SankaScreen):
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        job = self._job
+        if job is not None and event.button.id in {"cloud-apply", "cloud-fix"}:
+            from sanka.cli.tui.cloud import CloudAction
+
+            self.app.push_screen(
+                CloudAction(
+                    "apply" if event.button.id == "cloud-apply" else "fix",
+                    job.workspace,
+                    job=job,
+                    profile=self.sanka.session.profile,
+                    base_url=self.sanka.session.base_url,
+                ),
+                self._continued,
+            )
+            return
+        if job is not None and event.button.id == "cloud-copy-hash":
+            self.app.copy_to_clipboard(job.plan_sha)
+            return
+        if job is not None and event.button.id == "cloud-copy-command":
+            self.app.copy_to_clipboard(self.sanka.session.footer_line())
+            return
+        if job is not None and event.button.id in {"cloud-receipt", "cloud-download", "cloud-logs"}:
+            action = {
+                "cloud-receipt": "receipt",
+                "cloud-download": "download",
+                "cloud-logs": "logs",
+            }[str(event.button.id)]
+            self.run_worker(lambda: self._evidence_action(job, action), thread=True)
+            return
         if event.button.id == "detach":
-            job = self.sanka.session.job
+            job = self._job
             reattach = (
                 f"sanka cloud status --workspace {job.workspace} {job.run_id}"
                 if job is not None
@@ -1565,7 +1842,7 @@ class CloudMonitorScreen(SankaScreen):
             self.run_worker(self._refresh_once, thread=True)
             return
         if event.button.id == "cancel":
-            job = self.sanka.session.job
+            job = self._job
             if job is None:
                 return
             self.app.push_screen(
@@ -1573,8 +1850,37 @@ class CloudMonitorScreen(SankaScreen):
                 callback=self._cancel,
             )
 
+    def _continued(self, job: JobRef | None) -> None:
+        if job is not None:
+            self.sanka.session.job = job
+            self.app.push_screen(CloudMonitorScreen())
+
+    def _evidence_action(self, job: JobRef, action: str) -> None:
+        try:
+            args = [
+                "cloud",
+                "receipt" if action == "receipt" else "download",
+                job.run_id,
+                "--workspace",
+                job.workspace,
+            ]
+            if action in {"download", "logs"}:
+                destination = (
+                    Path(self.sanka.session.project_root)
+                    / f"sanka-{job.run_id}-{'logs.txt' if action == 'logs' else 'output.zip'}"
+                )
+                args += ["--to", str(destination)]
+                if action == "logs":
+                    args += ["--artifact", "logs.txt"]
+            payload = self.sanka.services.cloud_command(args)
+            self.app.call_from_thread(
+                self.query_one("#job-receipt", Static).update, json.dumps(payload, indent=2)
+            )
+        except Exception as error:
+            self.app.call_from_thread(self.notify, str(error))
+
     def _refresh_once(self) -> None:
-        job = self.sanka.session.job
+        job = self._job
         if job is None:
             return
         try:
@@ -1586,9 +1892,9 @@ class CloudMonitorScreen(SankaScreen):
         self.app.call_from_thread(self._polled, job, lines)
 
     def _cancel(self, yes: bool | None) -> None:
-        if not yes or self.sanka.session.job is None:
+        if not yes or self._job is None:
             return
-        job = self.sanka.session.job
+        job = self._job
         self.run_worker(lambda: self._cancel_work(job), thread=True)
 
     def _cancel_work(self, job: JobRef) -> None:
@@ -1645,6 +1951,9 @@ class SankaApp(App[int]):
         padding: 0 1;
     }
     Button:hover, Button:focus { background: $primary; }
+    #cloud-actions, #cloud-evidence-actions { height: 1; }
+    #job-header { height: auto; max-height: 3; }
+    #cloud-detail { height: 1fr; }
     #actions { height: 1; padding: 0 1; }
     #run-stage {
         width: auto;
@@ -1653,7 +1962,14 @@ class SankaApp(App[int]):
         text-style: bold;
     }
     #run-stage:disabled { background: $panel; color: $text-muted; }
-    #setup { height: auto; max-height: 70%; padding: 0 1; }
+    PlanConfiguration, CloudAction, ConfirmScreen { align: center middle; }
+    #configuration-modal {
+        width: 70; max-width: 95%; height: 90%;
+        background: $surface; border: solid $primary; padding: 1;
+    }
+    .dialog-actions { height: 1; }
+    #plan-extra { height: 6; }
+    #setup { height: auto; max-height: 40%; padding: 0 1; }
     #target-list {
         height: auto;
         max-height: 9;
@@ -1662,10 +1978,10 @@ class SankaApp(App[int]):
         background: $surface;
     }
     #result-scroll { height: 1fr; padding: 0 1; }
-    #rows { height: 8; }
+    #rows { height: 4; }
     #log {
         height: auto;
-        max-height: 12;
+        max-height: 4;
         margin: 0 1 1 1;
         border: round $primary;
         padding: 0 1;
@@ -1692,6 +2008,7 @@ class SankaApp(App[int]):
         Binding("v", "stage('verify')", "Verify"),
         Binding("e", "extensions", "Extensions"),
         Binding("m", "marketplace", "Marketplace"),
+        Binding("c", "cloud", "Cloud / Account"),
         Binding("slash", "search", "Search"),
         Binding("escape", "back", "Back"),
         Binding("q", "quit", "Quit"),
@@ -1754,6 +2071,12 @@ class SankaApp(App[int]):
             return
         self.session.command = command
         self.push_screen(StageScreen(command))
+
+    def action_cloud(self) -> None:
+        if not self._busy():
+            from sanka.cli.tui.cloud import CloudSetupScreen
+
+            self.push_screen(CloudSetupScreen())
 
     def action_extensions(self) -> None:
         if not self._busy():
@@ -1827,14 +2150,20 @@ def _review_text(session: Session) -> str:
         f"Plan hash  {stage.plan_hash or '-'}",
         "This run is finished. Start a new stage to run it again.",
     ]
-    if stage.message:
-        lines.insert(1, stage.message)
+    lines.append(_result_text(StageOutcome(stage), session.target))
     return "\n".join(lines)
 
 
 def _result_text(outcome: StageOutcome, target: str | None) -> str:
     run = outcome.run
     lines = [run.message or run.phase]
+    if run.command in {"test", "verify"}:
+        lines.append(
+            "Passed only within the reported scope; this is not proof of all source behavior."
+            if run.phase == "succeeded"
+            else "The reported checks did not establish a pass."
+        )
+    lines.extend(_evidence_lines(run.result_data))
     fingerprint = run.result_data.get("fingerprint")
     if isinstance(fingerprint, dict):
         languages = fingerprint.get("languages")
@@ -1891,3 +2220,46 @@ def _result_text(outcome: StageOutcome, target: str | None) -> str:
     if run.command == "scan" and not parse_endpoints(run.result_data):
         lines.append("The extension has not reported endpoints.")
     return "\n".join(lines)
+
+
+def _evidence_lines(data: object, prefix: str = "") -> list[str]:
+    lines: list[str] = []
+    if not isinstance(data, dict):
+        return lines
+    for key, value in data.items():
+        label = f"{prefix}{key}"
+        if isinstance(value, dict):
+            lines.extend(_evidence_lines(value, label + "."))
+        elif isinstance(value, (int, float, bool)) or key in {
+            "stdout",
+            "stderr",
+            "log",
+            "test_output",
+            "test_log",
+            "scope",
+            "output",
+            "status",
+            "reason",
+            "verification_scope",
+            "limitations",
+            "risks",
+            "files",
+            "dropped_routes",
+            "checks",
+            "generated_files",
+        }:
+            rendered = (
+                json.dumps(value, ensure_ascii=False) if isinstance(value, list) else str(value)
+            )
+            lines.append(f"{label}: {rendered[:12000]}")
+    return lines
+
+
+def _cloud_evidence(job: JobRef) -> str:
+    sections = []
+    for key in ("plan", "http_verification", "fix_result", "failure", "receipt"):
+        value = job.raw.get(key)
+        if isinstance(value, dict):
+            sections.append(key.replace("_", " ").title())
+            sections.extend(_evidence_lines(value))
+    return "\n".join(sections)

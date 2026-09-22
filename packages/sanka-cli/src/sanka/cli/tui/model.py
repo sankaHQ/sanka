@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+import shlex
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -36,7 +38,7 @@ def command_line(
     parts = ["sanka", command]
     if cloud:
         parts.append("--cloud")
-    if target:
+    if target and command in {"scan", "plan"}:
         parts.extend(["--to", target])
     if plan_hash:
         parts.extend(["--plan-hash", plan_hash])
@@ -242,12 +244,13 @@ class StageRun:
     error_message: str = ""
     error_details: str = ""
     progress: float | None = None
+    finished_at: datetime | None = None
     tests: tuple[TestRow, ...] = ()
     routes: tuple[RouteRow, ...] = ()
 
     @property
     def elapsed(self) -> str:
-        return format_elapsed(self.started_at)
+        return format_elapsed(self.started_at, now=self.finished_at)
 
 
 @dataclass
@@ -295,6 +298,12 @@ class HistoryEntry:
     execution: str = "local"
     endpoints: tuple[str, ...] = ()
 
+    error_code: str = ""
+    message: str = ""
+    duration: str = ""
+    artifacts: tuple[str, ...] = ()
+    configuration: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "at": self.at,
@@ -303,6 +312,11 @@ class HistoryEntry:
             "plan_hash": self.plan_hash,
             "stage": self.stage,
             "target": self.target,
+            "error_code": self.error_code,
+            "message": self.message,
+            "duration": self.duration,
+            "artifacts": list(self.artifacts),
+            "configuration": self.configuration,
         }
         if self.endpoints:
             payload["endpoints"] = list(self.endpoints)
@@ -330,6 +344,17 @@ class HistoryEntry:
             at=str(value.get("at") or ""),
             execution=str(value.get("execution") or "local"),
             endpoints=endpoints,
+            error_code=str(value.get("error_code") or ""),
+            message=str(value.get("message") or ""),
+            duration=str(value.get("duration") or ""),
+            artifacts=tuple(
+                str(item)
+                for item in (value["artifacts"] if isinstance(value.get("artifacts"), list) else [])
+                if isinstance(item, str)
+            ),
+            configuration=dict(value["configuration"])
+            if isinstance(value.get("configuration"), dict)
+            else {},
         )
 
 
@@ -351,22 +376,48 @@ class Session:
     pending_action: str | None = None
     notice: str = ""
     autostart: bool = False
+    profile: str | None = None
+    base_url: str | None = None
+    artifact_dir: str = ".sanka"
+    stages: dict[str, StageRun] = field(default_factory=dict)
 
     def footer_line(self) -> str:
         if self.command == "marketplace":
             return "sanka extension marketplace list --json"
         if self.command == "extension":
             return "sanka extension list --json"
-        plan_hash = self.plan_hash if self.command == "apply" else None
+        parts = ["sanka"]
+        if self.profile:
+            parts += ["--profile", self.profile]
+        if self.base_url:
+            parts += ["--base-url", self.base_url]
         if self.job is not None and self.command in LIFECYCLE_COMMANDS | {"fix"}:
-            return command_line(
-                self.command,
-                target=self.target,
-                plan_hash=plan_hash or (self.job.plan_sha if self.command == "apply" else None),
-                cloud=True,
-            )
-        command = self.command if self.command in LIFECYCLE_COMMANDS else "status"
-        return command_line(command, target=self.target, plan_hash=plan_hash)
+            parts += [
+                "--output",
+                "json",
+                "cloud",
+                "status",
+                self.job.run_id,
+                "--workspace",
+                self.job.workspace,
+            ]
+            return shlex.join(parts)
+        else:
+            command = self.command if self.command in LIFECYCLE_COMMANDS else "status"
+            parts += [command]
+            if command in {"scan", "plan"}:
+                parts += [self.project_root]
+            elif command in LIFECYCLE_COMMANDS:
+                parts += ["--root", self.project_root]
+            if command in LIFECYCLE_COMMANDS:
+                parts += ["--artifact-dir", self.artifact_dir]
+                if self.target and command == "plan":
+                    parts += ["--to", self.target]
+                if self.plan_hash and command == "apply":
+                    parts += ["--plan-hash", self.plan_hash]
+                if self.configuration:
+                    parts += ["--extension-config", json.dumps(self.configuration)]
+        return shlex.join([*parts, "--json"])
 
 
 def extension_from_recommendation(value: object) -> ExtensionChoice | None:

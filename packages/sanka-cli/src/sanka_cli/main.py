@@ -60,14 +60,15 @@ cli.add_command(doctor)
 
 
 @cli.command("tui")
-def tui_command() -> None:
+@click.pass_obj
+def tui_command(state: CLIState) -> None:
     """Open the status dashboard for the project in the current directory."""
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print_error("sanka tui needs a terminal. Run sanka --help.")
         raise SystemExit(2)
     from sanka.cli.tui.launch import launch_dashboard
 
-    raise SystemExit(launch_dashboard())
+    raise SystemExit(launch_dashboard(state=state))
 
 
 attach_resource_group(cli, "companies", "/v2/public/companies")

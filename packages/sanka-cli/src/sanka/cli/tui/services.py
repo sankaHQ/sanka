@@ -97,6 +97,14 @@ class TuiServices(Protocol):
 
     def cloud_cancel(self, job: JobRef) -> str: ...
 
+    def cloud_command(self, args: list[str]) -> dict[str, Any]: ...
+
+    def cloud_identity(self, workspace: str) -> dict[str, Any]: ...
+
+    def cloud_login(self, token: str) -> dict[str, Any]: ...
+
+    def fix_eligibility(self, job: JobRef) -> dict[str, Any]: ...
+
     def record(self, entry: HistoryEntry) -> None: ...
 
 
@@ -155,7 +163,9 @@ class HostServices:
     ) -> None:
         self.root = root.expanduser().resolve()
         self.artifact_dir = artifact_dir
-        self.cli_state = cli_state
+        from sanka_cli.state import CLIState
+
+        self.cli_state = cli_state or CLIState(None, None, "json")
         self.workspace = workspace
         self._stderr = ""
 
@@ -394,13 +404,15 @@ class HostServices:
                 lifecycle, command, target=target, plan_hash=plan_hash, configuration=cleaned
             )
         except ExtensionError as error:
-            return _outcome_from_error(command, error, started)
-        except OSError as error:
-            return _outcome_from_error(
+            outcome = _outcome_from_error(command, error, started)
+            return self._record_outcome(outcome, target, cleaned, endpoints)
+        except Exception as error:
+            outcome = _outcome_from_error(
                 command,
                 ExtensionError("SANKA_FAILED", str(error)),
                 started,
             )
+            return self._record_outcome(outcome, target, cleaned, endpoints)
         data = dict(result.data)
         plan_value = data.get("plan_hash")
         extension_id = ""
@@ -424,17 +436,45 @@ class HostServices:
             tests=parse_tests(data),
             routes=parse_routes(data),
         )
+        return self._record_outcome(
+            StageOutcome(run=run, exit_code=0 if run.phase == "succeeded" else 1),
+            target,
+            cleaned,
+            endpoints,
+        )
+
+    def _record_outcome(
+        self,
+        outcome: StageOutcome,
+        target: str | None,
+        configuration: dict[str, Any],
+        endpoints: tuple[str, ...],
+    ) -> StageOutcome:
+        run = outcome.run
+        run.finished_at = datetime.now(UTC)
+        # Credentials belong in the credential store, never in local attempt history.
+        safe = {
+            key: value
+            for key, value in configuration.items()
+            if key
+            in {"output", "generation", "strategy", "package_manager", "orm", "settings_module"}
+        }
         self.record(
             HistoryEntry(
-                stage=command,
+                stage=run.command,
                 outcome=run.phase,
                 target=target or "",
                 plan_hash=run.plan_hash,
-                at=started.isoformat(),
+                at=(run.started_at or run.finished_at).isoformat(),
                 endpoints=endpoints,
+                error_code=run.error_code,
+                message=run.error_message or run.message,
+                duration=run.elapsed,
+                artifacts=run.artifacts,
+                configuration=safe,
             )
         )
-        return StageOutcome(run=run, exit_code=0 if run.phase == "succeeded" else 1)
+        return outcome
 
     def history(self) -> tuple[HistoryEntry, ...]:
         return load_history(self.root, self.artifact_dir)
@@ -489,10 +529,10 @@ class HostServices:
                 JobRef(
                     run_id=run_id,
                     workspace=self.workspace,
-                    route="cloud-run",
+                    route="discover",
                     stage_group=str(item.get("kind") or item.get("stage") or "cloud"),
                     status=str(item.get("status") or "unknown"),
-                    command=str(item.get("stage") or "scan"),
+                    command=str(item.get("stage") or "verify"),
                     plan_sha=str(item.get("plan_sha256") or item.get("plan_hash") or ""),
                     extension_id=str(item.get("recipe") or item.get("extension_id") or ""),
                     started_at=str(item.get("created_at") or item.get("started_at") or ""),
@@ -511,12 +551,33 @@ class HostServices:
 
         if self.cli_state is None:
             return job
+        if job.route == "discover":
+            from dataclasses import replace
+
+            import click
+
+            try:
+                operation = _data(
+                    _read(self.cli_state, job.workspace, f"{CODE_ROOT}/runs/{job.run_id}")
+                )
+            except click.ClickException:
+                job = replace(job, route="cloud-run")
+            else:
+                if str((operation.get("run") or {}).get("id")) != job.run_id:
+                    raise ValueError("Cloud returned a different run.")
+                stage = "plan" if operation.get("operation") == "prepare" else "verify"
+                return _job_from_code(stage, operation, job.workspace, title="Cloud")
         path = (
             f"{CODE_ROOT}/runs/{job.run_id}"
             if job.route == "code-plan"
             else f"/v2/migrate/cloud-runs/{job.run_id}"
         )
         payload = _data(_read(self.cli_state, job.workspace, path))
+        returned_id = (
+            (payload.get("run") or {}).get("id") if job.route == "code-plan" else payload.get("id")
+        )
+        if str(returned_id) != job.run_id:
+            raise ValueError("Cloud returned a different run; the selected run was not changed.")
         if job.route == "code-plan":
             return _job_from_code(job.command, payload, job.workspace, title=job.title)
         return _job_from_cloud_run(payload, job)
@@ -564,6 +625,71 @@ class HostServices:
             headers={"X-Workspace-Code": job.workspace},
         )
         return f"Cancel requested for {job.run_id}"
+
+    def cloud_command(self, args: list[str]) -> dict[str, Any]:
+        """Reuse CLI validation, intent persistence and verified artifact downloads."""
+        import json
+        import subprocess
+        import sys
+
+        command = [sys.executable, "-m", "sanka_cli", "--output", "json"]
+        if self.cli_state is not None:
+            if self.cli_state.profile:
+                command += ["--profile", self.cli_state.profile]
+            if self.cli_state.base_url:
+                command += ["--base-url", self.cli_state.base_url]
+        process = subprocess.run(command + args, cwd=self.root, capture_output=True, text=True)
+        if process.returncode:
+            raise ValueError(process.stderr.strip() or "Cloud command failed")
+        payload = json.loads(process.stdout)
+        data = payload.get("data", payload) if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            raise ValueError("Cloud command returned an invalid response object.")
+        return data
+
+    def cloud_identity(self, workspace: str) -> dict[str, Any]:
+        from sanka_cli import runtime
+        from sanka_cli.commands.cloud import ROOT, _read
+
+        resolved = runtime.resolve_runtime(
+            profile_name=self.cli_state.profile, base_url_override=self.cli_state.base_url
+        )
+        self.cli_state.profile = resolved["profile_name"]
+        payload = runtime.request_json(self.cli_state, "GET", "/v2/public/auth/whoami")
+        identity = payload.get("data", payload)
+        # Pin and verify workspace access before exposing any paid actions.
+        _read(self.cli_state, workspace, ROOT, limit=1)
+        self.workspace = workspace
+        return {
+            **identity,
+            "selected_workspace": workspace,
+            "profile": self.cli_state.profile or "default",
+        }
+
+    def cloud_login(self, token: str) -> dict[str, Any]:
+        from sanka_cli import runtime
+        from sanka_cli.config import DEFAULT_BASE_URL
+
+        profile = self.cli_state.profile or "default"
+        base = self.cli_state.base_url or DEFAULT_BASE_URL
+        identity, warning = runtime.verify_access_token(base_url=base, access_token=token)
+        if identity is None:
+            raise ValueError(warning or "Could not verify token; nothing was saved.")
+        runtime.upsert_profile(profile, base_url=base)
+        runtime.store_tokens(profile, access_token=token, refresh_token=None)
+        self.cli_state.profile = profile
+        return identity
+
+    def fix_eligibility(self, job: JobRef) -> dict[str, Any]:
+        from sanka_cli.commands.cloud import ROOT, _data, _read
+
+        result = _data(_read(self.cli_state, job.workspace, f"{ROOT}/{job.run_id}/fix"))
+        if (
+            str(result.get("parent_run_id")) != job.run_id
+            or str(result.get("workspace_code")) != job.workspace
+        ):
+            raise ValueError("Fix eligibility returned a different workspace or run.")
+        return result
 
     def record(self, entry: HistoryEntry) -> None:
         append_history(self.root, entry, self.artifact_dir)
@@ -628,6 +754,9 @@ def _outcome_from_error(command: str, error: ExtensionError, started: datetime) 
         error_code=error.code,
         error_message=str(error),
         error_details=_details_text(error.details),
+        result_data=dict(error.details),
+        tests=parse_tests(error.details),
+        routes=parse_routes(error.details),
     )
     exit_code = 2 if error.code in {"SANKA_USAGE", "SANKA_EXTENSION_TARGET_REQUIRED"} else 1
     return StageOutcome(run=run, missing=missing, inputs=inputs, exit_code=exit_code)
@@ -653,7 +782,7 @@ def _job_from_code(stage: str, operation: dict[str, Any], workspace: str, *, tit
         status=status,
         command=stage,
         plan_sha=str(plan.get("plan_sha256") or plan.get("plan_hash") or ""),
-        extension_id=str(operation.get("recipe") or ""),
+        extension_id=str(operation.get("recipe") or (run.get("request") or {}).get("recipe") or ""),
         started_at=str(run.get("created_at") or run.get("started_at") or ""),
         current_task=str(operation.get("stage_status") or status),
         last_error=error,
@@ -686,7 +815,7 @@ def _job_from_cloud_run(payload: dict[str, Any], previous: JobRef) -> JobRef:
         route="cloud-run",
         stage_group=previous.stage_group,
         status=status,
-        command=previous.command,
+        command="fix" if fix_result else previous.command,
         plan_sha=str(payload.get("candidate_sha256") or previous.plan_sha),
         extension_id=str(payload.get("recipe") or previous.extension_id),
         endpoint_ids=previous.endpoint_ids,

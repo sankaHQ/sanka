@@ -11,6 +11,7 @@ from sanka.cli.tui.app import SankaApp
 from sanka.cli.tui.model import Session, StageRun
 from sanka.cli.tui.services import HostServices, _job_from_code, job_from_fix
 from sanka.runtime.extensions.model import ExtensionError
+from sanka_cli.state import CLIState
 
 _LIFECYCLE = frozenset({"scan", "plan", "apply", "test", "verify"})
 
@@ -23,11 +24,15 @@ def use_human_tui(state: Any) -> bool:
     )
 
 
-def launch_dashboard(root: Path | None = None) -> int:
+def launch_dashboard(root: Path | None = None, *, state: CLIState | None = None) -> int:
     project = (root or Path(".")).expanduser().resolve()
     app = SankaApp(
-        HostServices(project),
-        Session(project_root=str(project)),
+        HostServices(project, cli_state=state),
+        Session(
+            project_root=str(project),
+            profile=state.profile if state else None,
+            base_url=state.base_url if state else None,
+        ),
         start="status",
         ask_trust=True,
     )
@@ -37,9 +42,20 @@ def launch_dashboard(root: Path | None = None) -> int:
 def launch_local(args: Any) -> int:
     root = _root(args)
     artifact_dir = str(getattr(args, "artifact_dir", None) or ".sanka")
-    services = HostServices(root, artifact_dir=artifact_dir)
+    import click
+
+    context = click.get_current_context(silent=True)
+    state = context.obj if context and isinstance(context.obj, CLIState) else None
+    services = HostServices(root, artifact_dir=artifact_dir, cli_state=state)
     command = str(args.command)
-    session = Session(project_root=str(root), command=command, direct=True)
+    session = Session(
+        project_root=str(root),
+        command=command,
+        direct=True,
+        artifact_dir=artifact_dir,
+        profile=services.cli_state.profile,
+        base_url=services.cli_state.base_url,
+    )
     start = "status"
     autostart = False
     if command in _LIFECYCLE:
@@ -84,6 +100,8 @@ def monitor_code(
         direct=True,
         job=job,
         workspace=workspace,
+        profile=state.profile,
+        base_url=state.base_url,
         plan_hash=job.plan_sha or None,
         stage=StageRun(command=stage, execution="cloud", phase=job.status),
     )
@@ -103,6 +121,8 @@ def monitor_fix(state: Any, workspace: str, run: dict[str, Any], wait_timeout: i
     session = Session(
         project_root=str(root),
         command="fix",
+        profile=state.profile,
+        base_url=state.base_url,
         direct=True,
         job=job,
         workspace=workspace,
