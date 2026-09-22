@@ -222,7 +222,7 @@ def _read_source(path: Path) -> tuple[bool, bytes | None]:
     return True, data if len(data) <= MAX_SOURCE_BYTES else None
 
 
-def fingerprint_repository(root: Path) -> Fingerprint:
+def fingerprint_repository(root: Path, *, excluded_directory: Path | None = None) -> Fingerprint:
     """Build a deterministic project fingerprint without importing project code."""
     if root.is_symlink() or not root.is_dir():
         _error("SANKA_FINGERPRINT_ROOT_INVALID", "Repository root must be a real directory")
@@ -237,7 +237,9 @@ def fingerprint_repository(root: Path) -> Fingerprint:
         directories[:] = sorted(
             name
             for name in directories
-            if name not in IGNORED_DIRECTORIES and not (current_path / name).is_symlink()
+            if name not in IGNORED_DIRECTORIES
+            and current_path / name != excluded_directory
+            and not (current_path / name).is_symlink()
         )
         for name in sorted(files):
             path = current_path / name

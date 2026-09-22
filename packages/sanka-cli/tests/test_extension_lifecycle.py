@@ -715,6 +715,34 @@ def test_apply_rejects_stale_fingerprint_and_wrong_core_hash(tmp_path: Path) -> 
     assert raised.value.code == "SANKA_FINGERPRINT_STALE"
 
 
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_generated_output_does_not_hide_source_fingerprint_changes(
+    tmp_path: Path,
+    existing_output: bool,
+) -> None:
+    project = _project(tmp_path)
+    output = project / "generated"
+    if existing_output:
+        output.mkdir()
+        (output / "source.py").write_text("import django\n")
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    planned = lifecycle.plan(target="fastapi", configuration={"output": "generated"})
+    lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+    output.mkdir(exist_ok=True)
+    (output / "app.py").write_text("import fastapi\n")
+    if existing_output:
+        with pytest.raises(ExtensionError) as raised:
+            lifecycle.test()
+        assert raised.value.code == "SANKA_FINGERPRINT_STALE"
+        return
+    assert lifecycle.test().outcome == "success"
+    assert lifecycle.verify().outcome == "success"
+    (project / "new_source.py").write_text("import flask\n")
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.verify()
+    assert raised.value.code == "SANKA_FINGERPRINT_STALE"
+
+
 def test_apply_rejects_configuration_not_bound_by_the_core_plan(tmp_path: Path) -> None:
     project = _project(tmp_path)
     lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())

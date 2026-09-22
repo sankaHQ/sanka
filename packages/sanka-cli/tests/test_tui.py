@@ -12,6 +12,7 @@ from textual.widgets import DataTable, Input, OptionList, Static
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
+    CloudMonitorScreen,
     SankaApp,
     StageScreen,
     StatusScreen,
@@ -630,6 +631,39 @@ async def test_running_stage_footer_hides_escape_back() -> None:
         assert "esc back" not in text
         assert "stage running" in text
         assert "q quit" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,outcome,code",
+    [
+        ("succeeded", "checks_passed", 0),
+        ("succeeded", "needs_review", 3),
+        ("failed", "service_error", 4),
+        ("cancelled", "cancelled", 5),
+    ],
+)
+async def test_settled_cloud_session_preserves_result_and_blocks_local_stages(
+    status: str,
+    outcome: str,
+    code: int,
+) -> None:
+    services = FakeServices()
+    services.job.status = status
+    services.job.outcome = outcome
+    services.job.raw = {"status": status, "fix_result": {"outcome": outcome}}
+    session = Session(project_root="/work/demo", job=services.job, direct=True)
+    app = SankaApp(services, session, start="monitor")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert session.exit_code == code
+        for command in ("scan", "plan", "apply", "test", "verify"):
+            app.action_stage(command)
+            await pilot.pause()
+            assert isinstance(app.screen, CloudMonitorScreen)
+        assert services.calls == []
+        await pilot.press("q")
+        assert app.return_value == code
 
 
 @pytest.mark.asyncio

@@ -1418,7 +1418,7 @@ class CloudMonitorScreen(SankaScreen):
         self.sanka.session.command = job.command
         self._started = _parse_started(job.started_at) or _now()
         self.query_one("#progress", ProgressBar).display = False
-        self._show_job(job, ())
+        self._polled(job, ())
         self.refresh_footer()
         if job.route != "cloud-run":
             self.query_one("#cancel", Button).label = "Detach only"
@@ -1728,6 +1728,13 @@ class SankaApp(App[int]):
 
     def action_stage(self, command: str) -> None:
         if self._busy():
+            return
+        if self.session.job is not None:
+            self.notify(
+                "This session monitors a cloud run. Quit and use "
+                f"sanka {command} --cloud --help to continue in the cloud.",
+                timeout=10,
+            )
             return
         self.session.command = command
         self.push_screen(StageScreen(command))

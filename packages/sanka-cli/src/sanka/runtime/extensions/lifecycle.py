@@ -630,7 +630,20 @@ class ApplicationLifecycle:
                 current=core_hash,
                 reviewed=reviewed_plan_hash,
             )
-        fingerprint = fingerprint_repository(self.project_root)
+        base = plan.get("configuration")
+        extension_plan = plan.get("extension_plan")
+        if not isinstance(base, dict) or not isinstance(extension_plan, dict):
+            _error("SANKA_EXTENSION_IDENTITY", "Reviewed extension configuration is invalid")
+        output = base.get("output") or extension_plan.get("default_output")
+        excluded = None
+        if isinstance(output, str) and output:
+            candidate = (self.project_root / output).resolve()
+            if candidate != self.project_root and candidate.is_relative_to(self.project_root):
+                excluded = candidate
+        fingerprint = fingerprint_repository(self.project_root, excluded_directory=excluded)
+        if excluded is not None and fingerprint.hash != plan.get("fingerprint_hash"):
+            # Existing source in the output directory must still match the reviewed plan.
+            fingerprint = fingerprint_repository(self.project_root)
         if fingerprint.hash != plan.get("fingerprint_hash"):
             _error(
                 "SANKA_FINGERPRINT_STALE",
@@ -657,9 +670,6 @@ class ApplicationLifecycle:
                     "Reviewed extension artifact changed after planning",
                     artifact=artifact,
                 )
-        base = plan.get("configuration")
-        if not isinstance(base, dict):
-            _error("SANKA_EXTENSION_IDENTITY", "Reviewed extension configuration is invalid")
         normalized = _normalized_json_object(configuration)
         for name, value in normalized.items():
             if name not in PHASE_CONFIGURATION and (name not in base or base[name] != value):
@@ -669,10 +679,7 @@ class ApplicationLifecycle:
                     field=name,
                 )
         merged = {**base, **normalized}
-        extension_plan = plan.get("extension_plan")
-        if not isinstance(extension_plan, dict) or not isinstance(
-            extension_plan.get("plan_hash"), str
-        ):
+        if not isinstance(extension_plan.get("plan_hash"), str):
             _error("SANKA_EXTENSION_IDENTITY", "Reviewed extension plan is invalid")
         merged["extension_plan_hash"] = extension_plan["plan_hash"]
         request = self._request(
