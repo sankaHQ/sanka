@@ -55,7 +55,23 @@ _MENU = (
 )
 
 
-def _keys_line(*, home: bool, run: str | None = None, search: bool = False) -> str:
+def _keys_line(
+    *,
+    home: bool,
+    run: str | None = None,
+    search: bool = False,
+    busy: str | None = None,
+) -> str:
+    if busy == "cloud":
+        return (
+            "s scan    p plan    a apply    t test    v verify\n"
+            "e extensions    m marketplace    q quit    hosted run keeps going"
+        )
+    if busy == "local":
+        return (
+            "s scan    p plan    a apply    t test    v verify\n"
+            "e extensions    m marketplace    stage running    q quit"
+        )
     leave = "esc quit" if home else "esc back"
     action = f"enter {run}    " if run else ""
     find = "/ search    " if search else ""
@@ -63,6 +79,17 @@ def _keys_line(*, home: bool, run: str | None = None, search: bool = False) -> s
         f"{action}s scan    p plan    a apply    t test    v verify\n"
         f"e extensions    m marketplace    {find}{leave}    q quit"
     )
+
+
+def _next_step(history: tuple[HistoryEntry, ...]) -> str:
+    succeeded = {entry.stage for entry in history if entry.outcome == "succeeded"}
+    if "plan" in succeeded and "apply" not in succeeded:
+        return "Next: Apply the reviewed plan."
+    if "scan" in succeeded and "plan" not in succeeded:
+        return "Next: Plan a migration."
+    if not succeeded:
+        return "Next: Scan this project."
+    return "Next: Scan this project when it changes."
 
 
 class AppFooter(Vertical):
@@ -94,11 +121,15 @@ class SankaScreen(Screen[None]):
         run = None
         if isinstance(self, StageScreen) and not self.review:
             run = self.command
+        busy = None
+        if self.sanka.session.busy:
+            busy = "cloud" if isinstance(self, CloudMonitorScreen) else "local"
         self.query_one(KeysBar).update(
             _keys_line(
                 home=isinstance(self, StatusScreen),
                 run=run,
                 search=self.can_search(),
+                busy=busy,
             )
         )
 
@@ -259,15 +290,27 @@ class SearchModal(ModalScreen[str | None]):
         Binding("enter", "choose", "Select", priority=True),
     ]
 
-    def __init__(self, title: str, options: tuple[tuple[str, str], ...]) -> None:
+    def __init__(
+        self,
+        title: str,
+        options: tuple[tuple[str, str], ...] = (),
+        *,
+        choices: tuple[ExtensionChoice, ...] = (),
+    ) -> None:
         super().__init__()
         self.search_title = title
         self._options = options
+        self._choices = choices
 
     def compose(self) -> ComposeResult:
         with Vertical(id="search-modal"):
             yield Static(self.search_title, classes="section-title")
             yield Input(placeholder="Type to search", id="search-query")
+            if self._choices:
+                with Horizontal(id="search-filters"):
+                    yield Input(placeholder="Type", id="kind")
+                    yield Input(placeholder="Status", id="status-filter")
+                    yield Input(placeholder="Target", id="target-filter")
             yield OptionList(id="search-results")
             yield Static("Enter to select    Esc to cancel", id="search-hint")
 
@@ -276,19 +319,40 @@ class SearchModal(ModalScreen[str | None]):
         self.query_one("#search-query", Input).focus()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "search-query":
-            self._show(event.value)
+        if event.input.id in {"search-query", "kind", "status-filter", "target-filter"}:
+            self._show(self.query_one("#search-query", Input).value)
 
     def _show(self, query: str) -> None:
-        needle = query.strip().casefold()
         listing = self.query_one("#search-results", OptionList)
         listing.clear_options()
-        for option_id, prompt in self._options:
-            if needle and needle not in f"{option_id} {prompt}".casefold():
-                continue
-            listing.add_option(Option(prompt, id=option_id))
+        if self._choices:
+            self._show_choices(query, listing)
+        else:
+            needle = query.strip().casefold()
+            for option_id, prompt in self._options:
+                if needle and needle not in f"{option_id} {prompt}".casefold():
+                    continue
+                listing.add_option(Option(prompt, id=option_id))
         if listing.option_count:
             listing.highlighted = 0
+
+    def _show_choices(self, query: str, listing: OptionList) -> None:
+        kind = self.query_one("#kind", Input).value.strip()
+        status = self.query_one("#status-filter", Input).value.strip()
+        target = self.query_one("#target-filter", Input).value.strip()
+        needle = query.strip().casefold()
+        for choice in self._choices:
+            if kind and choice.kind != kind:
+                continue
+            label = choice.status_label.lower()
+            if status and status not in choice.status and label != status.lower():
+                continue
+            if target and target not in choice.targets:
+                continue
+            prompt = f"{choice.label}  {choice.kind}  {', '.join(choice.targets) or '-'}"
+            if needle and needle not in f"{choice.id} {prompt}".casefold():
+                continue
+            listing.add_option(Option(prompt, id=choice.id))
 
     def action_choose(self) -> None:
         listing = self.query_one("#search-results", OptionList)
@@ -388,35 +452,27 @@ class StatusScreen(SankaScreen):
         self._jobs = jobs
         self._history = history
         stage = self.sanka.session.stage
-        job = self.sanka.session.job
-        progress = "" if stage.progress is None else f"\nProgress        {stage.progress:.0%}"
-        endpoints = ""
-        selected = [item for item in self.sanka.session.endpoints if item.selected]
-        if self.sanka.session.endpoints:
-            endpoints = f"\nEndpoints       {len(selected)} selected"
         migration = stage.extension_id or self.sanka.session.target or ""
-        current = (
-            f"Current run\n"
-            f"Project         {project.root}\n"
-            f"Frameworks      {', '.join(project.frameworks) or 'unknown'}\n"
-            f"Migration       {migration}\n"
-            f"Stage           {stage.command}\n"
-            f"Status          {stage.phase}\n"
-            f"SHA             {stage.plan_hash or self.sanka.session.plan_hash or ''}\n"
-            f"Execution       {stage.execution}\n"
-            f"Job             {job.run_id if job else ''}\n"
-            f"Elapsed         {stage.elapsed}\n"
-            f"Task            {job.current_task if job else ''}"
-            f"{progress}{endpoints}"
-        )
+        lines = [
+            project.root,
+            ", ".join(project.frameworks) or "unknown",
+            _next_step(history),
+            "",
+            f"Stage     {stage.command}  {stage.phase}",
+            f"Elapsed   {stage.elapsed}",
+        ]
+        if migration:
+            lines.append(f"Migration {migration}")
+        plan_hash = stage.plan_hash or self.sanka.session.plan_hash
+        if plan_hash:
+            lines.append(f"Plan      {plan_hash}")
+        if stage.progress is not None:
+            lines.append(f"Progress  {stage.progress:.0%}")
         if project.note:
-            current += f"\n{project.note}"
-        if not jobs and not self.sanka.session.workspace:
-            current += (
-                "\nCloud runs appear after a cloud command with --workspace. "
-                "No workspace is selected."
-            )
-        self.query_one("#current", Static).update(current)
+            lines.append(project.note)
+        if self.sanka.session.workspace:
+            lines.append(f"Workspace {self.sanka.session.workspace}")
+        self.query_one("#current", Static).update("\n".join(lines))
         table = self.query_one("#recent", DataTable)
         table.clear()
         self._row_kinds: list[tuple[str, int]] = []
@@ -788,6 +844,7 @@ class StageScreen(SankaScreen):
         self.query_one(StageHeader).show_stage(session.stage, root=session.project_root)
         self._show_progress(session.stage.progress)
         self.query_one(ActivityLog).append_line(f"Starting {self.command}")
+        self.refresh_footer()
         self.set_interval(1, self._tick)
         self.run_worker(
             lambda: self._work(configuration, session.target, session.plan_hash, selected),
@@ -1153,10 +1210,6 @@ class MarketplaceScreen(SankaScreen):
         with Vertical(id="main"):
             yield Static("Extension marketplace", classes="section-title")
             yield Static("", id="catalog-status")
-            with Horizontal(id="filters"):
-                yield Input(placeholder="Type", id="kind")
-                yield Input(placeholder="Status", id="status-filter")
-                yield Input(placeholder="Target", id="target-filter")
             with Horizontal(id="catalog-actions"):
                 yield Button("Search", id="search")
                 yield Button("Inspect", id="inspect")
@@ -1197,18 +1250,10 @@ class MarketplaceScreen(SankaScreen):
         return True
 
     def open_search(self) -> None:
-        kind = self.query_one("#kind", Input).value.strip() or None
-        status = self.query_one("#status-filter", Input).value.strip() or None
-        target = self.query_one("#target-filter", Input).value.strip() or None
-        choices = self.sanka.services.extensions("", kind=kind, status=status, target=target)
-        options = tuple(
-            (
-                choice.id,
-                f"{choice.label}  {choice.kind}  {', '.join(choice.targets) or '-'}",
-            )
-            for choice in choices
+        self.app.push_screen(
+            SearchModal("Search marketplace", choices=self.sanka.services.extensions("")),
+            self._picked,
         )
-        self.app.push_screen(SearchModal("Search marketplace", options), self._picked)
 
     def _picked(self, extension_id: str | None) -> None:
         if not extension_id or extension_id not in self._ids:
@@ -1217,20 +1262,8 @@ class MarketplaceScreen(SankaScreen):
         table.move_cursor(row=self._ids.index(extension_id))
         table.focus()
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id in {"kind", "status-filter", "target-filter"}:
-            self._fill()
-
     def _fill(self) -> None:
-        kind = self.query_one("#kind", Input).value.strip() or None
-        status = self.query_one("#status-filter", Input).value.strip() or None
-        target = self.query_one("#target-filter", Input).value.strip() or None
-        choices = self.sanka.services.extensions(
-            "",
-            kind=kind,
-            status=status,
-            target=target,
-        )
+        choices = self.sanka.services.extensions("")
         table = self.query_one("#catalog", DataTable)
         table.clear()
         self._ids = [choice.id for choice in choices]
@@ -1391,6 +1424,7 @@ class CloudMonitorScreen(SankaScreen):
             self.query_one("#cancel", Button).label = "Detach only"
         if job.status not in _SETTLED:
             self.sanka.session.busy = True
+            self.refresh_footer()
             self._deadline = time.monotonic() + self.timeout_seconds
             self.run_worker(self._poll, thread=True, exclusive=True)
             self.set_interval(1, self._tick_job)
@@ -1484,6 +1518,7 @@ class CloudMonitorScreen(SankaScreen):
         if job.status in _SETTLED:
             self.sanka.session.busy = False
             self.sanka.session.exit_code = cloud_exit_code(job)
+            self.refresh_footer()
 
     def _failed(self, message: str) -> None:
         self.sanka.session.busy = False
@@ -1570,12 +1605,14 @@ class SankaApp(App[int]):
     SearchModal { align: center middle; }
     #search-modal {
         width: 64;
-        height: 16;
+        height: 18;
         background: $surface;
         border: solid $primary;
         padding: 1 1;
     }
     #search-results { height: 1fr; border: none; }
+    #search-filters { height: 3; }
+    #search-filters Input { width: 1fr; }
     #search-hint { color: $text-muted; padding: 0 1; }
     CliLine { height: 1; background: $boost; color: $text; padding: 0 1; }
     #menu { dock: left; width: 18; height: 100%; border: none; border-right: solid $primary; }
@@ -1623,11 +1660,11 @@ class SankaApp(App[int]):
     #extensions, #catalog { height: 1fr; }
     #snapshots { height: 5; }
     #snapshot-form { height: auto; padding: 0 1; }
-    #filters, #extension-actions, #catalog-actions, #snapshot-actions {
+    #extension-actions, #catalog-actions, #snapshot-actions {
         height: 3;
         padding: 0 1;
     }
-    #filters Input, #snapshot-form Input { width: 1fr; }
+    #snapshot-form Input { width: 1fr; }
     #main Input, #trust { margin: 0 1; }
     .section-title { text-style: bold; padding: 0 1; }
     """

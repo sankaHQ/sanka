@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from textual.widgets import DataTable, OptionList, Static
+from textual.widgets import DataTable, Input, OptionList, Static
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
@@ -350,6 +350,8 @@ async def test_status_shows_project_and_recent_local_run() -> None:
         await pilot.pause()
         current = str(app.screen.query_one("#current", Static).content)
         assert "/work/demo" in current
+        assert "Next: Scan this project when it changes." in current
+        assert "No workspace is selected" not in current
         assert "verify" in _table_text(app.screen.query_one("#recent"))
         assert "sanka status --json" in str(app.screen.query_one(CliLine).content)
         assert "q quit" in str(app.screen.query_one(KeysBar).content)
@@ -596,6 +598,38 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         highlighted = menu.highlighted
         assert highlighted is not None
         assert menu.get_option_at_index(highlighted).id == "marketplace"
+
+
+@pytest.mark.asyncio
+async def test_marketplace_search_filters_by_target() -> None:
+    app = SankaApp(FakeServices(), Session(project_root="/work/demo"), start="marketplace")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        assert app.screen.query_one("#search-filters")
+        app.screen.query_one("#target-filter", Input).value = "go"
+        await pilot.pause()
+        results = app.screen.query_one("#search-results", OptionList)
+        assert results.option_count == 1
+        assert "Python to Go" in str(results.get_option_at_index(0).prompt)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "DRF to FastAPI" in _table_text(app.screen.query_one("#catalog"))
+
+
+@pytest.mark.asyncio
+async def test_running_stage_footer_hides_escape_back() -> None:
+    app = SankaApp(FakeServices(), Session(project_root="/work/demo"), start="plan")
+    async with app.run_test(size=(120, 32)) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, StageScreen)
+        app.session.busy = True
+        app.screen.refresh_footer()
+        text = str(app.screen.query_one(KeysBar).content)
+        assert "esc back" not in text
+        assert "stage running" in text
+        assert "q quit" in text
 
 
 @pytest.mark.asyncio
