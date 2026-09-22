@@ -107,7 +107,7 @@ def _frame(root: str) -> ComposeResult:
     home = Path.home()
     display_path = str(Path("~") / path.relative_to(home)) if path.is_relative_to(home) else root
     with Horizontal(id="brand"):
-        yield Static("▀█▀▀▀▀▀▀\n ▀▀▀▀▀█ \n▀▀▀▀▀▀▀▀", id="brand-mark", markup=False)
+        yield Static("▀▀▀▀▀▀▀▀\n ▀▀▀▀▀▀ \n▀▀▀▀▀▀▀▀", id="brand-mark", markup=False)
         with Vertical(id="brand-details"):
             yield Static(f"Sanka v{__version__}", id="brand-name", markup=False)
             directory = Static(display_path, id="brand-directory", markup=False)
