@@ -1031,3 +1031,14 @@ def test_copied_local_commands_parse_with_project_and_configuration(tmp_path: Pa
         args = _build_parser().parse_args(shlex.split(session.footer_line())[1:])
         assert (getattr(args, "root_option", None) or args.root) == session.project_root
         assert args.extension_config == ['{"output": "generated output"}']
+
+
+def test_cloud_completion_requires_stage_evidence() -> None:
+    from sanka.cli.tui.services import _job_from_code
+
+    operation = {"run": {"id": "run-1", "status": "succeeded"}, "operation": "execute"}
+    job = _job_from_code("verify", operation, "12345678", title="Cloud")
+    assert job.outcome == "needs_review"
+    assert job.last_error == "needs_review"
+    plan = _job_from_code("plan", {**operation, "operation": "prepare"}, "12345678", title="Cloud")
+    assert plan.outcome == "evidence_unavailable"

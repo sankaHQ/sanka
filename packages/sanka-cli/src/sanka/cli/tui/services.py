@@ -771,6 +771,10 @@ def _job_from_code(stage: str, operation: dict[str, Any], workspace: str, *, tit
     group = "scan+plan" if stage in {"scan", "plan"} else "apply+test+verify"
     run_id = str(run.get("id") or "")
     outcome = str(operation.get("outcome") or "")
+    if operation.get("operation") in {"prepare", "execute"}:
+        from sanka_cli.commands.code_cloud import stage_result
+
+        outcome, _exit = stage_result(stage, operation)
     error = ""
     if status == "failed" or outcome in {"failed", "needs_review", "evidence_unavailable"}:
         error = str(operation.get("error") or run.get("error") or outcome or "failed")
