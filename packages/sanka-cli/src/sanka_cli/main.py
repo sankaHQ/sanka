@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import sys
+
 import click
 
 from sanka_cli import __version__
@@ -55,6 +57,18 @@ cli.add_command(cloud)
 cli.add_command(fix)
 cli.add_command(skill)
 cli.add_command(doctor)
+
+
+@cli.command("tui")
+def tui_command() -> None:
+    """Open the status dashboard for the project in the current directory."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print_error("sanka tui needs a terminal. Run sanka --help.")
+        raise SystemExit(2)
+    from sanka.cli.tui.launch import launch_dashboard
+
+    raise SystemExit(launch_dashboard())
+
 
 attach_resource_group(cli, "companies", "/v2/public/companies")
 attach_resource_group(cli, "contacts", "/v2/public/contacts")

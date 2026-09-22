@@ -128,8 +128,10 @@ sanka verify .
 
 `scan` and `plan` do not write to the destination. `apply` requires the exact
 reviewed plan hash. `verify` reconciles the generated or transferred result;
-an exit code alone is not completion evidence. Add `--json` for one
-`sanka-cli/v1` machine-readable document.
+an exit code alone is not completion evidence. On a terminal, these commands
+open a live view of the same work. `sanka tui` opens the status dashboard for
+the current project. Add `--json`, or run without a terminal, for one
+`sanka-cli/v1` machine-readable document. Agents and the SDKs keep that contract.
 
 New to the CLI? Start with the
 [quickstart](https://sanka.com/docs/developers/quickstart/cli/). See the

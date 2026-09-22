@@ -10,6 +10,7 @@ import selectors
 import stat
 import subprocess
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -48,9 +49,11 @@ class ExtensionRunner:
         *,
         user_root: Path | None = None,
         timeout_seconds: float = 300.0,
+        on_stderr: Callable[[bytes], None] | None = None,
     ) -> None:
         self.user_root = (user_root or user_extension_root()).expanduser().resolve()
         self.timeout_seconds = timeout_seconds
+        self.on_stderr = on_stderr
 
     def _executable(self, lock: LockEntry) -> Path:
         executable_name = cast(str, lock.executable)
@@ -167,6 +170,9 @@ class ExtensionRunner:
                             "SANKA_EXTENSION_PROTOCOL",
                             "Extension process output exceeded the limit",
                         )
+                    if key.data is stderr and self.on_stderr is not None:
+                        with suppress(Exception):
+                            self.on_stderr(chunk)
                     key.data.extend(chunk)
             remaining = deadline - time.monotonic()
             if remaining <= 0:

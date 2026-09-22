@@ -105,6 +105,10 @@ def main(argv: list[str] | None = None, *, api_base: str | None = None) -> int:
         return 0
     if hasattr(args, "root_option"):
         args.root = args.root_option or args.root or "."
+    if _use_local_tui(args):
+        from sanka.cli.tui.launch import launch_local
+
+        return launch_local(args)
     try:
         return int(asyncio.run(args.handler(args)))
     except CliUsageError as error:
@@ -804,6 +808,17 @@ def _load_spec(path: str) -> MigrationSpec:
 
 def _interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+_TUI_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify", "status", "extension"})
+
+
+def _use_local_tui(args: argparse.Namespace) -> bool:
+    if args.command not in _TUI_COMMANDS:
+        return False
+    if getattr(args, "json", False) or getattr(args, "compact_dsl", False):
+        return False
+    return _interactive_terminal()
 
 
 def _prompt_choice(

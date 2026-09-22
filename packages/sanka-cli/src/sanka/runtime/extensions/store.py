@@ -3274,6 +3274,45 @@ class ExtensionStore:
             self._write_disabled(disabled)
             self._write_lock(entries)
 
+    @_store_operation
+    def set_extension_enabled(self, extension_id: str, *, enabled: bool) -> None:
+        """Record an installed extension in the existing disabled set.
+
+        Enabling still goes through ``add_extension``, which drops the id from
+        that set. This only refuses a disable when every catalog row for the id
+        is already incompatible.
+        """
+        matches = [item for item in self.list_extensions() if item.id == extension_id]
+        if not matches:
+            _error(
+                "SANKA_EXTENSION_NOT_FOUND",
+                "Extension is not in the trusted catalog",
+                extension_id=extension_id,
+            )
+        if not enabled and all("incompatible" in item.status for item in matches):
+            _error(
+                "SANKA_EXTENSION_INCOMPATIBLE",
+                "Refusing to disable an extension that is already incompatible",
+                extension_id=extension_id,
+            )
+        installed = {"installed", "locked", "disabled", "update_available"}
+        if not enabled and not any(installed.intersection(item.status) for item in matches):
+            _error(
+                "SANKA_EXTENSION_NOT_FOUND",
+                "Extension is not installed",
+                extension_id=extension_id,
+            )
+        with (
+            _locked(self.user_root, self._installation_path),
+            _locked(self.project_root, self._project_lock_path),
+        ):
+            disabled = self._load_disabled()
+            if enabled:
+                disabled.discard(extension_id)
+            else:
+                disabled.add(extension_id)
+            self._write_disabled(disabled)
+
     def _snapshot_for_lock(self, entry: LockEntry) -> Path:
         return self._confined(
             self.user_root,

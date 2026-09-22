@@ -248,6 +248,10 @@ def fix(
         ) from exc
     run["idempotency_key"] = idempotency_key
     run["receipt_command"] = f"sanka cloud receipt --workspace {workspace} {run['id']}"
+    from sanka.cli.tui.launch import monitor_fix, use_human_tui
+
+    if use_human_tui(state):
+        raise SystemExit(monitor_fix(state, workspace, run, wait_timeout))
     if wait:
         click.echo(f"Fix run: {run['id']} {run.get('ui_url', '')}", err=True)
         _follow(state, workspace, run, wait_timeout)
