@@ -157,6 +157,7 @@ def main() -> int:
                 "platformdirs",
                 "pyyaml",
                 "rich",
+                "textual",
             }
             if core_requirement_names != expected_core_dependencies:
                 errors.append(
