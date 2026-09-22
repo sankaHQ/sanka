@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from textual.widgets import OptionList
+from textual.widgets import DataTable, OptionList, Static
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
@@ -41,7 +41,7 @@ class FakeServices:
         self.calls: list[dict[str, Any]] = []
         self.installed: list[str] = []
         self.disabled: list[str] = []
-        self.catalog = (
+        self.catalog: tuple[ExtensionChoice, ...] = (
             _choice("sanka/drf-to-fastapi", "1.2.0", installed=True, targets=("fastapi",)),
             _choice("sanka/drf-to-flask", "1.0.0", installed=True, targets=("flask",)),
             _choice("sanka/python-to-go", "0.1.0", installed=False, targets=("go",)),
@@ -348,7 +348,7 @@ async def test_status_shows_project_and_recent_local_run() -> None:
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        current = str(app.screen.query_one("#current").content)
+        current = str(app.screen.query_one("#current", Static).content)
         assert "/work/demo" in current
         assert "verify" in _table_text(app.screen.query_one("#recent"))
         assert "sanka status --json" in str(app.screen.query_one(CliLine).content)
@@ -358,13 +358,13 @@ async def test_status_shows_project_and_recent_local_run() -> None:
         assert "p plan" in str(app.screen.query_one(KeysBar).content)
         assert app.screen.query_one("#menu", OptionList).option_count == 8
         assert "Elapsed" in current
-        recent = app.screen.query_one("#recent")
+        recent = app.screen.query_one("#recent", DataTable)
         recent.focus()
         await pilot.pause()
         recent.action_select_cursor()
         await pilot.pause()
         assert app.screen.query_one("#run-stage").display is False
-        assert "finished" in str(app.screen.query_one("#result").content)
+        assert "finished" in str(app.screen.query_one("#result", Static).content)
 
 
 @pytest.mark.asyncio
@@ -387,8 +387,8 @@ async def test_escape_on_scan_returns_home() -> None:
         await pilot.pause()
         assert isinstance(app.screen, StageScreen)
         assert app.screen.query_one("#log").display is False
-        assert "Nothing is written" in str(app.screen.query_one("#result").content)
-        assert "extension pending" not in str(app.screen.query_one("#stage-header").content)
+        assert "Nothing is written" in str(app.screen.query_one("#result", Static).content)
+        assert "extension pending" not in str(app.screen.query_one("#stage-header", Static).content)
         keys = app.screen.query_one(KeysBar)
         rendered = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
         assert "Scan" in rendered
@@ -439,7 +439,7 @@ async def test_verify_fills_a_route_table() -> None:
         table = _table_text(app.screen.query_one("#rows"))
         assert "GET /users" in table
         assert "failed" in table
-        header = str(app.screen.query_one("#stage-header").content)
+        header = str(app.screen.query_one("#stage-header", Static).content)
         assert "verify" in header
 
 
@@ -488,7 +488,7 @@ async def test_plan_posts_the_target_and_apply_waits_for_a_hash() -> None:
         assert not app.screen.query_one("#run-stage").disabled
         await pilot.click("#run-stage")
         await pilot.pause()
-        assert "Extension" in str(app.screen.query_one("#confirm-message").content)
+        assert "Extension" in str(app.screen.query_one("#confirm-message", Static).content)
         await pilot.click("#yes")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -529,7 +529,7 @@ async def test_plan_offers_to_install_an_available_target() -> None:
         assert "Available" in prompt
         await pilot.press("enter")
         await pilot.pause()
-        assert "python-to-go" in str(app.screen.query_one("#missing-body").content)
+        assert "python-to-go" in str(app.screen.query_one("#missing-body", Static).content)
         await pilot.click("#install")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -546,7 +546,7 @@ async def test_plan_refresh_adds_a_marketplace_target() -> None:
         services.target_names = ("fastapi", "flask")
         return "Upgraded 1 marketplace snapshot(s)"
 
-    services.upgrade_marketplace = upgrade  # type: ignore[method-assign]
+    services.upgrade_marketplace = upgrade  # type: ignore[assignment]
     app = SankaApp(services, Session(project_root="/work/demo"), start="plan")
     async with app.run_test(size=(120, 40)) as pilot:
         await app.workers.wait_for_complete()
@@ -567,7 +567,9 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         await pilot.pause()
         menu = app.screen.query_one("#menu", OptionList)
         assert str(menu.get_option_at_index(0).prompt) == "Scan"
-        assert menu.get_option_at_index(menu.highlighted).id == "extensions"
+        highlighted = menu.highlighted
+        assert highlighted is not None
+        assert menu.get_option_at_index(highlighted).id == "extensions"
         table = _table_text(app.screen.query_one("#extensions"))
         assert "DRF to FastAPI" in table
         assert "Python to Go" in table
@@ -578,8 +580,8 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         assert modal.region.y > 2
         await pilot.press("g", "o", "enter")
         await pilot.pause()
-        table = app.screen.query_one("#extensions")
-        selected = " ".join(str(cell) for cell in table.get_row_at(table.cursor_row))
+        extensions = app.screen.query_one("#extensions", DataTable)
+        selected = " ".join(str(cell) for cell in extensions.get_row_at(extensions.cursor_row))
         assert "Python to Go" in selected
         assert "DRF to FastAPI" not in selected
         await pilot.click("#install")
@@ -588,10 +590,12 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         assert services.installed == ["sanka/python-to-go"]
         await pilot.press("m")
         await pilot.pause()
-        titles = [str(node.content) for node in app.screen.query(".section-title")]
+        titles = [str(node.content) for node in app.screen.query(Static)]
         assert "Extension marketplace" in titles
         menu = app.screen.query_one("#menu", OptionList)
-        assert menu.get_option_at_index(menu.highlighted).id == "marketplace"
+        highlighted = menu.highlighted
+        assert highlighted is not None
+        assert menu.get_option_at_index(highlighted).id == "marketplace"
 
 
 @pytest.mark.asyncio
@@ -608,12 +612,12 @@ async def test_cloud_monitor_shows_the_running_job() -> None:
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        header = str(app.screen.query_one("#job-header").content)
+        header = str(app.screen.query_one("#job-header", Static).content)
         assert "run_01K" in header
         assert "Fix" in header
-        fields = str(app.screen.query_one("#job-fields").content)
+        fields = str(app.screen.query_one("#job-fields", Static).content)
         assert "succeeded" in fields or "checks_passed" in fields
-        assert "worker started" in str(app.screen.query_one("#log").content)
+        assert "worker started" in str(app.screen.query_one("#log", Static).content)
 
 
 @pytest.mark.asyncio
