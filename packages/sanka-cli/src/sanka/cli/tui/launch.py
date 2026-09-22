@@ -39,6 +39,19 @@ def launch_dashboard(root: Path | None = None, *, state: CLIState | None = None)
     return _run(app)
 
 
+def launch_doctor(state: CLIState, expected_version: str | None = None) -> int:
+    root = Path.cwd()
+    return _run(
+        SankaApp(
+            HostServices(root, cli_state=state),
+            Session(project_root=str(root), command="doctor", direct=True),
+            start="doctor",
+            ask_trust=True,
+            doctor_expected_version=expected_version,
+        )
+    )
+
+
 def launch_local(args: Any) -> int:
     root = _root(args)
     artifact_dir = str(getattr(args, "artifact_dir", None) or ".sanka")

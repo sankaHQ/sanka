@@ -95,3 +95,90 @@ def test_runtime_requirement_is_diagnosed(installed: Path, monkeypatch: pytest.M
     report = json.loads(result.output)
     assert report["checks"][0]["code"] == "python_version"
     assert report["checks"][0]["recovery"] == "uv tool install --python 3.12 sanka-cli"
+
+
+@pytest.mark.parametrize(
+    "args", [["doctor", "--json"], ["--output", "json", "doctor"], ["doctor", "-h"]]
+)
+def test_machine_output_and_help_never_launch_tui(
+    installed: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    monkeypatch.setattr(
+        "sanka.cli.tui.launch.launch_doctor", lambda *args: pytest.fail("unexpected TUI")
+    )
+    assert CliRunner().invoke(cli, args).exit_code == 0
+
+
+def test_doctor_routes_human_tty_and_preserves_exit_code(
+    installed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr("sanka.cli.tui.launch.use_human_tui", lambda state: True)
+    seen: list[str | None] = []
+
+    def launch(state: object, expected: str | None) -> int:
+        seen.append(expected)
+        return 1
+
+    monkeypatch.setattr("sanka.cli.tui.launch.launch_doctor", launch)
+    result = CliRunner().invoke(cli, ["doctor", "--expected-version", "0.0.0"])
+    assert result.exit_code == 1
+    assert seen == ["0.0.0"]
+
+
+@pytest.mark.asyncio
+async def test_doctor_screen_refresh_copy_and_trust_boundary(
+    installed: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from textual.widgets import Button, Static
+
+    from sanka.cli.tui.app import DoctorScreen, SankaApp, TrustFolderScreen
+    from sanka.cli.tui.model import Session
+    from sanka.cli.tui.services import HostServices
+
+    monkeypatch.setattr("sanka.cli.tui.app.is_folder_trusted", lambda root: False)
+    monkeypatch.setattr(HostServices, "project", lambda self: pytest.fail("doctor read project"))
+    app = SankaApp(
+        HostServices(tmp_path),
+        Session(project_root=str(tmp_path), direct=True),
+        start="doctor",
+        ask_trust=True,
+        doctor_expected_version="0.0.0",
+    )
+    copied: list[str] = []
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, DoctorScreen)
+        assert "ERROR" in str(app.screen.query_one("#doctor-status", Static).content)
+        assert "Expected Sanka 0.0.0" in str(app.screen.query_one("#doctor-report", Static).content)
+        assert app.session.exit_code == 1
+        assert app.screen.query_one("#doctor-refresh", Button).region.bottom <= 24
+        await pilot.click("#doctor-copy")
+        assert json.loads(copied[-1])["schema"] == "sanka-doctor/v1"
+        app.doctor_expected_version = __version__
+        await pilot.press("r")
+        assert app.session.exit_code == 0
+        assert "No installation issues" in str(
+            app.screen.query_one("#doctor-report", Static).content
+        )
+        app.action_stage("scan")
+        await pilot.pause()
+        assert isinstance(app.screen, TrustFolderScreen)
+
+
+@pytest.mark.asyncio
+async def test_direct_doctor_escape_exits(installed: Path, tmp_path: Path) -> None:
+    from sanka.cli.tui.app import SankaApp
+    from sanka.cli.tui.model import Session
+    from sanka.cli.tui.services import HostServices
+
+    app = SankaApp(
+        HostServices(tmp_path),
+        Session(project_root=str(tmp_path), direct=True),
+        start="doctor",
+        doctor_expected_version="0.0.0",
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("escape")
+    assert app.return_value == 1

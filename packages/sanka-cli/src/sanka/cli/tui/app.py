@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 import time
 from datetime import UTC, datetime
@@ -56,6 +57,7 @@ _MENU = (
     ("extensions", "e", "Extensions"),
     ("marketplace", "m", "Marketplace"),
     ("cloud", "c", "Cloud / Account"),
+    ("doctor", "d", "Doctor"),
     ("quit", "q", "Quit"),
 )
 
@@ -82,7 +84,7 @@ def _keys_line(
     find = "/ search    " if search else ""
     return (
         f"{action}s scan    p plan    a apply    t test    v verify\n"
-        f"e extensions    m market  c cloud  {find}{leave}    q quit"
+        f"e extensions    m market  c cloud  d doctor  {find}{leave}    q quit"
     )
 
 
@@ -166,6 +168,9 @@ class SankaScreen(Screen[None]):
         choice = str(event.option.id)
         if choice == "quit":
             self.sanka.exit(self.sanka.session.exit_code)
+            return
+        if choice == "doctor":
+            self.sanka.action_doctor()
             return
         if choice == "cloud":
             self.sanka.action_cloud()
@@ -535,6 +540,90 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 self.dismiss(values)
             except (ValueError, OSError) as error:
                 self.query_one("#configuration-error", Static).update(str(error))
+
+
+class DoctorScreen(SankaScreen):
+    """Installation diagnostics only; never loads or executes project code."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("r", "refresh", "Refresh")]
+
+    def compose(self) -> ComposeResult:
+        yield from _frame(self.sanka.session.project_root)
+        with Vertical(id="main"):
+            yield Static("Doctor — checking installation…", id="doctor-status", markup=False)
+            with Horizontal(id="actions"):
+                yield Button("Refresh", id="doctor-refresh")
+                yield Button("Copy report", id="doctor-copy", disabled=True)
+            with VerticalScroll(id="result-scroll"):
+                yield Static("", id="doctor-report", markup=False)
+
+    def on_mount(self) -> None:
+        self._highlight_menu("doctor")
+        self.action_refresh()
+
+    def refresh_footer(self) -> None:
+        command = ["sanka", "doctor", "--json"]
+        if self.sanka.doctor_expected_version is not None:
+            command.extend(["--expected-version", self.sanka.doctor_expected_version])
+        self.query_one(CliLine).show(shlex.join(command))
+        leave = "quit" if len(self.app.screen_stack) <= 2 else "back"
+        self.query_one(KeysBar).update(
+            f"r refresh    tab choose control    enter select\nesc {leave}    q quit"
+        )
+
+    def action_refresh(self) -> None:
+        from sanka_cli.commands.doctor import installation_report
+
+        self.refresh_footer()
+        self.report: dict[str, Any] | None = None
+        self.query_one("#doctor-copy", Button).disabled = True
+        try:
+            report = installation_report(self.sanka.doctor_expected_version)
+        except Exception as error:
+            self.query_one("#doctor-status", Static).update("Doctor — diagnostic error")
+            self.query_one("#doctor-report", Static).update(str(error))
+            if self.sanka.session.direct:
+                self.sanka.session.exit_code = 1
+            return
+        self.report = report
+        self.query_one("#doctor-copy", Button).disabled = False
+        if self.sanka.session.direct:
+            self.sanka.session.exit_code = int(report["status"] == "error")
+        self.query_one("#doctor-status", Static).update(f"Doctor — {report['status'].upper()}")
+        lines = [
+            "Read-only checks. No credentials or network access.",
+            f"Sanka: {report['cli_version']}",
+            f"Expected version: {report['expected_version'] or 'any'}",
+            f"Executable: {report['active_executable']}",
+            f"Resolved executable: {report['resolved_executable']}",
+            f"Python: {report['python']['version']} (requires {report['python']['required']})",
+            f"Python executable: {report['python']['executable']}",
+            f"Environment: {report['python']['environment']}",
+            f"PATH selects: {report['path_executable'] or 'none'}",
+            "",
+            "Findings",
+        ]
+        for check in report["checks"]:
+            lines.extend(
+                [
+                    f"{check['severity'].upper()}: {check['message']}",
+                    f"Recovery: {check['recovery']}",
+                    "",
+                ]
+            )
+        if not report["checks"]:
+            lines.append("No installation issues found.")
+        lines.extend(["", "Installations on PATH"])
+        lines.extend(f"{item['path']} -> {item['resolved_path']}" for item in report["executables"])
+        lines.extend(["", report["shell_note"]])
+        self.query_one("#doctor-report", Static).update("\n".join(lines))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "doctor-refresh":
+            self.action_refresh()
+        elif event.button.id == "doctor-copy" and self.report is not None:
+            self.app.copy_to_clipboard(json.dumps(self.report, ensure_ascii=False, indent=2))
+            self.notify("Diagnostic report copied.")
 
 
 class StatusScreen(SankaScreen):
@@ -2009,6 +2098,7 @@ class SankaApp(App[int]):
         Binding("e", "extensions", "Extensions"),
         Binding("m", "marketplace", "Marketplace"),
         Binding("c", "cloud", "Cloud / Account"),
+        Binding("d", "doctor", "Doctor"),
         Binding("slash", "search", "Search"),
         Binding("escape", "back", "Back"),
         Binding("q", "quit", "Quit"),
@@ -2023,6 +2113,7 @@ class SankaApp(App[int]):
         autostart: bool = False,
         monitor_timeout: int = 900,
         ask_trust: bool = False,
+        doctor_expected_version: str | None = None,
     ) -> None:
         super().__init__()
         self.services = services
@@ -2031,11 +2122,12 @@ class SankaApp(App[int]):
         self.autostart = autostart
         self.monitor_timeout = monitor_timeout
         self.marketplace_current = False
+        self.doctor_expected_version = doctor_expected_version
         self.ask_trust = ask_trust
         self.folder_trusted = not ask_trust or is_folder_trusted(session.project_root)
 
     def on_mount(self) -> None:
-        if self.ask_trust and not self.folder_trusted:
+        if self.ask_trust and not self.folder_trusted and self.start != "doctor":
             self.push_screen(TrustFolderScreen(self.session.project_root))
             return
         self.push_screen(self._screen(self.start, autostart=self.autostart))
@@ -2043,6 +2135,8 @@ class SankaApp(App[int]):
     def _screen(self, name: str, *, autostart: bool = False) -> Screen[Any]:
         if name in LIFECYCLE_COMMANDS:
             return StageScreen(name, autostart=autostart)
+        if name == "doctor":
+            return DoctorScreen()
         if name == "extensions":
             return ExtensionListScreen()
         if name == "marketplace":
@@ -2053,6 +2147,8 @@ class SankaApp(App[int]):
 
     def _busy(self) -> bool:
         if not self.folder_trusted:
+            if not isinstance(self.screen, TrustFolderScreen):
+                self.push_screen(TrustFolderScreen(self.session.project_root))
             return True
         if self.session.busy:
             self.notify("Wait for the current stage to finish or detach.")
@@ -2071,6 +2167,10 @@ class SankaApp(App[int]):
             return
         self.session.command = command
         self.push_screen(StageScreen(command))
+
+    def action_doctor(self) -> None:
+        if not self._busy():
+            self.push_screen(DoctorScreen())
 
     def action_cloud(self) -> None:
         if not self._busy():

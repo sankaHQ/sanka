@@ -402,7 +402,7 @@ async def test_status_shows_project_and_recent_local_run() -> None:
         assert "esc quit" in str(app.screen.query_one(KeysBar).content)
         assert "s scan" in str(app.screen.query_one(KeysBar).content)
         assert "p plan" in str(app.screen.query_one(KeysBar).content)
-        assert app.screen.query_one("#menu", OptionList).option_count == 9
+        assert app.screen.query_one("#menu", OptionList).option_count == 10
         assert "Elapsed" in current
         recent = app.screen.query_one("#recent", DataTable)
         recent.focus()

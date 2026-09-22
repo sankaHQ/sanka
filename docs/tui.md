@@ -49,3 +49,17 @@ The monitor distinguishes waiting for a worker from active execution and shows
 Fix outcomes such as `needs_review` separately from worker completion. Controls
 stay above a scrollable result area at 80×24. Quitting detaches from a hosted run;
 it does not cancel it. Cancel requires its own confirmation when supported.
+
+## Installation diagnostics
+
+On an interactive terminal, `sanka doctor` opens the Doctor screen. Open it from
+any idle TUI screen with `d` or the Doctor sidebar item. Refresh with `r`; Copy
+report copies the existing `sanka-doctor/v1` JSON diagnostics. The scrollable view
+shows CLI/Python versions, executable paths, duplicate installations and recovery
+steps. Checks never execute another installation, load project code, use
+credentials or access the network. Recovery commands are suggestions only.
+
+Doctor needs no folder trust; entering project workflows still requires trust.
+`--expected-version` remains enforced and a directly opened Doctor exits with 1
+when diagnostics report an error. `sanka doctor --json`, global `--output json`,
+pipes and CI retain their existing printer output; help never opens the TUI.
