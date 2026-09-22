@@ -107,7 +107,12 @@ def _frame(root: str) -> ComposeResult:
     home = Path.home()
     display_path = str(Path("~") / path.relative_to(home)) if path.is_relative_to(home) else root
     with Horizontal(id="brand"):
-        yield Static("▀████████▀\n ▀██████▄ \n▄████████▄", id="brand-mark", markup=False)
+        mark = Text("▀██████████▀\n")
+        mark.append(" ▜██▄       \n", style="dim")
+        mark.append(" ◢████████◣ \n")
+        mark.append("       ▀██▙ \n", style="dim")
+        mark.append("▄██████████▄")
+        yield Static(mark, id="brand-mark")
         with Vertical(id="brand-details"):
             yield Static(f"Sanka v{__version__}", id="brand-name", markup=False)
             directory = Static(display_path, id="brand-directory", markup=False)
@@ -1604,9 +1609,9 @@ class SankaApp(App[int]):
     ESCAPE_TO_MINIMIZE = False
     CSS = """
     Screen { layout: vertical; }
-    #brand { dock: top; height: 3; padding: 0 1; color: $text; background: $surface; }
-    #brand-mark { width: 10; height: 3; margin-right: 2; }
-    #brand-details { width: 1fr; height: 3; }
+    #brand { dock: top; height: 7; padding: 1 2; color: $text; background: $surface; }
+    #brand-mark { width: 12; height: 5; margin-right: 2; }
+    #brand-details { width: 1fr; height: 3; margin-top: 1; }
     #brand-name { height: 1; text-style: bold; }
     #brand-directory { height: 1; color: $text-muted; text-wrap: nowrap; text-overflow: ellipsis; }
     #footer { dock: bottom; height: 3; }
@@ -1629,7 +1634,7 @@ class SankaApp(App[int]):
     #search-hint { color: $text-muted; padding: 0 1; }
     CliLine { height: 1; background: $boost; color: $text; padding: 0 1; }
     #menu {
-        dock: left; width: 18; height: 1fr; margin-top: 3;
+        dock: left; width: 18; height: 1fr; margin-top: 7;
         border: none; border-right: solid $primary;
     }
     #main { height: 1fr; width: 1fr; }
