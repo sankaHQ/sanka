@@ -19,6 +19,7 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     Checkbox,
+    Collapsible,
     DataTable,
     Input,
     Label,
@@ -80,11 +81,10 @@ def _keys_line(
             "e extensions    m marketplace    stage running    q quit"
         )
     leave = "esc quit" if home else "esc back"
-    action = f"enter {run}    " if run else ""
     find = "/ search    " if search else ""
     return (
-        f"{action}s scan    p plan    a apply    t test    v verify\n"
-        f"e extensions    m market  c cloud  d doctor  {find}{leave}    q quit"
+        f"{'enter select    ' if run else ''}{find}tab controls    ? shortcuts\n"
+        f"s scan  p plan  a apply  t test  v verify  {leave}    q quit"
     )
 
 
@@ -386,6 +386,33 @@ class SearchModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ReportScreen(ModalScreen[None]):
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "close", "Close")]
+
+    def __init__(self, title: str, text: str) -> None:
+        super().__init__()
+        self.heading, self.text = title, text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="configuration-modal"):
+            yield Label(self.heading)
+            with VerticalScroll():
+                yield Static(self.text, markup=False)
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Copy", id="report-copy")
+                yield Button("Close", id="report-close")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "report-copy":
+            self.app.copy_to_clipboard(self.text)
+            self.notify("Copied.")
+        elif event.button.id == "report-close":
+            self.dismiss(None)
+
+
 class ConfirmScreen(ModalScreen[bool]):
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel")]
 
@@ -480,23 +507,34 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                             yield Label(label)
                             current = str(self.values.get(name, default))
                             choices = options if current in options else (*options, current)
+                            descriptions = {
+                                "minimal": "Minimal — compact application",
+                                "full": "Full — application, config and tests",
+                                "update": "Update — existing generated project",
+                                "native": "Native — generated target implementation",
+                                "compatibility": "Compatibility — retain Django bridge",
+                                "uv": "uv — manage generated environment",
+                                "pip": "pip — install generated requirements",
+                            }
                             yield Select(
-                                [(v, v) for v in choices],
+                                [(descriptions.get(v, v), v) for v in choices],
                                 value=current,
                                 allow_blank=False,
                                 id=f"plan-{name}",
                             )
-                    yield Label("Django settings module (optional; inferred when empty)")
-                    yield Input(str(self.values.get("settings_module", "")), id="plan-settings")
-                yield Label("Additional extension configuration (JSON object)")
-                known = {"output", "settings_module"}
-                if self.target == "fastapi":
-                    known.update({"generation", "strategy", "package_manager"})
-                extra = {k: v for k, v in self.values.items() if not self.drf or k not in known}
-                yield TextArea(json.dumps(extra, indent=2), id="plan-extra")
+                with Collapsible(title="Advanced configuration", collapsed=self.drf):
+                    if self.drf:
+                        yield Label("Django settings module (optional; inferred when empty)")
+                        yield Input(str(self.values.get("settings_module", "")), id="plan-settings")
+                    yield Label("Additional extension configuration (JSON object)")
+                    known = {"output", "settings_module"}
+                    if self.target == "fastapi":
+                        known.update({"generation", "strategy", "package_manager"})
+                    extra = {k: v for k, v in self.values.items() if not self.drf or k not in known}
+                    yield TextArea(json.dumps(extra, indent=2), id="plan-extra")
             yield Static("", id="configuration-error", markup=False)
             with Horizontal(classes="dialog-actions"):
-                yield Button("Save", id="save-configuration")
+                yield Button("Save configuration", id="save-configuration", variant="primary")
                 yield Button("Cancel", id="cancel-configuration")
 
     def action_cancel(self) -> None:
@@ -760,6 +798,12 @@ class StageScreen(SankaScreen):
         self._run = StageRun(command)
 
     def action_run(self) -> None:
+        if self.focused is not None and self.focused.id == "next-stage" and self._next_stage():
+            self.sanka.action_stage(self._next_stage() or "plan")
+            return
+        if isinstance(self.focused, Button) and self.focused.id != "run-stage":
+            self.focused.press()
+            return
         if self.review or not self.query("#run-stage"):
             return
         button = self.query_one("#run-stage", Button)
@@ -784,8 +828,10 @@ class StageScreen(SankaScreen):
             yield StageHeader(id="stage-header")
             with Horizontal(id="actions"):
                 yield Button("Run", id="run-stage")
+                yield Button("Next", id="next-stage", variant="primary", disabled=True)
+                yield Button("Details", id="stage-details")
                 yield Button("Configure", id="configure-stage")
-                yield Button("Copy command", id="copy-command")
+                yield Button("Command", id="copy-command")
                 yield Button("Copy hash", id="copy-hash")
             yield ProgressBar(id="progress", total=100, show_eta=False)
             yield VerticalScroll(id="setup")
@@ -838,13 +884,45 @@ class StageScreen(SankaScreen):
         if self.autostart and self.command not in {"plan", "apply"}:
             self._start()
         if self._run.phase != "idle":
-            self._set_result(_result_text(StageOutcome(self._run), session.target))
+            self._set_result(_summary_text(self._run, session.stages.get("plan")))
+            self._result_actions()
+        self._result_actions()
         self.refresh_footer()
 
     def on_screen_resume(self) -> None:
         self.sanka.session.command = self.command
         self.sanka.session.stage = self._run
         super().on_screen_resume()
+
+    def _next_stage(self) -> str | None:
+        if self._run.phase != "succeeded":
+            return None
+        return {"scan": "plan", "plan": "apply", "apply": "test", "test": "verify"}.get(
+            self.command
+        )
+
+    def _result_actions(self) -> None:
+        self.query_one(StageHeader).set_class(self._run.phase == "succeeded", "result-success")
+        self.query_one(StageHeader).set_class(self._run.phase == "failed", "result-failure")
+        next_stage = self._next_stage()
+        button = self.query_one("#next-stage", Button)
+        button.disabled = next_stage is None
+        button.display = next_stage is not None
+        button.label = {
+            "plan": "Plan migration",
+            "apply": "Review & Apply",
+            "test": "Run Tests",
+            "verify": "Verify",
+        }.get(next_stage or "", "Next")
+        self.query_one("#copy-hash", Button).disabled = not bool(
+            self._run.plan_hash or self.sanka.session.plan_hash
+        )
+        if self._run.phase in {"succeeded", "failed"}:
+            self.query_one("#run-stage", Button).label = (
+                "Rerun" if self._run.phase == "succeeded" else "Retry"
+            )
+        if next_stage:
+            button.focus()
 
     def _set_result(self, text: str) -> None:
         pane = self.query_one("#result-scroll", VerticalScroll)
@@ -994,11 +1072,26 @@ class StageScreen(SankaScreen):
         self.refresh_footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "next-stage":
+            next_stage = self._next_stage()
+            if next_stage:
+                self.sanka.action_stage(next_stage)
+            return
+        if event.button.id == "stage-details":
+            self.app.push_screen(
+                ReportScreen(
+                    "Stage evidence",
+                    _result_text(StageOutcome(self._run), self.sanka.session.target),
+                )
+            )
+            return
         if event.button.id == "configure-stage":
             self._configure_plan()
             return
         if event.button.id == "copy-command":
-            self.app.copy_to_clipboard(self.sanka.session.footer_line())
+            self.app.push_screen(
+                ReportScreen("Equivalent CLI command", self.sanka.session.footer_line())
+            )
             return
         if event.button.id == "copy-hash":
             self.app.copy_to_clipboard(self._run.plan_hash or self.sanka.session.plan_hash or "")
@@ -1097,6 +1190,7 @@ class StageScreen(SankaScreen):
             self.notify("Choose the reviewed plan hash.")
             return
         session.busy = True
+        self.query_one("#next-stage", Button).display = False
         if self.query("#run-stage"):
             self.query_one("#run-stage", Button).focus()
         session.stage = StageRun(
@@ -1200,9 +1294,10 @@ class StageScreen(SankaScreen):
             session.endpoints = list(discovered)
         self.query_one(StageHeader).show_stage(outcome.run, root=session.project_root)
         self._show_progress(outcome.run.progress)
-        self._show_rows(outcome.run)
+        self.query_one("#rows").display = False
         self.refresh_footer()
-        self._set_result(_result_text(outcome, session.target))
+        self._set_result(_summary_text(outcome.run, session.stages.get("plan")))
+        self._result_actions()
         if outcome.inputs:
             setup = self.query_one("#setup", VerticalScroll)
             for name in outcome.inputs:
@@ -1723,10 +1818,14 @@ class CloudMonitorScreen(SankaScreen):
                 yield Static("", id="job-error", markup=False)
                 yield Static("", id="job-result", markup=False)
                 yield Static("", id="job-receipt", markup=False)
-                yield Static("", id="job-fields", markup=False)
-                yield ActivityLog(id="log", wrap=True)
+                with Collapsible(title="Run details", collapsed=True):
+                    yield Static("", id="job-fields", markup=False)
+                    yield Static("", id="job-evidence", markup=False)
+                with Collapsible(title="Activity", collapsed=True):
+                    yield ActivityLog(id="log", wrap=True)
 
     def on_mount(self) -> None:
+        self._highlight_menu("cloud")
         self._job = self.sanka.session.job
         job = self._job
         if job is None:
@@ -1758,13 +1857,18 @@ class CloudMonitorScreen(SankaScreen):
         job = self._job
         if job is None or job.status in _SETTLED:
             return
-        self.query_one(StageHeader).show_job(job, elapsed=format_elapsed(self._started))
+        self.query_one(StageHeader).show_job(job, elapsed=_job_elapsed(job))
 
     def _show_job(self, job: JobRef, lines: tuple[str, ...]) -> None:
         self._job = job
+        self.query_one(StageHeader).set_class(
+            job.status == "failed"
+            or job.outcome in {"failed", "needs_review", "evidence_unavailable"},
+            "result-failure",
+        )
         self.sanka.session.job = job
         self.sanka.session.command = job.command
-        self.query_one(StageHeader).show_job(job, elapsed=format_elapsed(self._started))
+        self.query_one(StageHeader).show_job(job, elapsed=_job_elapsed(job))
         bar = self.query_one("#progress", ProgressBar)
         if job.progress is None:
             bar.display = False
@@ -1785,6 +1889,11 @@ class CloudMonitorScreen(SankaScreen):
             job.status in _SETTLED or job.route != "cloud-run"
         )
         self.query_one("#cloud-download", Button).disabled = job.status not in _SETTLED
+        self.query_one("#cloud-copy-hash", Button).disabled = not bool(job.plan_sha)
+        self.query_one("#cloud-copy-hash", Button).tooltip = (
+            "No plan hash reported" if not job.plan_sha else "Copy full plan hash"
+        )
+        self.query_one("#detach", Button).label = "Close" if job.status in _SETTLED else "Detach"
         endpoints = ", ".join(job.endpoint_ids) if job.endpoint_ids else "not reported"
         self.query_one("#job-fields", Static).update(
             "\n".join(
@@ -1802,6 +1911,7 @@ class CloudMonitorScreen(SankaScreen):
                 )
             )
         )
+        self.query_one("#job-evidence", Static).update(_cloud_evidence(job))
         log = self.query_one(ActivityLog)
         for line in lines:
             log.append_line(line)
@@ -1811,25 +1921,16 @@ class CloudMonitorScreen(SankaScreen):
         error = job.last_error
         if not error and (job.status == "failed" or job.outcome in attention):
             error = job.outcome or job.status
-        self.query_one("#job-error", Static).update(error)
+        visible_error = "" if error in {job.outcome, job.status} else error
+        self.query_one("#job-error", Static).update(visible_error)
+        self.query_one("#job-error").display = bool(visible_error)
         if job.status in _SETTLED:
             logs = (
                 "Logs are available as a download now that the run has finished."
                 if job.status == "succeeded"
                 else "Download retained logs.txt even when verification failed."
             )
-            self.query_one("#job-result", Static).update(
-                "\n".join(
-                    (
-                        f"Result          {job.outcome or job.status}",
-                        f"Receipt         {job.receipt_command}",
-                        f"Download        {job.download_command}",
-                        f"UI              {job.ui_url or '-'}",
-                        _cloud_evidence(job),
-                        logs,
-                    )
-                )
-            )
+            self.query_one("#job-result", Static).update(_cloud_summary(job) + "\n" + logs)
         else:
             self.query_one("#job-result", Static).update(
                 "Queued — waiting for a worker; active compute has not started."
@@ -1867,6 +1968,7 @@ class CloudMonitorScreen(SankaScreen):
     def _failed(self, message: str) -> None:
         self.sanka.session.busy = False
         self.sanka.session.exit_code = 1
+        self.query_one("#job-error").display = True
         self.query_one("#job-error", Static).update(message)
         self.refresh_footer()
 
@@ -1898,7 +2000,9 @@ class CloudMonitorScreen(SankaScreen):
             self.app.copy_to_clipboard(job.plan_sha)
             return
         if job is not None and event.button.id == "cloud-copy-command":
-            self.app.copy_to_clipboard(self.sanka.session.footer_line())
+            self.app.push_screen(
+                ReportScreen("Equivalent CLI command", self.sanka.session.footer_line())
+            )
             return
         if job is not None and event.button.id in {"cloud-receipt", "cloud-download", "cloud-logs"}:
             action = {
@@ -1910,6 +2014,12 @@ class CloudMonitorScreen(SankaScreen):
             return
         if event.button.id == "detach":
             job = self._job
+            if job is not None and job.status in _SETTLED:
+                if len(self.app.screen_stack) <= 2:
+                    self.app.exit(self.sanka.session.exit_code)
+                else:
+                    self.app.pop_screen()
+                return
             reattach = (
                 f"sanka cloud status --workspace {job.workspace} {job.run_id}"
                 if job is not None
@@ -2043,15 +2153,15 @@ class SankaApp(App[int]):
     #cloud-actions, #cloud-evidence-actions { height: 1; }
     #job-header { height: auto; max-height: 3; }
     #cloud-detail { height: 1fr; }
-    #actions { height: 1; padding: 0 1; }
+    #actions { height: 2; layout: grid; grid-size: 3; grid-rows: 1 1; padding: 0 1; }
     #run-stage {
         width: auto;
-        margin: 0 0 1 0;
+        margin: 0;
         background: $primary;
         text-style: bold;
     }
     #run-stage:disabled { background: $panel; color: $text-muted; }
-    PlanConfiguration, CloudAction, ConfirmScreen { align: center middle; }
+    ReportScreen, PlanConfiguration, CloudAction, ConfirmScreen { align: center middle; }
     #configuration-modal {
         width: 70; max-width: 95%; height: 90%;
         background: $surface; border: solid $primary; padding: 1;
@@ -2066,6 +2176,12 @@ class SankaApp(App[int]):
         padding: 0 1;
         background: $surface;
     }
+    #main Collapsible { padding: 0; margin: 0; }
+    #result { padding-top: 1; }
+    #next-stage { background: $primary; text-style: bold; }
+    StageHeader { text-style: bold; }
+    .result-success { color: $success; }
+    .result-failure { color: $error; }
     #result-scroll { height: 1fr; padding: 0 1; }
     #rows { height: 4; }
     #log {
@@ -2099,6 +2215,7 @@ class SankaApp(App[int]):
         Binding("m", "marketplace", "Marketplace"),
         Binding("c", "cloud", "Cloud / Account"),
         Binding("d", "doctor", "Doctor"),
+        Binding("question_mark", "shortcuts", "Shortcuts"),
         Binding("slash", "search", "Search"),
         Binding("escape", "back", "Back"),
         Binding("q", "quit", "Quit"),
@@ -2187,6 +2304,24 @@ class SankaApp(App[int]):
         if not self._busy():
             self.session.command = "marketplace"
             self.push_screen(MarketplaceScreen())
+
+    def action_shortcuts(self) -> None:
+        self.push_screen(
+            ReportScreen(
+                "Keyboard shortcuts",
+                "\n".join(
+                    [
+                        "s Scan    p Plan    a Apply    t Test    v Verify",
+                        "e Extensions    m Marketplace    c Cloud / Account    d Doctor",
+                        "/ Search (where available)    Tab / Shift+Tab Move focus",
+                        "Enter Activate focused action    Escape Back    q Quit",
+                        "Cloud monitor: r Refresh, b Receipt, d Download, l Logs, a Apply, f Fix",
+                        "Doctor: r Refresh",
+                        "Text fields keep typing keys. Escape leaves a focused stage input.",
+                    ]
+                ),
+            )
+        )
 
     def action_search(self) -> None:
         screen = self.screen
@@ -2363,3 +2498,136 @@ def _cloud_evidence(job: JobRef) -> str:
             sections.append(key.replace("_", " ").title())
             sections.extend(_evidence_lines(value))
     return "\n".join(sections)
+
+
+def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
+    """Keep evidence counts and limitations above paths and protocol fields."""
+    data = run.result_data
+    extension = data.get("extension")
+    if isinstance(extension, dict):
+        data = {**extension, **data}
+    if plan is not None and "dropped_alias_routes" not in data:
+        plan_data = plan.result_data
+        nested = plan_data.get("extension")
+        aliases = plan_data.get(
+            "dropped_alias_routes",
+            nested.get("dropped_alias_routes") if isinstance(nested, dict) else None,
+        )
+        if aliases is not None:
+            data = {**data, "dropped_alias_routes": aliases}
+    lines = [f"{run.command.title()} · {run.phase.replace('_', ' ').title()}"]
+    if run.error_code or run.error_message:
+        if "No module named 'django'" in run.error_message:
+            lines.extend(
+                [
+                    "Blocked: the extension environment cannot import Django.",
+                    "Check the installed converter version in Extensions.",
+                    "Use a converter that supports the source project's Python environment.",
+                    "Do not install Django globally as a workaround.",
+                ]
+            )
+        else:
+            lines.append(run.error_message or run.message)
+        lines.append(f"Diagnostic code: {run.error_code or 'not reported'}")
+        lines.append("Open Details for diagnostic evidence; retry after resolving the cause.")
+        return "\n".join(lines)
+    http = data.get("http")
+    if isinstance(http, dict):
+        passed, total = http.get("passed"), http.get("probed")
+        if passed is not None and total is not None:
+            lines.append(f"HTTP probes: {passed} / {total} passed")
+    for key, label in (
+        ("tests_passed", "Tests passed"),
+        ("tests_run", "Tests run"),
+        ("test_count", "Tests reported"),
+        ("tests", "Tests reported"),
+        ("native_routes", "Native routes"),
+        ("dropped_alias_routes", "Omitted format-suffix aliases"),
+    ):
+        if key in data and isinstance(data[key], (int, float)) and not isinstance(data[key], bool):
+            lines.append(f"{label}: {data[key]}")
+    routes = data.get("routes")
+    if isinstance(routes, dict):
+        for key, label in (("generated", "Generated routes"), ("scanned", "Scanned routes")):
+            if key in routes:
+                lines.append(f"{label}: {routes[key]}")
+    if run.command == "scan":
+        fingerprint = data.get("fingerprint")
+        if isinstance(fingerprint, dict):
+            for key in ("languages", "frameworks"):
+                if fingerprint.get(key):
+                    lines.append(f"{key.title()}: " + ", ".join(map(str, fingerprint[key])))
+        lines.append(f"Reported endpoints: {len(parse_endpoints(data))}")
+    if data.get("output"):
+        lines.append(f"Output folder: {Path(str(data['output'])).name}")
+    if run.command in {"test", "verify"}:
+        lines.append(
+            "Passed only within the reported scope; not proof of all source behavior."
+            if run.phase == "succeeded"
+            else "No passing verification has been established."
+        )
+    for item in run.limitations:
+        lines.append(f"Limitation: {item}")
+    for key in ("risks", "limitations"):
+        values = data.get(key)
+        if isinstance(values, list):
+            for value in values:
+                text = value.get("message", str(value)) if isinstance(value, dict) else str(value)
+                if text not in run.limitations:
+                    lines.append(f"{key.title()}: {text}")
+    lines.append("Details contains the full evidence, files and logs.")
+    return "\n".join(lines)
+
+
+def _job_elapsed(job: JobRef) -> str:
+    start = _parse_started(job.started_at)
+    if job.status not in _SETTLED:
+        return format_elapsed(start)
+    raw_run = job.raw.get("run", job.raw)
+    if isinstance(raw_run, dict):
+        end = _parse_started(str(raw_run.get("finished_at") or raw_run.get("completed_at") or ""))
+        if start is not None and end is not None:
+            return format_elapsed(start, now=end)
+    return "Duration unavailable"
+
+
+def _cloud_summary(job: JobRef) -> str:
+    outcome = job.outcome or job.status
+    lines = [f"Outcome: {outcome.replace('_', ' ').title()}"]
+    verification = job.raw.get("http_verification")
+    if isinstance(verification, dict):
+        matched, total = verification.get("matched"), verification.get("total")
+        if matched is not None and total is not None:
+            lines.append(f"HTTP scenarios: {matched} / {total} matched")
+        if verification.get("reason"):
+            lines.append("Verification: " + str(verification["reason"]).replace("_", " "))
+    plan = job.raw.get("plan")
+    if isinstance(plan, dict):
+        summary = plan.get("summary", {})
+        if isinstance(summary, dict):
+            for key, label in (
+                ("native_routes", "Native routes"),
+                ("needs_adaptation_routes", "Routes needing adaptation"),
+            ):
+                if key in summary:
+                    lines.append(f"{label}: {summary[key]}")
+            for key in ("risks", "limitations"):
+                values = summary.get(key)
+                if isinstance(values, list):
+                    for value in values:
+                        lines.append(
+                            str(value.get("message", value))
+                            if isinstance(value, dict)
+                            else str(value)
+                        )
+    if job.command in {"scan", "plan"} and job.status == "succeeded":
+        lines.append("Next: review Run details, then Apply the reviewed plan.")
+    elif outcome in {"failed", "needs_review", "evidence_unavailable"}:
+        lines.append(
+            "Next: inspect Logs and Run details. Fix requires eligibility and paid confirmation."
+        )
+    else:
+        lines.append(
+            "Results cover only the reported checks. Download output and review the receipt."
+        )
+    return "\n".join(lines)

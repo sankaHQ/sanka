@@ -63,3 +63,17 @@ Doctor needs no folder trust; entering project workflows still requires trust.
 `--expected-version` remains enforced and a directly opened Doctor exits with 1
 when diagnostics report an error. `sanka doctor --json`, global `--output json`,
 pipes and CI retain their existing printer output; help never opens the TUI.
+
+## Reading results
+
+Stage results lead with reported counts and scope, with full evidence, file paths
+and logs available through Details. Successful stages offer the next workflow
+step; Review & Apply still requires the existing plan-hash confirmation. Command
+opens the complete copyable command, and `?` opens the shortcut reference.
+Advanced Plan configuration contains settings overrides and raw JSON.
+
+Cloud monitors distinguish the reported outcome from worker status. Completed
+runs use recorded completion timestamps for duration (or say unavailable), offer
+Close rather than Detach, and keep metadata and evidence under Run details.
+Missing hashes disable Copy hash. No verification coverage is inferred from a
+worker's successful completion.

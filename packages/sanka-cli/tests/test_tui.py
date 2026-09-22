@@ -446,9 +446,9 @@ async def test_escape_on_scan_returns_home() -> None:
         assert "a apply" in text
         assert "t test" in text
         assert "v verify" in text
-        assert "e extensions" in text
-        assert "m market" in text
-        assert "enter scan" in text
+        assert "? shortcuts" in text
+        assert "tab controls" in text
+        assert "enter select" in text
         assert "esc back" in text
         assert "q quit" in text
         await pilot.press("escape")
@@ -482,9 +482,16 @@ async def test_verify_fills_a_route_table() -> None:
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        table = _table_text(app.screen.query_one("#rows"))
+        await pilot.click("#stage-details")
+        await pilot.pause()
+        from sanka.cli.tui.app import ReportScreen
+
+        assert isinstance(app.screen, ReportScreen)
+        table = app.screen.text
         assert "GET /users" in table
         assert "failed" in table
+        await pilot.press("escape")
+        await pilot.pause()
         header = str(app.screen.query_one("#stage-header", Static).content)
         assert "verify" in header
 
@@ -903,7 +910,7 @@ async def test_cloud_actions_fit_small_terminal_and_declined_apply_does_not_subm
             button = app.screen.query_one(f"#{name}", Button)
             assert button.region.right <= 80
             assert button.region.bottom <= 21
-        assert "main.py" in str(app.screen.query_one("#job-result", Static).content)
+        assert "main.py" in str(app.screen.query_one("#job-evidence", Static).content)
         await pilot.click("#cloud-apply")
         await pilot.pause()
         assert isinstance(app.screen, CloudAction)
@@ -1042,3 +1049,86 @@ def test_cloud_completion_requires_stage_evidence() -> None:
     assert job.last_error == "needs_review"
     plan = _job_from_code("plan", {**operation, "operation": "prepare"}, "12345678", title="Cloud")
     assert plan.outcome == "evidence_unavailable"
+
+
+def test_summary_keeps_scope_counts_ahead_of_file_noise() -> None:
+    from sanka.cli.tui.app import _summary_text
+
+    run = StageRun(
+        "verify",
+        phase="succeeded",
+        result_data={
+            "generated_files": ["/long/path/main.py"],
+            "http": {"passed": 2, "probed": 2},
+            "routes": {"generated": 7, "scanned": 14},
+            "dropped_alias_routes": 7,
+        },
+    )
+    result = _summary_text(run)
+    assert "2 / 2 passed" in result
+    assert "Generated routes: 7" in result
+    assert "Omitted format-suffix aliases: 7" in result
+    assert "not proof of all source behavior" in result
+    assert "/long/path" not in result
+    assert "Tests reported: 7" in _summary_text(
+        StageRun("test", phase="succeeded", result_data={"tests": 7})
+    )
+
+
+@pytest.mark.asyncio
+async def test_next_action_and_command_dialog_at_small_size() -> None:
+    from textual.widgets import Button
+
+    from sanka.cli.tui.app import ReportScreen
+
+    app = SankaApp(FakeServices(), Session(project_root="/work/demo"), start="scan", autostart=True)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        next_button = app.screen.query_one("#next-stage", Button)
+        assert not next_button.disabled
+        assert next_button.region.height == 1
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, StageScreen) and app.screen.command == "plan"
+        await pilot.click("#copy-command")
+        await pilot.pause()
+        assert isinstance(app.screen, ReportScreen)
+        assert "sanka plan /work/demo" in app.screen.text
+        await pilot.press("escape", "?")
+        await pilot.pause()
+        assert isinstance(app.screen, ReportScreen)
+        assert "Doctor" in app.screen.text
+
+
+@pytest.mark.asyncio
+async def test_completed_cloud_close_keeps_failure_and_frozen_duration() -> None:
+    from textual.widgets import Button
+
+    from sanka.cli.tui.app import _job_elapsed
+
+    job = JobRef(
+        run_id="run",
+        workspace="10483816",
+        route="code-plan",
+        stage_group="apply+test+verify",
+        command="apply",
+        status="failed",
+        started_at="2026-09-22T01:00:00Z",
+        raw={"run": {"completed_at": "2026-09-22T01:02:00Z"}},
+    )
+    assert _job_elapsed(job) == "02:00"
+    assert _job_elapsed(replace(job, raw={})) == "Duration unavailable"
+    app = SankaApp(FakeServices(), Session(project_root="/work/demo", job=job), start="monitor")
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        assert str(app.screen.query_one("#detach", Button).label) == "Close"
+        assert app.screen.query_one("#cloud-copy-hash", Button).disabled
+        menu = app.screen.query_one("#menu", OptionList)
+        assert menu.highlighted is not None
+        assert menu.get_option_at_index(menu.highlighted).id == "cloud"
+        expected = app.session.exit_code
+        assert expected != 0
+        await pilot.click("#detach")
+    assert app.return_value == expected
