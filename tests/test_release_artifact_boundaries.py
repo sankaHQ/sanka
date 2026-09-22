@@ -102,6 +102,7 @@ def test_unified_release_artifact_contains_three_license_zones(
             b"Requires-Dist: platformdirs>=4,<5\n"
             b"Requires-Dist: pyyaml>=6\n"
             b"Requires-Dist: rich>=13,<15\n"
+            b"Requires-Dist: textual>=3.2,<8\n"
         ),
         "sanka_cli-0.2.4.dist-info/entry_points.txt": (
             b"[console_scripts]\nsanka = sanka_cli.main:main\n"
