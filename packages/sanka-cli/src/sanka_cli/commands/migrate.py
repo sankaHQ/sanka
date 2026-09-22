@@ -37,6 +37,10 @@ CLOUD_ONLY_COMMANDS: dict[str, str] = {
 
 class _ForwardingCommand(click.Command):
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        boundary = args.index("--") if "--" in args else len(args)
+        args = ["--help" if arg in {"-h", "--h"} else arg for arg in args[:boundary]] + args[
+            boundary:
+        ]
         if (
             self.name in STAGES
             and "--cloud" in args[: args.index("--") if "--" in args else len(args)]
@@ -132,6 +136,7 @@ def _build_hybrid(name: str, help_text: str) -> click.Command:
 def _build_cloud_only(name: str, help_text: str) -> click.Command:
     @click.command(
         name,
+        cls=_ForwardingCommand,
         help=help_text,
         context_settings={
             "ignore_unknown_options": True,

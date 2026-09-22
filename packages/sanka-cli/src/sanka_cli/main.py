@@ -23,7 +23,7 @@ from sanka_cli.output import print_error
 from sanka_cli.state import CLIState
 
 
-@click.group()
+@click.group(context_settings={"help_option_names": ["-h", "--h", "--help"]})
 @click.version_option(__version__, prog_name="sanka")
 @click.option("--profile", default=None, help="Profile name to use.")
 @click.option("--base-url", default=None, help="Override API base URL.")
@@ -41,6 +41,20 @@ def cli(
     output: str | None,
 ) -> None:
     ctx.obj = CLIState(profile=profile, base_url=base_url, output=output)
+
+
+@cli.command("help")
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def help_command(ctx: click.Context, command: tuple[str, ...]) -> None:
+    """Show help for any command, e.g. sanka help scan or sanka help cloud list."""
+    if any(part.startswith("-") for part in command):
+        raise click.UsageError("Use sanka <command> [options] --help for option-specific help.")
+    cli.main(
+        args=[*command, "--help"],
+        prog_name=ctx.find_root().info_name,
+        standalone_mode=False,
+    )
 
 
 cli.add_command(auth)
