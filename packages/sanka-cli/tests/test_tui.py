@@ -52,7 +52,7 @@ async def test_brand_header_stays_visible_and_renders_paths_literally(theme: str
         assert f"Sanka v{__version__}" in str(app.screen.query_one("#brand-name", Static).content)
         directory = app.screen.query_one("#brand-directory", Static)
         assert str(directory.content) == root
-        assert directory.tooltip == root
+        assert str(directory.tooltip) == root
         assert app.screen.query_one("#menu").region.y >= header.region.bottom
         assert app.screen.query_one("#footer").region.bottom <= 24
         await pilot.press("s")

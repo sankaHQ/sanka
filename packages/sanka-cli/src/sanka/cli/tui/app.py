@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -110,7 +111,7 @@ def _frame(root: str) -> ComposeResult:
         with Vertical(id="brand-details"):
             yield Static(f"Sanka v{__version__}", id="brand-name", markup=False)
             directory = Static(display_path, id="brand-directory", markup=False)
-            directory.tooltip = root
+            directory.tooltip = Text(root)
             yield directory
     yield OptionList(*(Option(label, id=name) for name, _key, label in _MENU), id="menu")
     yield AppFooter(id="footer")
@@ -1627,7 +1628,10 @@ class SankaApp(App[int]):
     #search-filters Input { width: 1fr; }
     #search-hint { color: $text-muted; padding: 0 1; }
     CliLine { height: 1; background: $boost; color: $text; padding: 0 1; }
-    #menu { dock: left; width: 18; height: 1fr; margin-top: 3; border: none; border-right: solid $primary; }
+    #menu {
+        dock: left; width: 18; height: 1fr; margin-top: 3;
+        border: none; border-right: solid $primary;
+    }
     #main { height: 1fr; width: 1fr; }
     #status-detail { height: 1fr; }
     #stage-header { height: auto; padding: 0 1; }
