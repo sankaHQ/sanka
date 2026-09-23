@@ -17,10 +17,6 @@ One `sanka` executable covers everything you need for migration projects - Open 
 
 ---
 
-For the hosted repository execution with a credit limit, see
-[Cloud Runs](docs/cloud-runs.md). The `sanka cloud` commands use the workspace's
-developer API token; the hosted service must be enabled separately.
-
 ## Why Sanka?
 
 - **The migration actually finishes**: `verify` reconciles the generated result against the source — an exit code alone is never treated as completion evidence
@@ -60,6 +56,30 @@ Full leaderboard, per-task results, cost and token efficiency, and the raw JSON:
 are open source at [sankaHQ/bench](https://github.com/sankaHQ/bench).
 
 ---
+
+## Try it in 3 minutes
+
+Migrate the example Django REST Framework app on your machine. Nothing here
+needs an account.
+
+```bash
+git clone https://github.com/sankaHQ/sanka-examples
+cd sanka-examples/django/order-tracker
+uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt
+uv tool install --python 3.12 sanka-cli
+sanka extension add sanka/drf-to-fastapi
+
+sanka scan .
+sanka plan . --to fastapi        # answers: minimal, .sanka/output/fastapi, uv, native
+sanka apply --root . --plan-hash sha256:<hash printed by plan>
+sanka test .
+sanka verify .
+```
+
+`plan` prints a hash; `apply` accepts only that hash. `verify` replays requests
+against the DRF app and the generated FastAPI app and diffs the responses. The
+[DRF to FastAPI guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)
+walks through what each step checks and what stays manual.
 
 ## Install
 
@@ -143,6 +163,11 @@ compatibility envelopes.
 
 ## Local and hosted commands
 
+Hosted execution is optional. For repository runs on Sanka's infrastructure with
+a credit limit, see [Cloud Runs](docs/cloud-runs.md); the `sanka cloud` commands
+use the workspace's developer API token and the hosted service must be enabled
+separately.
+
 Authentication is selected after command routing:
 
 | Surface | Execution | Sanka token |
@@ -203,5 +228,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR. Open or reuse an
 issue first, agree on the scope of substantial changes with a maintainer, then
 link your PR to that issue. The guide also explains development checks and the
 repository's license boundaries.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md) code of
+conduct.
 
 See [Sanka Fix](docs/fix.md) for optional cloud verification and repair of existing Sanka Code runs.
