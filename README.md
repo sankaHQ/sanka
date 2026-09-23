@@ -17,30 +17,6 @@ One `sanka` executable covers everything you need for migration projects - Open 
 
 ---
 
-## Try it in 3 minutes
-
-Migrate the example Django REST Framework app on your machine. Nothing here
-needs an account.
-
-```bash
-git clone https://github.com/sankaHQ/sanka-examples
-cd sanka-examples/django/order-tracker
-uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt
-uv tool install --python 3.12 sanka-cli
-sanka extension add sanka/drf-to-fastapi
-
-sanka scan .
-sanka plan . --to fastapi        # answers: minimal, .sanka/output/fastapi, uv, native
-sanka apply --root . --plan-hash sha256:<hash printed by plan>
-sanka test .
-sanka verify .
-```
-
-`plan` prints a hash; `apply` accepts only that hash. `verify` replays requests
-against the DRF app and the generated FastAPI app and diffs the responses. The
-[DRF to FastAPI guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)
-walks through what each step checks and what stays manual.
-
 ## Why Sanka?
 
 - **The migration actually finishes**: `verify` reconciles the generated result against the source — an exit code alone is never treated as completion evidence
@@ -80,6 +56,30 @@ Full leaderboard, per-task results, cost and token efficiency, and the raw JSON:
 are open source at [sankaHQ/bench](https://github.com/sankaHQ/bench).
 
 ---
+
+## Try it in 3 minutes
+
+Migrate the example Django REST Framework app on your machine. Nothing here
+needs an account.
+
+```bash
+git clone https://github.com/sankaHQ/sanka-examples
+cd sanka-examples/django/order-tracker
+uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt
+uv tool install --python 3.12 sanka-cli
+sanka extension add sanka/drf-to-fastapi
+
+sanka scan .
+sanka plan . --to fastapi        # answers: minimal, .sanka/output/fastapi, uv, native
+sanka apply --root . --plan-hash sha256:<hash printed by plan>
+sanka test .
+sanka verify .
+```
+
+`plan` prints a hash; `apply` accepts only that hash. `verify` replays requests
+against the DRF app and the generated FastAPI app and diffs the responses. The
+[DRF to FastAPI guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)
+walks through what each step checks and what stays manual.
 
 ## Install
 
