@@ -13,6 +13,10 @@ One `sanka` executable covers everything you need for migration projects - Open 
 [![License](https://img.shields.io/badge/license-Apache--2.0%20AND%20AGPL--3.0-blue)](LICENSE)
 [![Benchmarks](https://img.shields.io/badge/benchmarks-sanka.com%2Fbench-ff5a1f)](https://sanka.com/bench)
 
+<br>
+
+<img src="docs/assets/drf-to-fastapi-launch.gif" alt="Sanka in 30 seconds: every DRF to FastAPI migration used to be a one-off script, written once, run once, deleted. Sanka runs scan, plan, apply, test and verify with a hash-locked plan and a differential verify; 74.3% to 85.3% pass across eight models on the same 17 migrations." width="480" height="480">
+
 </div>
 
 ---
