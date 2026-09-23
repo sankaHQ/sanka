@@ -38,4 +38,4 @@ def test_root_version_uses_unified_public_version() -> None:
     result = CliRunner().invoke(cli, ["--version"])
 
     assert result.exit_code == 0
-    assert result.output == "sanka, version 0.2.15\n"
+    assert result.output == "sanka, version 0.2.16\n"
