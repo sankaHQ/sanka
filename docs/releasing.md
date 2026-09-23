@@ -9,9 +9,10 @@ contracts unchanged. It embeds published Extension SDK `0.1.0a7` from
 Order billing verification and activation control; hosted execution still requires
 a separate native adapter. Blueprint v5 execution remains unsupported.
 
-The default Data/Code marketplace is pinned to the reviewed Extensions PR #123
-merge `96352d2c64ab37a0e59dcc041404ec0a50122ad0`, whose manifests accept both
-CLI 0.2.14 and 0.3.x. Existing project locks remain
+The default Data/Code marketplace is pinned to Extensions PR #127 commit
+`e46aaffb6b1ec0b1c4f82bcaf09d2bb411baa7fa`, which restores the published
+FastAPI wheel hash in the 0.3-compatible catalog. PR #127 merged as
+`21819486f0a574362d69510fb2315f09805c36ab`. Existing project locks remain
 byte-for-byte unchanged on CLI upgrade; users explicitly refresh the catalog and
 re-add each extension to adopt its compatible manifest. The business-flow package
 is distributed separately; publishing the CLI does not install or activate it.

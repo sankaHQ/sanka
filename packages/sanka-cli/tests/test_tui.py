@@ -850,6 +850,30 @@ def test_result_keeps_aggregate_evidence_and_scope() -> None:
         assert value in result
 
 
+def test_verify_summary_shows_scenario_replay_count() -> None:
+    from sanka.cli.tui.app import _summary_text
+
+    run = StageRun(
+        "verify",
+        phase="succeeded",
+        result_data={"summary": {"matched": 1, "scenarios": 1}},
+    )
+    assert "Scenario replay: 1 / 1 matched" in _summary_text(run)
+
+
+def test_plan_without_generated_output_does_not_offer_apply() -> None:
+    from sanka.cli.tui.app import StageScreen, _summary_text
+
+    screen = StageScreen("plan")
+    screen._run = StageRun(
+        "plan",
+        phase="succeeded",
+        result_data={"generated": False},
+    )
+    assert screen._next_stage() is None
+    assert "Planning only" in _summary_text(screen._run)
+
+
 @pytest.mark.asyncio
 async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: Path) -> None:
     from textual.widgets import Button
@@ -885,6 +909,42 @@ async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: P
         await pilot.pause()
         assert isinstance(app.screen, PlanConfiguration)
         assert app.screen.query_one("#plan-output", Input).value == "generated"
+
+
+@pytest.mark.asyncio
+async def test_flask_verify_configuration_forwards_scenario_replay(tmp_path: Path) -> None:
+    from sanka.cli.tui.app import VerifyConfiguration
+
+    scenarios = tmp_path / "scenarios.json"
+    scenarios.write_text('[{"id":"list","method":"GET","path":"/api/orders/"}]')
+    (tmp_path / "flask-app").mkdir()
+    service = FakeServices()
+    service.used_extension_id = lambda target=None: "sanka/drf-to-flask"  # type: ignore[method-assign]
+    app = SankaApp(service, Session(project_root=str(tmp_path), target="flask"), start="verify")
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.click("#configure-stage")
+        await pilot.pause()
+        assert isinstance(app.screen, VerifyConfiguration)
+        await pilot.click("#save-configuration")
+        await pilot.pause()
+        assert "scenarios file" in str(app.screen.query_one("#configuration-error", Static).content)
+        app.screen.query_one("#verify-scenarios", Input).value = scenarios.name
+        app.screen.query_one("#verify-candidate", Input).value = "flask-app"
+        app.screen.query_one("#verify-db-env", Input).value = "BENCH_DB_PATH"
+        await pilot.pause(0.6)
+        await pilot.click("#save-configuration")
+        await pilot.pause()
+        assert not isinstance(app.screen, VerifyConfiguration), str(
+            app.screen.query_one("#configuration-error", Static).content
+        )
+        await pilot.click("#run-stage")
+        await app.workers.wait_for_complete()
+        assert service.calls[0]["configuration"] == {
+            "scenarios": "scenarios.json",
+            "candidate": "flask-app",
+            "db_env": "BENCH_DB_PATH",
+        }
 
 
 @pytest.mark.asyncio

@@ -580,6 +580,67 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 self.query_one("#configuration-error", Static).update(str(error))
 
 
+class VerifyConfiguration(ModalScreen[dict[str, Any] | None]):
+    """Collect the scenario replay inputs used by Flask verification."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, values: dict[str, Any], *, flask: bool) -> None:
+        super().__init__()
+        self.values = values
+        self.flask = flask
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="configuration-modal"):
+            yield Label("Verify configuration")
+            yield Label("Scenario JSON file (required for Flask)")
+            yield Input(str(self.values.get("scenarios", "")), id="verify-scenarios")
+            yield Label("Candidate app directory")
+            yield Input(
+                str(self.values.get("candidate") or self.values.get("output", "")),
+                id="verify-candidate",
+            )
+            yield Label("Database environment variable")
+            yield Input(str(self.values.get("db_env", "SANKA_TEST_DB")), id="verify-db-env")
+            yield Static("", id="configuration-error", markup=False)
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Save configuration", id="save-configuration", variant="primary")
+                yield Button("Cancel", id="cancel-configuration")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-configuration":
+            self.dismiss(None)
+        elif event.button.id == "save-configuration":
+            try:
+                app = self.app
+                assert isinstance(app, SankaApp)
+                root = Path(app.session.project_root).resolve()
+                values = dict(self.values)
+                for name, kind in (("scenarios", "file"), ("candidate", "directory")):
+                    value = self.query_one(f"#verify-{name}", Input).value.strip()
+                    if not value:
+                        if self.flask:
+                            raise ValueError(f"Flask verification needs a {name} {kind}.")
+                        values.pop(name, None)
+                        continue
+                    path = (root / value).resolve()
+                    if not path.is_relative_to(root) or not (
+                        path.is_file() if kind == "file" else path.is_dir()
+                    ):
+                        raise ValueError(f"Choose an existing {name} {kind} inside this project.")
+                    values[name] = value
+                db_env = self.query_one("#verify-db-env", Input).value.strip()
+                if not db_env.isidentifier():
+                    raise ValueError("Enter a valid database environment variable name.")
+                values["db_env"] = db_env
+                self.dismiss(values)
+            except (ValueError, OSError) as error:
+                self.query_one("#configuration-error", Static).update(str(error))
+
+
 class DoctorScreen(SankaScreen):
     """Installation diagnostics only; never loads or executes project code."""
 
@@ -859,7 +920,7 @@ class StageScreen(SankaScreen):
             return
         session.stage = session.stages.get(self.command, StageRun(command=self.command))
         self._run = session.stage
-        self.query_one("#configure-stage").display = self.command == "plan"
+        self.query_one("#configure-stage").display = self.command in {"plan", "verify"}
         self.query_one(StageHeader).show_stage(session.stage, root=session.project_root)
         self.refresh_footer()
         button = self.query_one("#run-stage", Button)
@@ -872,7 +933,10 @@ class StageScreen(SankaScreen):
         elif self.command == "test":
             self._set_result("Generated tests cover the generated application, not source parity.")
         elif self.command == "verify":
-            self._set_result("Checks the generated application against the source.")
+            self._set_result(
+                "Checks the generated application against the source. "
+                "For Flask, Configure scenario replay before running."
+            )
         elif self.command == "scan":
             self._set_result("Reads this project and recommends a migration. Nothing is written.")
         if not list(setup.children):
@@ -896,6 +960,8 @@ class StageScreen(SankaScreen):
 
     def _next_stage(self) -> str | None:
         if self._run.phase != "succeeded":
+            return None
+        if self.command == "plan" and self._run.result_data.get("generated") is False:
             return None
         return {"scan": "plan", "plan": "apply", "apply": "test", "test": "verify"}.get(
             self.command
@@ -1086,7 +1152,10 @@ class StageScreen(SankaScreen):
             )
             return
         if event.button.id == "configure-stage":
-            self._configure_plan()
+            if self.command == "verify":
+                self._configure_verify()
+            else:
+                self._configure_plan()
             return
         if event.button.id == "copy-command":
             self.app.push_screen(
@@ -1124,6 +1193,21 @@ class StageScreen(SankaScreen):
         self.sanka.session.configuration = values
         self._configured_target = target
         self._set_result("Configuration saved. Review the values with Configure, then run Plan.")
+        self.refresh_footer()
+
+    def _configure_verify(self) -> None:
+        session = self.sanka.session
+        extension = self.sanka.services.used_extension_id(session.target)
+        self.app.push_screen(
+            VerifyConfiguration(session.configuration, flask=extension == "sanka/drf-to-flask"),
+            self._verified_configuration,
+        )
+
+    def _verified_configuration(self, values: dict[str, Any] | None) -> None:
+        if values is None:
+            return
+        self.sanka.session.configuration = values
+        self._set_result("Verification configuration saved. Run Verify when ready.")
         self.refresh_footer()
 
     def _confirm_apply(self) -> None:
@@ -2133,7 +2217,10 @@ class SankaApp(App[int]):
     #search-filters { height: 3; }
     #search-filters Input { width: 1fr; }
     #search-hint { color: $text-muted; padding: 0 1; }
-    CliLine { height: 1; background: $boost; color: $text; padding: 0 1; }
+    CliLine {
+        height: 1; background: $boost; color: $text; padding: 0 1;
+        text-wrap: nowrap; text-overflow: ellipsis;
+    }
     #menu {
         dock: left; width: 18; height: 1fr; margin-top: 5;
         border: none; border-right: solid $primary;
@@ -2162,7 +2249,8 @@ class SankaApp(App[int]):
         text-style: bold;
     }
     #run-stage:disabled { background: $panel; color: $text-muted; }
-    ReportScreen, PlanConfiguration, CloudAction, ConfirmScreen { align: center middle; }
+    ReportScreen, PlanConfiguration, VerifyConfiguration,
+    CloudAction, ConfirmScreen { align: center middle; }
     #configuration-modal {
         width: 70; max-width: 95%; height: 90%;
         background: $surface; border: solid $primary; padding: 1;
@@ -2537,6 +2625,13 @@ def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
         passed, total = http.get("passed"), http.get("probed")
         if passed is not None and total is not None:
             lines.append(f"HTTP probes: {passed} / {total} passed")
+    replay = data.get("summary")
+    if run.command == "verify" and isinstance(replay, dict):
+        matched, total = replay.get("matched"), replay.get("scenarios")
+        if isinstance(matched, int) and isinstance(total, int):
+            lines.append(f"Scenario replay: {matched} / {total} matched")
+    if run.command == "plan" and data.get("generated") is False:
+        lines.append("Planning only: this target does not generate an app yet.")
     for key, label in (
         ("tests_passed", "Tests passed"),
         ("tests_run", "Tests run"),

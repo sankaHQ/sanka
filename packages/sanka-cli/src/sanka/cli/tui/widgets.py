@@ -20,6 +20,7 @@ class CliLine(Static):
 
     def show(self, line: str) -> None:
         self.update(line)
+        self.tooltip = line
 
 
 class EmptyState(Static):
