@@ -60,7 +60,10 @@ are open source at [sankaHQ/bench](https://github.com/sankaHQ/bench).
 ## Try it in 3 minutes
 
 Migrate the example Django REST Framework app on your machine. Nothing here
-needs an account.
+needs an account. Prefer to watch first? The 7-minute walkthrough runs every
+step below from a clean checkout:
+
+[![Watch: migrate Django REST Framework to FastAPI in 5 commands with Sanka](https://img.youtube.com/vi/iH1dgWGRn6g/maxresdefault.jpg)](https://www.youtube.com/watch?v=iH1dgWGRn6g)
 
 ```bash
 git clone https://github.com/sankaHQ/sanka-examples
