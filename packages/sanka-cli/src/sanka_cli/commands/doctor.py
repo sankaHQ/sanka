@@ -35,6 +35,71 @@ def executables_on_path() -> list[dict[str, str]]:
     return records
 
 
+def extension_environments() -> dict[str, Any]:
+    """Cached extension environments and whether this interpreter can still run them.
+
+    The store is read, never repaired, and nothing is executed. A missing store
+    means no extension has been installed on this machine.
+    """
+    from sanka.runtime.extensions.model import ExtensionError
+    from sanka.runtime.extensions.store import ExtensionStore, user_extension_root
+
+    if not user_extension_root().is_dir():
+        return {"environments": [], "error": None}
+    try:
+        store = ExtensionStore(Path.cwd())
+        try:
+            records = [dict(record) for record in store.installation_health()]
+        finally:
+            store.close()
+    except (ExtensionError, OSError) as error:
+        return {"environments": [], "error": str(error)}
+    return {"environments": records, "error": None}
+
+
+def _extension_checks(extensions: dict[str, Any]) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+    if extensions["error"]:
+        checks.append(
+            {
+                "code": "extension_store",
+                "severity": "warning",
+                "message": f"Extension store could not be read: {extensions['error']}",
+                "recovery": "Run sanka extension list for the full error.",
+            }
+        )
+    for record in extensions["environments"]:
+        identifier = f"{record['id']} {record['version']}"
+        if record["status"] == "missing":
+            checks.append(
+                {
+                    "code": "extension_environment",
+                    "severity": "error",
+                    "message": f"Extension environment for {identifier} is missing.",
+                    "recovery": f"sanka extension add {record['id']}",
+                }
+            )
+        elif record["status"] == "interpreter_mismatch":
+            launcher = record["launchers"].get("bin/python") or "missing"
+            checks.append(
+                {
+                    "code": "extension_environment",
+                    "severity": "error",
+                    "message": (
+                        f"Extension environment for {identifier} was built with a different "
+                        f"Python interpreter (bin/python -> {launcher}; this CLI runs "
+                        f"{record['expected_interpreter']}). Lifecycle commands will fail "
+                        "until it is rebuilt."
+                    ),
+                    "recovery": (
+                        f"sanka extension remove {record['id']} && "
+                        f"sanka extension add {record['id']}"
+                    ),
+                }
+            )
+    return checks
+
+
 def installation_report(expected_version: str | None = None) -> dict[str, Any]:
     candidates = executables_on_path()
     active = Path(shutil.which(sys.argv[0]) or sys.argv[0]).absolute()
@@ -85,6 +150,8 @@ def installation_report(expected_version: str | None = None) -> dict[str, Any]:
                 ),
             }
         )
+    extensions = extension_environments()
+    checks.extend(_extension_checks(extensions))
     status = (
         "error"
         if any(item["severity"] == "error" for item in checks)
@@ -107,6 +174,7 @@ def installation_report(expected_version: str | None = None) -> dict[str, Any]:
             "executable": sys.executable,
             "environment": sys.prefix,
         },
+        "extensions": extensions,
         "checks": checks,
         "shell_note": (
             "PATH lookup cannot inspect your parent shell's aliases or command cache. "
@@ -122,7 +190,7 @@ def installation_report(expected_version: str | None = None) -> dict[str, Any]:
 )
 @click.pass_obj
 def doctor(state: CLIState, as_json: bool, expected_version: str | None) -> None:
-    """Check installation, Python and PATH without credentials or network access."""
+    """Check installation, Python, PATH and cached extension environments locally."""
     if not as_json and state.output != "json" and not os.environ.get("CI"):
         from sanka.cli.tui.launch import launch_doctor, use_human_tui
 
@@ -138,6 +206,8 @@ def doctor(state: CLIState, as_json: bool, expected_version: str | None) -> None
         click.echo(f"PATH selects: {report['path_executable'] or 'none'}")
         for item in report["executables"]:
             click.echo(f"  {item['path']} -> {item['resolved_path']}")
+        for record in report["extensions"]["environments"]:
+            click.echo(f"Extension {record['id']} {record['version']}: {record['status']}")
         for check in report["checks"]:
             click.echo(f"{check['severity'].upper()}: {check['message']}\n  {check['recovery']}")
         click.echo(report["shell_note"])
