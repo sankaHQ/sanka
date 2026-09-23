@@ -2076,6 +2076,48 @@ class ExtensionStore:
         return tuple(sorted(records, key=lambda item: (item.id, item.version, item.marketplace)))
 
     @_store_operation
+    def installation_health(self) -> tuple[dict[str, Any], ...]:
+        """Read-only launcher check for every cached extension environment.
+
+        ``sanka doctor`` uses this to explain lifecycle failures such as
+        ``Extension environment contains an unverified symlink``: after the CLI is
+        reinstalled on another Python, the cached environments still launch the
+        previous interpreter. Nothing is executed and nothing is repaired here.
+        """
+        expected = self._environment_symlinks()
+        interpreter = str(Path(sys.executable).resolve())
+        records: list[dict[str, Any]] = []
+        for item in self._load_installations():
+            root = self.user_root / "environments" / str(item["artifact_digest"])
+            launchers: dict[str, str | None] = {}
+            if not root.is_dir():
+                status = "missing"
+            elif os.name == "nt":
+                status = "ok"
+            else:
+                for name, target in expected.items():
+                    launcher = root / name
+                    if not launcher.is_symlink():
+                        if name == "bin/python":
+                            launchers[name] = None
+                        continue
+                    linked = os.readlink(launcher)
+                    if Path(linked) != target:
+                        launchers[name] = linked
+                status = "interpreter_mismatch" if launchers else "ok"
+            records.append(
+                {
+                    "id": item["id"],
+                    "version": item["version"],
+                    "environment": str(root),
+                    "status": status,
+                    "expected_interpreter": interpreter,
+                    "launchers": launchers,
+                }
+            )
+        return tuple(sorted(records, key=lambda record: (record["id"], record["version"])))
+
+    @_store_operation
     def recommendations(self, fingerprint: Fingerprint) -> tuple[Recommendation, ...]:
         """Match only manifests read through the verified snapshot boundary."""
         catalog = self._catalog()
