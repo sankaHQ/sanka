@@ -46,6 +46,7 @@ from sanka.cli._research import (
     SankaMigrateApiError,
     signup_url,
 )
+from sanka.cli._summary import application_summary
 from sanka.runtime.__about__ import __version__
 from sanka.runtime.engine import ExecutionError, MigrationEngine, VerifyReport
 from sanka.runtime.execution import DEFAULT_VALIDATION_SAMPLE_SIZE
@@ -911,9 +912,18 @@ def _print_application_result(
         )
     else:
         terminal = _terminal(args)
+        quiet = bool(getattr(args, "quiet", False))
+        summary, next_hint = application_summary(command, result.data, root=args.root)
+        if not quiet:
+            for line in summary:
+                print(line)
+            if summary:
+                print()
         terminal.success(f"{command} complete")
         if command == "plan" and isinstance(result.data.get("plan_hash"), str):
             print(f"plan {result.data['plan_hash']}")
+        if next_hint and not quiet:
+            print(f"next: {next_hint}")
     return 0
 
 
