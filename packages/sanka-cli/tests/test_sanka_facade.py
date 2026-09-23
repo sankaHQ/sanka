@@ -33,7 +33,7 @@ def test_public_facade_version_matches_unified_distribution() -> None:
         == sanka.runtime.__version__
         == sanka_cli.__version__
         == distribution_version("sanka-cli")
-        == "0.2.15"
+        == "0.2.16"
     )
 
 
