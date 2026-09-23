@@ -2,7 +2,7 @@
 
 ## Published release and 0.3 candidate
 
-Published `sanka-cli==0.2.14` is the upgrade baseline. The `0.3.0` candidate
+Published `sanka-cli==0.2.15` is the upgrade baseline. The `0.3.0` candidate
 introduces the Textual terminal UI while keeping JSON and non-interactive output
 contracts unchanged. It embeds published Extension SDK `0.1.0a7` from
 `78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`. Blueprint v4 adds shared native
@@ -18,7 +18,7 @@ is distributed separately; publishing the CLI does not install or activate it.
 
 Run original a4 v1/v2, a5 v3 and a7 generator conformance against the built CLI. The
 quickstart gate installs the public Code extension and checks fresh setup and
-upgrade from the published 0.2.14 without changing existing project locks. No full
+upgrade from the published 0.2.15 without changing existing project locks. No full
 migration or live provider operation is performed. Local MCP remains retired.
 
 ## Local preparation and review
@@ -35,7 +35,7 @@ upload. It does not publish, tag or push packages.
 Quickstart acceptance installs the built CLI wheel and the public example into
 separate Python 3.12 environments. It installs the official public DRF extension,
 checks source scans with and without activation, and creates a bounded native
-FastAPI plan. It also upgrades an isolated 0.2.14 installation, confirms that
+FastAPI plan. It also upgrades an isolated 0.2.15 installation, confirms that
 upgrading the CLI and refreshing the catalog preserve the project lock, then
 explicitly updates the extension and repeats scan/plan checks. No development
 imports, private marketplace overrides or source dependencies in the CLI can
@@ -127,7 +127,7 @@ before publishing the GitHub installer assets or preparing the Homebrew update:
 
 ```bash
 uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.3.0 \
-  --upgrade-from 0.2.14 --report /tmp/public-quickstart.json
+  --upgrade-from 0.2.15 --report /tmp/public-quickstart.json
 ```
 
 The workflow stages the reviewed `install.sh`, wheel, source archive, source
