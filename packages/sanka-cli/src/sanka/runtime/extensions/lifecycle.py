@@ -53,6 +53,7 @@ PHASE_CONFIGURATION = frozenset(
     }
 )
 type Prompt = Callable[[str, tuple[str, ...] | None], str | None]
+type InputHints = Callable[[str, str | None], tuple[tuple[str, ...] | None, str | None]]
 
 
 def _error(code: str, message: str, **details: Any) -> NoReturn:
@@ -157,6 +158,7 @@ class ApplicationLifecycle:
         runner: ExtensionRunner | None = None,
         interactive: bool = False,
         prompt: Prompt | None = None,
+        input_hints: InputHints | None = None,
     ) -> None:
         self.project_root = project_root.expanduser().resolve(strict=True)
         artifact = Path(artifact_dir)
@@ -168,11 +170,21 @@ class ApplicationLifecycle:
         self.runner = runner or ExtensionRunner(user_root=user_root)
         self.interactive = interactive
         self.prompt = prompt
+        self.input_hints = input_hints
 
     def _prompt(self, label: str, choices: tuple[str, ...] | None = None) -> str | None:
         if not self.interactive or self.prompt is None:
             return None
         return self.prompt(label, choices)
+
+    def _input_hint(
+        self, name: str, target: str | None
+    ) -> tuple[tuple[str, ...] | None, str | None]:
+        """Choices and default for an extension input, when the CLI knows them."""
+        if self.input_hints is None:
+            return None, None
+        choices, default = self.input_hints(name, target)
+        return (tuple(choices) if choices else None), default
 
     def _recommendations(self, fingerprint: Fingerprint) -> tuple[Recommendation, ...]:
         return self.store.recommendations(fingerprint)
@@ -553,17 +565,33 @@ class ApplicationLifecycle:
                 break
             details = (result.error or {}).get("details")
             inputs = details.get("inputs") if isinstance(details, dict) else None
-            if (
-                not self.interactive
-                or (result.error or {}).get("code") != "SANKA_EXTENSION_INPUT_REQUIRED"
-                or not isinstance(inputs, list)
-                or any(
-                    not isinstance(name, str) or not name or name in seen_inputs for name in inputs
+            structured = (
+                (result.error or {}).get("code") == "SANKA_EXTENSION_INPUT_REQUIRED"
+                and isinstance(inputs, list)
+                and bool(inputs)
+                and all(
+                    isinstance(name, str) and name and name not in seen_inputs for name in inputs
                 )
-            ):
+            )
+            if not structured:
                 self._raise_failure(result)
+            assert isinstance(inputs, list)
+            if not self.interactive:
+                flags = ", ".join(f"--{name.replace('_', '-')}" for name in inputs)
+                _error(
+                    "SANKA_EXTENSION_INPUT_REQUIRED",
+                    f"Missing plan inputs: {', '.join(inputs)}. Pass {flags}, "
+                    "or run plan in an interactive terminal to be asked for them",
+                    inputs=list(inputs),
+                )
             for name in inputs:
-                answer = self._prompt(f"Extension configuration: {name}")
+                choices, default = self._input_hint(name, selected_target)
+                label = f"Extension configuration: {name}"
+                if default is not None and not choices:
+                    label = f"{label} [{default}]"
+                answer = self._prompt(label, choices)
+                if answer is None:
+                    answer = default
                 if answer is None:
                     self._raise_failure(result)
                 normalized[name] = answer
