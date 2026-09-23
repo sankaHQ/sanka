@@ -13,6 +13,10 @@ One `sanka` executable covers everything you need for migration projects - Open 
 [![License](https://img.shields.io/badge/license-Apache--2.0%20AND%20AGPL--3.0-blue)](LICENSE)
 [![Benchmarks](https://img.shields.io/badge/benchmarks-sanka.com%2Fbench-ff5a1f)](https://sanka.com/bench)
 
+<br>
+
+<img src="docs/assets/drf-to-fastapi-concept.gif" alt="A paper-cut app crosses the river from Django REST Framework to FastAPI on the Sanka ferry, collecting five stamps: scan, plan, apply, test, verify." width="420" height="420">
+
 </div>
 
 ---
