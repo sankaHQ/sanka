@@ -32,6 +32,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
 
+from sanka.cli._summary import application_summary
 from sanka.cli.tui.model import (
     LIFECYCLE_COMMANDS,
     ExtensionChoice,
@@ -955,7 +956,9 @@ class StageScreen(SankaScreen):
         if self.autostart and self.command not in {"plan", "apply"}:
             self._start()
         if self._run.phase != "idle":
-            self._set_result(_summary_text(self._run, session.stages.get("plan")))
+            self._set_result(
+                _summary_text(self._run, session.stages.get("plan"), root=session.project_root)
+            )
             self._result_actions()
         self._result_actions()
         self.refresh_footer()
@@ -1004,7 +1007,10 @@ class StageScreen(SankaScreen):
             return
         pane.display = True
         self.query_one("#result", Static).update(text)
-        pane.scroll_home(animate=False)
+        if self._run.phase == "succeeded":
+            pane.scroll_end(animate=False)
+        else:
+            pane.scroll_home(animate=False)
 
     def _mount_plan(self, setup: VerticalScroll) -> None:
         self._targets = self.sanka.services.targets()
@@ -1403,7 +1409,9 @@ class StageScreen(SankaScreen):
         self._show_progress(outcome.run.progress)
         self.query_one("#rows").display = False
         self.refresh_footer()
-        self._set_result(_summary_text(outcome.run, session.stages.get("plan")))
+        self._set_result(
+            _summary_text(outcome.run, session.stages.get("plan"), root=session.project_root)
+        )
         self._result_actions()
         if outcome.inputs:
             setup = self.query_one("#setup", VerticalScroll)
@@ -2611,7 +2619,7 @@ def _cloud_evidence(job: JobRef) -> str:
     return "\n".join(sections)
 
 
-def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
+def _summary_text(run: StageRun, plan: StageRun | None = None, *, root: str | Path = ".") -> str:
     """Keep evidence counts and limitations above paths and protocol fields."""
     data = run.result_data
     extension = data.get("extension")
@@ -2626,6 +2634,8 @@ def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
         )
         if aliases is not None:
             data = {**data, "dropped_alias_routes": aliases}
+    if run.command == "plan" and run.plan_hash and not data.get("plan_hash"):
+        data = {**data, "plan_hash": run.plan_hash}
     lines = [f"{run.command.title()} · {run.phase.replace('_', ' ').title()}"]
     if run.error_code or run.error_message:
         if "No module named 'django'" in run.error_message:
@@ -2642,8 +2652,12 @@ def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
         lines.append(f"Diagnostic code: {run.error_code or 'not reported'}")
         lines.append("Open Details for diagnostic evidence; retry after resolving the cause.")
         return "\n".join(lines)
+    summary, next_hint = application_summary(run.command, data, root=root)
+    if run.phase == "succeeded" and summary:
+        lines.extend(["", *summary])
+    summarized = "\n".join(summary)
     http = data.get("http")
-    if isinstance(http, dict):
+    if isinstance(http, dict) and "probes passed" not in summarized:
         passed, total = http.get("passed"), http.get("probed")
         if passed is not None and total is not None:
             lines.append(f"HTTP probes: {passed} / {total} passed")
@@ -2663,20 +2677,28 @@ def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
         ("dropped_alias_routes", "Omitted format-suffix aliases"),
     ):
         if key in data and isinstance(data[key], (int, float)) and not isinstance(data[key], bool):
+            if run.command == "test" and key in {"test_count", "tests"} and "Ran " in summarized:
+                continue
+            if key == "native_routes" and "generated natively" in summarized:
+                continue
+            if key == "dropped_alias_routes" and "aliases dropped" in summarized:
+                continue
             lines.append(f"{label}: {data[key]}")
     routes = data.get("routes")
     if isinstance(routes, dict):
         for key, label in (("generated", "Generated routes"), ("scanned", "Scanned routes")):
-            if key in routes:
+            if key in routes and not (key == "generated" and " generated" in summarized):
                 lines.append(f"{label}: {routes[key]}")
     if run.command == "scan":
         fingerprint = data.get("fingerprint")
-        if isinstance(fingerprint, dict):
+        if isinstance(fingerprint, dict) and not summary:
             for key in ("languages", "frameworks"):
                 if fingerprint.get(key):
                     lines.append(f"{key.title()}: " + ", ".join(map(str, fingerprint[key])))
-        lines.append(f"Reported endpoints: {len(parse_endpoints(data))}")
-    if data.get("output"):
+        endpoints = parse_endpoints(data)
+        if endpoints:
+            lines.append(f"Reported endpoints: {len(endpoints)}")
+    if data.get("output") and "Output" not in summarized:
         lines.append(f"Output folder: {Path(str(data['output'])).name}")
     if run.command in {"test", "verify"}:
         lines.append(
@@ -2694,6 +2716,13 @@ def _summary_text(run: StageRun, plan: StageRun | None = None) -> str:
                 if text not in run.limitations:
                     lines.append(f"{key.title()}: {text}")
     lines.append("Details contains the full evidence, files and logs.")
+    if run.phase == "succeeded":
+        lines.extend(["", f"✓ OK  {run.command} complete"])
+        plan_hash = data.get("plan_hash") or run.plan_hash
+        if run.command == "plan" and isinstance(plan_hash, str) and plan_hash:
+            lines.append(f"plan {plan_hash}")
+        if next_hint and not (run.command == "plan" and data.get("generated") is False):
+            lines.append(f"next: {next_hint}")
     return "\n".join(lines)
 
 

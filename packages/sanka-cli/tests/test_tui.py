@@ -891,6 +891,7 @@ async def test_scan_configuration_forwards_source_settings(tmp_path: Path) -> No
         await pilot.click("#run-stage")
         await app.workers.wait_for_complete()
         assert service.calls[0]["configuration"] == {"source_framework": "flask"}
+        assert "✓ OK  scan complete" in str(app.screen.query_one("#result", Static).content)
 
 
 @pytest.mark.asyncio
@@ -1146,14 +1147,126 @@ def test_summary_keeps_scope_counts_ahead_of_file_noise() -> None:
         },
     )
     result = _summary_text(run)
-    assert "2 / 2 passed" in result
-    assert "Generated routes: 7" in result
+    assert "2/2 probes passed" in result
+    assert "7 generated" in result
     assert "Omitted format-suffix aliases: 7" in result
     assert "not proof of all source behavior" in result
     assert "/long/path" not in result
-    assert "Tests reported: 7" in _summary_text(
+    assert "Ran 7 tests" in _summary_text(
         StageRun("test", phase="succeeded", result_data={"tests": 7})
     )
+
+
+def test_successful_stage_results_keep_cli_summary_and_next_command() -> None:
+    from sanka.cli.tui.app import _summary_text
+
+    root = Path("/work/demo")
+    plan_hash = "sha256:" + "c" * 64
+    cases = (
+        (
+            "scan",
+            {
+                "python_version": "3.12.13",
+                "django_version": "5.2.17",
+                "drf_version": "3.18.1",
+                "database": {"vendor": "sqlite", "name": "db.sqlite3"},
+                "routes": [{}] * 14,
+                "scan_hash": "sha256:" + "a" * 64,
+                "extensions": [{"id": "sanka/drf-to-fastapi", "targets": ["fastapi"]}],
+            },
+            ("Detected", "Python     3.12.13", "14 routes", "scan hash: sha256:"),
+            "next: sanka plan . --to fastapi",
+        ),
+        (
+            "plan",
+            {
+                "source_framework": "django-rest-framework",
+                "target_framework": "fastapi",
+                "mode": "native",
+                "sql_engine": "tortoise",
+                "generation_mode": "minimal",
+                "package_manager": "uv",
+                "default_output": "/work/demo/.sanka/output/fastapi",
+                "native_routes": 7,
+                "dropped_alias_routes": 7,
+                "needs_adaptation_routes": 0,
+                "plan_hash": plan_hash,
+            },
+            ("DRF → FastAPI plan", "7 generated natively", "7 format-suffix aliases dropped"),
+            f"next: sanka apply --root . --plan-hash {plan_hash}",
+        ),
+        (
+            "apply",
+            {"routes_generated": 7, "output": "/work/demo/.sanka/output/fastapi"},
+            ("Generated", "7 native routes", ".sanka/output/fastapi"),
+            "next: sanka test .",
+        ),
+        (
+            "test",
+            {"log": "Ran 7 tests in 0.5s", "environment": "/work/demo/.sanka/output/fastapi/.venv"},
+            ("Generated app tests", "Ran 7 tests", ".sanka/output/fastapi/.venv"),
+            "next: sanka verify .",
+        ),
+        (
+            "verify",
+            {
+                "mode": "native",
+                "routes": {"generated": 7, "dropped": [{}] * 7, "missing": [], "extra": []},
+                "http": {"probed": 0, "passed": 0},
+            },
+            ("Verified (native)", "7 generated · 7 aliases dropped", "0/0 probes passed"),
+            None,
+        ),
+    )
+    for command, data, expected, next_command in cases:
+        result = _summary_text(StageRun(command, phase="succeeded", result_data=data), root=root)
+        for phrase in expected:
+            assert phrase in result, (command, phrase, result)
+        assert f"✓ OK  {command} complete" in result
+        if next_command:
+            assert next_command in result
+        else:
+            assert "next:" not in result
+
+    planning_only = _summary_text(
+        StageRun("plan", phase="succeeded", result_data={"generated": False}), root=root
+    )
+    assert "next: sanka apply" not in planning_only
+    restored_plan = _summary_text(
+        StageRun("plan", phase="succeeded", plan_hash=plan_hash), root=root
+    )
+    assert f"next: sanka apply --root . --plan-hash {plan_hash}" in restored_plan
+    failed = _summary_text(StageRun("verify", phase="failed", error_message="Mismatch"), root=root)
+    assert "✓ OK" not in failed
+    assert "next:" not in failed
+
+
+@pytest.mark.asyncio
+async def test_completed_scan_shows_its_cli_completion_at_120_by_28() -> None:
+    session = Session(project_root="/work/demo")
+    session.stages["scan"] = StageRun(
+        "scan",
+        phase="succeeded",
+        result_data={
+            "python_version": "3.12.13",
+            "django_version": "5.2.17",
+            "drf_version": "3.18.1",
+            "database": {"vendor": "sqlite", "name": "db.sqlite3"},
+            "routes": [{}] * 14,
+            "serializers": ["orders.Serializer"],
+            "models": ["orders.Order"],
+            "permissions": ["AllowAny"],
+            "test_files": 0,
+            "scan_hash": "sha256:" + "a" * 64,
+            "extensions": [{"id": "sanka/drf-to-fastapi", "targets": ["fastapi"]}],
+        },
+    )
+    app = SankaApp(FakeServices(), session, start="scan")
+    async with app.run_test(size=(120, 28)) as pilot:
+        await pilot.pause()
+        visible = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
+        assert "✓ OK  scan complete" in visible
+        assert "next: sanka plan . --to fastapi" in visible
 
 
 @pytest.mark.asyncio
