@@ -470,13 +470,17 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
 
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, target: str, values: dict[str, Any], *, drf: bool) -> None:
+    def __init__(
+        self, target: str, values: dict[str, Any], *, drf: bool, stage: str = "Plan"
+    ) -> None:
         super().__init__()
-        self.target, self.values, self.drf = target, values, drf
+        self.target, self.values, self.drf, self.stage = target, values, drf, stage
 
     def compose(self) -> ComposeResult:
         with Vertical(id="configuration-modal"):
-            yield Label(f"Plan configuration — {self.target}")
+            yield Label(
+                f"{self.stage} configuration" + (f" — {self.target}" if self.target else "")
+            )
             with VerticalScroll():
                 if self.drf:
                     yield Label("Output directory (inside this project)")
@@ -920,7 +924,7 @@ class StageScreen(SankaScreen):
             return
         session.stage = session.stages.get(self.command, StageRun(command=self.command))
         self._run = session.stage
-        self.query_one("#configure-stage").display = self.command in {"plan", "verify"}
+        self.query_one("#configure-stage").display = self.command in {"scan", "plan", "verify"}
         self.query_one(StageHeader).show_stage(session.stage, root=session.project_root)
         self.refresh_footer()
         button = self.query_one("#run-stage", Button)
@@ -938,7 +942,10 @@ class StageScreen(SankaScreen):
                 "For Flask, Configure scenario replay before running."
             )
         elif self.command == "scan":
-            self._set_result("Reads this project and recommends a migration. Nothing is written.")
+            self._set_result(
+                "Reads this project and recommends a migration. Nothing is written. "
+                "Use Configure for extension-specific source settings."
+            )
         if not list(setup.children):
             setup.display = False
         if self.query("#run-stage") and self.query_one("#run-stage", Button).display:
@@ -1152,7 +1159,9 @@ class StageScreen(SankaScreen):
             )
             return
         if event.button.id == "configure-stage":
-            if self.command == "verify":
+            if self.command == "scan":
+                self._configure_scan()
+            elif self.command == "verify":
                 self._configure_verify()
             else:
                 self._configure_plan()
@@ -1174,6 +1183,19 @@ class StageScreen(SankaScreen):
             self._confirm_apply()
             return
         self._start()
+
+    def _configure_scan(self) -> None:
+        self.app.push_screen(
+            PlanConfiguration("", self.sanka.session.configuration, drf=False, stage="Scan"),
+            self._scanned_configuration,
+        )
+
+    def _scanned_configuration(self, values: dict[str, Any] | None) -> None:
+        if values is None:
+            return
+        self.sanka.session.configuration = values
+        self._set_result("Scan configuration saved. Run Scan when ready.")
+        self.refresh_footer()
 
     def _configure_plan(self) -> None:
         target = self.sanka.session.target

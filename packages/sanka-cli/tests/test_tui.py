@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from textual.widgets import DataTable, Input, OptionList, Static
+from textual.widgets import DataTable, Input, OptionList, Static, TextArea
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
@@ -872,6 +872,25 @@ def test_plan_without_generated_output_does_not_offer_apply() -> None:
     )
     assert screen._next_stage() is None
     assert "Planning only" in _summary_text(screen._run)
+
+
+@pytest.mark.asyncio
+async def test_scan_configuration_forwards_source_settings(tmp_path: Path) -> None:
+    from sanka.cli.tui.app import PlanConfiguration
+
+    service = FakeServices()
+    app = SankaApp(service, Session(project_root=str(tmp_path)), start="scan")
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.click("#configure-stage")
+        await pilot.pause()
+        assert isinstance(app.screen, PlanConfiguration)
+        app.screen.query_one("#plan-extra", TextArea).text = '{"source_framework":"flask"}'
+        await pilot.click("#save-configuration")
+        await pilot.pause()
+        await pilot.click("#run-stage")
+        await app.workers.wait_for_complete()
+        assert service.calls[0]["configuration"] == {"source_framework": "flask"}
 
 
 @pytest.mark.asyncio
