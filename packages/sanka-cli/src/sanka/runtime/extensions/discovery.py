@@ -458,7 +458,12 @@ def _flow_capabilities(value: Any, code: str, path: Path) -> tuple[FlowCapabilit
             )
             is None
             or item["output_schema"]
-            not in ("sanka-flow-blueprint/v1", "sanka-flow-blueprint/v2", "sanka-flow-blueprint/v3")
+            not in (
+                "sanka-flow-blueprint/v1",
+                "sanka-flow-blueprint/v2",
+                "sanka-flow-blueprint/v3",
+                "sanka-flow-blueprint/v4",
+            )
             or not isinstance(item["references"], list)
             or not isinstance(item["values"], list)
         ):

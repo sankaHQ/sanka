@@ -524,6 +524,17 @@ class ApplicationLifecycle:
                 target=selected_target,
                 extensions=[item.id for item in selected],
             )
+        configured_target = normalized.get("target")
+        if configured_target is not None and configured_target != selected_target:
+            _error(
+                "SANKA_EXTENSION_TARGET_MISMATCH",
+                "The selected target differs from configuration.target",
+                target=selected_target,
+                configured=configured_target,
+            )
+        # An extension that advertises several targets learns the selection here. The
+        # reviewed core plan records it, so apply, test and verify receive the same value.
+        normalized = {**normalized, "target": selected_target}
         lock = self.store.resolve_locked(selected[0].id)
         self._verify_selection(lock, selected[0])
         request = self._request(lock, "plan", fingerprint, normalized)

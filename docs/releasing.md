@@ -1,14 +1,13 @@
 # Sanka release procedure
 
-## Candidate and published prerequisites
+## Published release and 0.3 candidate
 
-The release candidate is `sanka-cli==0.3.0`. It introduces the Textual terminal UI
-for interactive lifecycle and cloud monitoring while keeping JSON and
-non-interactive output contracts unchanged. It embeds published Extension SDK
-`0.1.0a5` from `878b416898dd5c19b61b818a34b9a12443ebdc31` and supports isolated
-native Blueprint v3 generation and shared inactive construction planning. Native
-v3 verification and activation remain unavailable; this release does not provide
-a hosted HubSpot adapter or execute a business workflow.
+Published `sanka-cli==0.2.14` is the upgrade baseline. The `0.3.0` candidate
+introduces the Textual terminal UI while keeping JSON and non-interactive output
+contracts unchanged. It embeds published Extension SDK `0.1.0a7` from
+`78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`. Blueprint v4 adds shared native
+Order billing verification and activation control; hosted execution still requires
+a separate native adapter. Blueprint v5 execution remains unsupported.
 
 Before publishing CLI 0.3.0, pin its default Data/Code marketplace to the
 reviewed Extensions commit whose manifests accept both CLI 0.2.14 and 0.3.x.
@@ -16,12 +15,10 @@ The PR candidate uses compatibility PR #123 head
 `3fd1281d7ec8449eabaefaaf5585dcd7e95cfd1b` for acceptance; replace this
 with the exact reviewed merge commit before tagging. Existing project locks remain
 byte-for-byte unchanged on CLI upgrade; users explicitly refresh the catalog and
-re-add each extension to adopt its compatible manifest. Published SDK wheels
-remain unchanged. CLI 0.2.14 is the published baseline. The business-flow
-package is distributed separately; publishing the CLI does not install or
-activate it for users.
+re-add each extension to adopt its compatible manifest. The business-flow package
+is distributed separately; publishing the CLI does not install or activate it.
 
-Run original a4 v1/v2 and a5 v3 generator conformance against the built CLI. The
+Run original a4 v1/v2, a5 v3 and a7 generator conformance against the built CLI. The
 quickstart gate installs the public Code extension and checks fresh setup and
 upgrade from the published 0.2.14 without changing existing project locks. No full
 migration or live provider operation is performed. Local MCP remains retired.
@@ -51,15 +48,15 @@ preserve its lock byte-for-byte. Fresh and upgraded installations must resolve
 the same exact extension artifacts; an extension version change is not required.
 
 Run Flow wheel acceptance against the built CLI artifact. The maintained helper
-downloads the a4 and a5 SDK wheels and the a12 compatibility wheel and verifies
+downloads the a4, a5 and a7 SDK wheels and the a12 compatibility wheel and verifies
 their pinned sizes and hashes before starting the tests:
 
 ```bash
 make flow-wheel-acceptance
 ```
 
-This verifies the embedded and standalone SDK paths, all three Blueprint schemas,
-capability rejection even when a generator ignores it, template/schema tampering,
+This verifies embedded, original standalone and a7 SDK paths, all four admitted
+Blueprint schemas, capability rejection even when a generator ignores it, template/schema tampering,
 and native endpoint substitution with unchanged echoed request metadata.
 The synthetic generator verifies artifact transport, not native business execution.
 
@@ -137,7 +134,8 @@ uv run python scripts/smoke_quickstart.py --cli sanka-cli==0.3.0 \
 
 The workflow stages the reviewed `install.sh`, wheel, source archive, source
 commit and checksums as immutable GitHub release assets and a workflow artifact.
-The CLI repository and its release assets are public. A second
+Repository visibility and release access require separate authorization; this
+procedure does not authorize making a private repository public. A second
 attempt to create an existing release fails; inspect its exact assets before any
 retry. Never overwrite an uncertain release. The default installer version must
 match the package version, and existing system/uv/Homebrew installs remain owned

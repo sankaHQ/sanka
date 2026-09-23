@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/sankaHQ/sanka/main/docs/assets/sanka-logo.png" alt="Sanka" width="120" height="120">
+<img src="docs/assets/sanka-logo.png" alt="Sanka" width="120" height="120">
 
 # Sanka
 
@@ -84,7 +84,8 @@ The macOS/Linux uv prerequisite is `curl -LsSf https://astral.sh/uv/install.sh |
 follow its printed shell setup instructions. Advanced pip users should use a
 Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
 Bare `pip` can select an older system interpreter and report “No matching distribution found.”
-The installer first ships with CLI 0.2.11. See [installation and recovery](docs/install.md)
+The installer pins the CLI version of its release (`sh install.sh --version X.Y.Z` selects
+another). See [installation and recovery](docs/install.md)
 for Homebrew upgrades, PATH conflicts, and project environments.
 
 ## Extensions
@@ -114,6 +115,10 @@ Explicit revisions may refer to unpublished artifacts, which still fail installa
 Project pins live in `.sanka/extensions.lock`; marketplace
 snapshots and verified artifacts live under `~/.sanka/extensions` or
 `$SANKA_HOME/extensions`.
+
+Experimental code paths are developed in the same repository before they enter
+the catalog: see the [TypeScript to Rust guide](docs/typescript-to-rust.md) and
+the [React Native to native guide](docs/react-native-to-native.md).
 
 ## Local lifecycle
 

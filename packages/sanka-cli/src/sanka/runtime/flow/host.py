@@ -69,6 +69,14 @@ class FlowTarget(Protocol):
         The shared runtime compares actual readback with expected counts/values.
         No live messages, payments or provider writes are allowed. This port must
         use native execution rather than a parallel business-action executor.
+
+        Blueprint v4 uses the native billing result contract documented in
+        native_verification.py. It returns immutable fixture/readback references,
+        complete per-delivery imported Order IDs, actual native run/attempt
+        identities, concurrency timing, and the pinned isolated namespace. The
+        host additionally implements NativeVerificationArtifacts. Never claim a
+        required case passed from a dry-run/readiness endpoint or an in-memory
+        imitation of the native business actions.
         """
         ...
 

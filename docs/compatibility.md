@@ -17,11 +17,15 @@ The SDK snapshot and marketplace snapshot have different responsibilities and
 need not have matching versions. Do not upgrade the embedded SDK by manually
 installing a separate SDK into the isolated CLI environment.
 
-The source tree now embeds SDK `0.1.0a5` from published Extensions commit
-`878b416898dd5c19b61b818a34b9a12443ebdc31`. CLI 0.2.13 is the candidate for this
-adoption, not a change to the published 0.2.12 combination above. Its conformance tests retain
-the original a4 v1/v2 generator wheels and add a5 native v3 generation. Native
-v3 verification and activation remain unavailable.
+Published CLI 0.2.13 embeds SDK `0.1.0a5` from Extensions commit
+`878b416898dd5c19b61b818a34b9a12443ebdc31`. The current source adopts published
+SDK `0.1.0a7` from `78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`; this does not
+change either published CLI release. Its conformance tests retain the original
+a4 v1/v2 and a5 v3 generator wheels and add standalone a7 host and generator
+environments. The runtime admits v1/v2/v3/v4 generation; v4 uses a7 and adds the
+shared native Order billing comparator and lifecycle. Its hosted executor/artifact
+adapter and live execution acceptance remain separate work. Native v3 verification
+and activation remain unavailable, and v5 execution is unsupported.
 
 The separate `sanka/business-flows` 0.1.0a1 candidate requires CLI 0.2.13. Its
 real-wheel acceptance covers HubSpot order/billing definition generation and
