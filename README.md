@@ -105,7 +105,9 @@ wheel identity before installing it in an isolated environment. PyPI is not a
 extension fallback. The official catalog defaults to the published bundle pinned by this
 CLI release, never the development branch. Upgrade the CLI, then run
 `sanka extension marketplace upgrade` to adopt its catalog without changing project
-pins. To inspect a candidate or retain a particular catalog, add a separately named
+pins. For an existing project, run `sanka extension add <extension-id>` to review
+and lock a compatible manifest before starting the next migration. To inspect a
+candidate or retain a particular catalog, add a separately named
 marketplace with `--revision FULL_COMMIT_SHA`; upgrades retain that exact revision.
 Explicit revisions may refer to unpublished artifacts, which still fail installation.
 
@@ -128,10 +130,15 @@ sanka verify .
 
 `scan` and `plan` do not write to the destination. `apply` requires the exact
 reviewed plan hash. `verify` reconciles the generated or transferred result;
-an exit code alone is not completion evidence. On a terminal, these commands
-open a live view of the same work. `sanka tui` opens the status dashboard for
-the current project. Add `--json`, or run without a terminal, for one
-`sanka-cli/v1` machine-readable document. Agents and the SDKs keep that contract.
+an exit code alone is not completion evidence.
+
+On an interactive terminal, start with `sanka tui` in your project directory,
+or run `sanka scan .` to open the Scan screen directly. Use the sidebar and
+footer shortcuts to move through Scan → Plan → Apply → Test → Verify. Plan shows
+the hash to review before Apply; cloud runs can be monitored from Cloud / Account.
+See the [TUI guide](docs/tui.md) for configuration and shortcuts. Add `--json`
+or `--compact-dsl` for agent output; pipes and CI keep the non-interactive
+printers.
 
 New to the CLI? Start with the
 [quickstart](https://sanka.com/docs/developers/quickstart/cli/). See the

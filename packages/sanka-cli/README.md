@@ -75,6 +75,13 @@ sanka test .
 sanka verify .
 ```
 
+On an interactive terminal, run `sanka tui` from your project to open the
+dashboard, or `sanka scan .` to open Scan directly. Use the sidebar and footer
+shortcuts for Plan → Apply → Test → Verify; review Plan's hash before Apply.
+Cloud / Account monitors hosted runs. See the [TUI guide](https://github.com/sankaHQ/sanka/blob/main/docs/tui.md)
+for configuration and shortcuts. Agents can use `--json` or `--compact-dsl`;
+pipes and CI keep non-interactive output.
+
 Data migrations default to `sanka.yaml`:
 
 ```yaml

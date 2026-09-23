@@ -121,7 +121,7 @@ def _marketplace(
     version: str = "0.1.0",
     distribution: str = "example-demo",
     executable: str = "example-demo",
-    runtime: str = ">=0.2.0,<0.3",
+    runtime: str = ">=0.2.0,<0.4",
     requires: tuple[str, ...] = (),
     purelib: bool = True,
     cli_source: str = "def main():\n    return 0\n",
@@ -262,7 +262,7 @@ def _connector_marketplace(root: Path) -> tuple[Path, dict[str, bytes]]:
                     "version": "0.1.0",
                     "entry_point": "example",
                 },
-                "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+                "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
                 "providers": [{"name": "example", "roles": ["source"]}],
                 "wheels": [
                     {
@@ -423,7 +423,7 @@ def _configured_store(
     *,
     extension_id: str = "example/demo",
     version: str = "0.1.0",
-    runtime: str = ">=0.2.0,<0.3",
+    runtime: str = ">=0.2.0,<0.4",
     requires: tuple[str, ...] = (),
 ) -> tuple[ExtensionStore, Path, bytes]:
     source, wheel = _marketplace(
@@ -2045,7 +2045,7 @@ def test_lock_json_is_atomic_sorted_and_has_exact_entry_fields(
                     "commands": ["scan"],
                     "match": {"all": [{"kind": "language", "value": "python"}], "any": []},
                     "targets": ["fastapi"],
-                    "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+                    "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
                     "wheels": [
                         {
                             "name": wheel_name,
@@ -2192,6 +2192,34 @@ def test_marketplace_upgrade_reports_update_without_changing_project_pin(
     listing = store.list_extensions()[0]
     assert listing.version == "0.2.0"
     assert listing.status == ("available", "update_available")
+
+
+def test_cli_030_requires_explicit_refresh_of_old_extension_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, source, _wheel_bytes = _configured_store(tmp_path, monkeypatch, runtime=">=0.2.0,<0.3")
+    monkeypatch.setattr(extension_store, "__version__", "0.2.14")
+    old = store.add_extension("example/demo")
+    lock_path = store.project_root / ".sanka" / "extensions.lock"
+    old_lock = lock_path.read_bytes()
+
+    monkeypatch.setattr(extension_store, "__version__", "0.3.0")
+    with pytest.raises(ExtensionError) as raised:
+        store.resolve_locked("example/demo")
+    assert raised.value.code == "SANKA_EXTENSION_INCOMPATIBLE"
+
+    manifest_path = source / "example-demo.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtime"]["sanka_cli"] = ">=0.2.0,<0.4"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    store.upgrade_marketplace("fixtures")
+    assert lock_path.read_bytes() == old_lock
+
+    updated = store.add_extension("example/demo")
+    assert updated.manifest_digest != old.manifest_digest
+    assert store.resolve_locked("example/demo") == updated
+    monkeypatch.setattr(extension_store, "__version__", "0.2.14")
+    assert store.resolve_locked("example/demo") == updated
 
 
 def test_marketplace_upgrade_does_not_lend_capabilities_to_the_locked_version(
