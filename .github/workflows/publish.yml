@@ -161,7 +161,7 @@ jobs:
       - name: Test public package installation without system Python
         run: python3 scripts/smoke_installer.py --version "${GITHUB_REF_NAME#v}" --upgrade-from 0.2.9 --report installer-smoke.json
       - name: Verify the public PyPI quickstart
-        run: python3 scripts/smoke_quickstart.py --cli "sanka-cli==${GITHUB_REF_NAME#v}" --upgrade-from 0.2.14 --report quickstart-acceptance.json
+        run: python3 scripts/smoke_quickstart.py --cli "sanka-cli==${GITHUB_REF_NAME#v}" --upgrade-from 0.2.16 --report quickstart-acceptance.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

@@ -169,6 +169,8 @@ def _lifecycle(
     *,
     interactive: bool = False,
     prompt: Callable[[str, tuple[str, ...] | None], str | None] | None = None,
+    input_hints: Callable[[str, str | None], tuple[tuple[str, ...] | None, str | None]]
+    | None = None,
 ) -> ApplicationLifecycle:
     if not hasattr(store, "execution_guard"):
         store.execution_guard = nullcontext  # type: ignore[attr-defined]
@@ -180,6 +182,7 @@ def _lifecycle(
         runner=cast(ExtensionRunner, runner),
         interactive=interactive,
         prompt=prompt,
+        input_hints=input_hints,
     )
 
 
@@ -913,3 +916,78 @@ def test_plan_rejects_a_conflicting_configured_target(tmp_path: Path) -> None:
 
     assert planned.outcome == "success"
     assert runner.calls[-1][1]["configuration"] == {"target": "fastapi"}
+
+
+def test_interactive_plan_uses_hint_defaults_when_the_answer_is_empty(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    runner.required_inputs = ["generation", "output"]
+    prompts: list[tuple[str, tuple[str, ...] | None]] = []
+
+    def empty_answer(label: str, choices: tuple[str, ...] | None = None) -> None:
+        prompts.append((label, choices))
+        return None
+
+    def hints(name: str, target: str | None) -> tuple[tuple[str, ...] | None, str | None]:
+        if name == "generation":
+            return ("minimal", "update", "full"), "minimal"
+        if name == "output":
+            return None, f".sanka/output/{target}"
+        return None, None
+
+    lifecycle = _lifecycle(
+        project,
+        FakeStore(installed=True),
+        runner,
+        interactive=True,
+        prompt=empty_answer,
+        input_hints=hints,
+    )
+    lifecycle.scan()
+
+    result = lifecycle.plan(target="fastapi")
+
+    assert result.outcome == "success"
+    configuration = runner.calls[-1][1]["configuration"]
+    assert configuration["generation"] == "minimal"
+    assert configuration["output"] == ".sanka/output/fastapi"
+    assert prompts == [
+        ("Extension configuration: generation", ("minimal", "update", "full")),
+        ("Extension configuration: output [.sanka/output/fastapi]", None),
+    ]
+
+
+def test_interactive_plan_without_hints_still_fails_on_an_empty_answer(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    runner.required_inputs = ["generation"]
+    lifecycle = _lifecycle(
+        project,
+        FakeStore(installed=True),
+        runner,
+        interactive=True,
+        prompt=lambda *_args: None,
+    )
+    lifecycle.scan()
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.plan(target="fastapi")
+
+    assert raised.value.code == "SANKA_EXTENSION_INPUT_REQUIRED"
+    assert raised.value.details == {"inputs": ["generation"]}
+
+
+def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    runner.required_inputs = ["generation", "package_manager"]
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    lifecycle.scan()
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.plan(target="fastapi")
+
+    assert raised.value.code == "SANKA_EXTENSION_INPUT_REQUIRED"
+    assert raised.value.details == {"inputs": ["generation", "package_manager"]}
+    assert "Missing plan inputs: generation, package_manager" in str(raised.value)
+    assert "--generation, --package-manager" in str(raised.value)

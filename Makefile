@@ -45,7 +45,7 @@ build-release:
 
 # Run after build-release; install its wheel, without any development imports.
 quickstart-acceptance:
-	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.15 --report quickstart-acceptance.json
+	$(UV) run python scripts/smoke_quickstart.py --cli dist/sanka_cli-*-py3-none-any.whl --upgrade-from 0.2.16 --report quickstart-acceptance.json
 
 # Run after build-release; verify original v1/v2/v3 wheels and a7 v4 generation.
 flow-wheel-acceptance:

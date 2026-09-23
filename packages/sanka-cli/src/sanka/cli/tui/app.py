@@ -488,7 +488,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                             (
                                 "generation",
                                 "Generation layout",
-                                ("minimal", "full", "update"),
+                                ("minimal", "update", "full"),
                                 "minimal",
                             ),
                             (

@@ -37,6 +37,7 @@ import json
 import shlex
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -58,6 +59,36 @@ from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ExtensionRegistry, UnknownEndpointError
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import SqliteStateStore
+
+# Interactive `plan` prompts: the first entry of each tuple is the default, so an
+# empty answer never reaches the extension as "".
+PLAN_STRATEGIES = ("native", "compatibility")
+PLAN_GENERATIONS = ("minimal", "update", "full")
+PLAN_PACKAGE_MANAGERS = ("uv", "pip")
+PLAN_ORMS = ("tortoise", "sqlalchemy", "psycopg")
+_PLAN_INPUT_CHOICES = {
+    "strategy": PLAN_STRATEGIES,
+    "generation": PLAN_GENERATIONS,
+    "package_manager": PLAN_PACKAGE_MANAGERS,
+    "orm": PLAN_ORMS,
+}
+
+
+def plan_input_hints(
+    default_target: str | None,
+) -> Callable[[str, str | None], tuple[tuple[str, ...] | None, str | None]]:
+    """Choices and defaults the lifecycle shows when an extension asks for plan inputs."""
+
+    def hints(name: str, target: str | None) -> tuple[tuple[str, ...] | None, str | None]:
+        choices = _PLAN_INPUT_CHOICES.get(name)
+        if choices:
+            return choices, choices[0]
+        if name == "output":
+            return None, f".sanka/output/{target or default_target or 'app'}"
+        return None, None
+
+    return hints
+
 
 DEFAULT_SPEC_FILE = "sanka.yaml"
 DEFAULT_STATE_FILE = ".sanka/migrate/state.db"
@@ -303,7 +334,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     plan.add_argument("--to", help="target application framework")
     plan.add_argument(
         "--strategy",
-        choices=("native", "compatibility"),
+        choices=PLAN_STRATEGIES,
         default=None,
         help="native FastAPI generation or the in-process compatibility bridge",
     )
@@ -311,19 +342,19 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     plan.add_argument("--output", default=None, help="generated FastAPI target directory")
     plan.add_argument(
         "--generation",
-        choices=("full", "update", "minimal"),
+        choices=PLAN_GENERATIONS,
         default=None,
-        help="full standalone project, safe update, or minimal runnable output",
+        help="minimal runnable output, safe update, or full standalone project",
     )
     plan.add_argument(
         "--package-manager",
-        choices=("uv", "pip"),
+        choices=PLAN_PACKAGE_MANAGERS,
         default=None,
         help="dependency setup used by the generated project",
     )
     plan.add_argument(
         "--orm",
-        choices=("tortoise", "sqlalchemy", "psycopg"),
+        choices=PLAN_ORMS,
         default=None,
         help="async SQL engine for native FastAPI (default: tortoise, closest to Django)",
     )
@@ -899,6 +930,7 @@ def _application_lifecycle(args: argparse.Namespace) -> ApplicationLifecycle:
         artifact_dir=args.artifact_dir,
         interactive=_interactive_terminal() and not args.json,
         prompt=_lifecycle_prompt,
+        input_hints=plan_input_hints(getattr(args, "to", None)),
     )
 
 
