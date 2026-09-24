@@ -139,7 +139,7 @@ In native mode every route receives one of four dispositions:
   captured link table;
 - `dropped-format-suffix-alias` — DRF's `.{format}` alias routes are dropped
   as a disclosed contract change; clients negotiate content types with
-  headers instead;
+  headers instead. See [Dropped format-suffix alias routes](#dropped-format-suffix-alias-routes);
 - `needs-manual-adaptation` — everything else (APIViews, custom actions,
   non-token authentication, permission logic beyond the recognized owner
   idiom, pagination, filters, other overridden viewset methods, or middleware
@@ -155,6 +155,40 @@ The exact middleware allowlist covers Django's `SecurityMiddleware`,
 WhiteNoise, CORS, project-specific subclasses, and similarly named middleware
 remain outside the allowlist because native output cannot reproduce their
 settings faithfully; matching is by the full import path.
+
+### Dropped format-suffix alias routes
+
+Django REST Framework's `format_suffix_patterns()` registers extra URL
+patterns next to each canonical route: `GET /api/orders/` plus
+`GET /api/orders.json/` (and the `<drf_format_suffix:format>` converter
+form). Those aliases exist so a client can pick a renderer from the path
+instead of an `Accept` header.
+
+Native FastAPI output keeps only the canonical route. FastAPI has no
+equivalent of `format_suffix_patterns`, and emitting `.{format}` paths
+would invent a contract the generated app cannot honor with DRF's
+renderer registry. The drop is therefore disclosed rather than generated:
+
+- `sanka plan` classifies each alias as `dropped-format-suffix-alias` and
+  reports the count and share of scanned routes separately. Aliases are
+  excluded from the native-readiness denominator because they are not
+  generated code.
+- `sanka verify` treats a disclosed alias drop as expected. It is not a
+  missing-route failure. Routes still classified
+  `needs-manual-adaptation` do fail verification.
+
+If an existing client calls `.json` (or another suffix) URLs:
+
+1. During a strangler cutover, leave `format_suffix_patterns` on the
+   source DRF app so the old paths keep working while traffic moves.
+2. Or add a FastAPI route that maps the suffix path onto the canonical
+   handler, for example `@app.get("/api/orders.json")` that calls the
+   same function as `GET /api/orders/` and returns JSON. Do this only for
+   suffixes clients actually use; do not re-implement DRF's full suffix
+   table.
+
+Neither option is emitted by `apply`. Both are manual follow-up after
+the reviewed plan.
 
 Native migration readiness is the number of `native-fastapi-crud` and
 `native-fastapi-api-root` routes divided by scanned routes after excluding
