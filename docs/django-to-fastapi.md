@@ -108,6 +108,11 @@ sanka plan . --to fastapi --generation full --output ./fastapi-app \
   --strategy native --orm tortoise --package-manager uv
 ```
 
+Swagger UI at `/docs` is enabled by default. Add `--no-swagger-ui` to the
+plan command to omit that page, or `--swagger-ui` to enable it explicitly.
+The choice is bound to the reviewed plan and carried into Apply; `/openapi.json`
+and ReDoc remain available. The TUI Plan configuration has the same choice.
+
 JSON and non-TTY runs never prompt. The plan classifies every discovered
 route, records the selected strategy (`native` or `compatibility`), records
 the async SQL engine only when generated routes need database access, lists

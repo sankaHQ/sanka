@@ -115,6 +115,10 @@ def report(
     wait: bool,
     wait_timeout: int,
 ) -> None:
+    from sanka.cli.tui.launch import monitor_code, use_human_tui
+
+    if use_human_tui(state):
+        raise SystemExit(monitor_code(state, workspace, stage, operation, wait_timeout))
     run_id = str(operation["run"]["id"])
     deadline = time.monotonic() + wait_timeout
     outcome, code = stage_result(stage, operation)

@@ -191,6 +191,11 @@ def installation_report(expected_version: str | None = None) -> dict[str, Any]:
 @click.pass_obj
 def doctor(state: CLIState, as_json: bool, expected_version: str | None) -> None:
     """Check installation, Python, PATH and cached extension environments locally."""
+    if not as_json and state.output != "json" and not os.environ.get("CI"):
+        from sanka.cli.tui.launch import launch_doctor, use_human_tui
+
+        if use_human_tui(state):
+            raise SystemExit(launch_doctor(state, expected_version))
     report = installation_report(expected_version)
     if as_json or state.output == "json":
         click.echo(json.dumps(report, ensure_ascii=False, indent=2))

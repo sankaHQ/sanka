@@ -57,9 +57,9 @@ from sanka_extensions.data import ENTRY_POINT_GROUP, ExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
-# Published extensions-v0.1.0a22. Advance only after verifying its release wheels.
-# The development catalog can refer to artifacts that have not been published yet.
-OFFICIAL_REVISION = "37873d18970e7ffe4c55bfa1663e7c4c36fd4d12"
+# Advance only after verifying the catalog's published release wheels.
+# Development entries may still refer to releases awaiting publication.
+OFFICIAL_REVISION = "17e5f510ea8f76b403d1f4f35adf675eaadbe868"
 DEFAULT_EXTENSION_ID = "sanka/drf-to-fastapi"
 MAX_WHEEL_BYTES = 128 * 1024 * 1024
 MAX_WHEEL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -3315,6 +3315,45 @@ class ExtensionStore:
                 disabled.add(extension_id)
             self._write_disabled(disabled)
             self._write_lock(entries)
+
+    @_store_operation
+    def set_extension_enabled(self, extension_id: str, *, enabled: bool) -> None:
+        """Record an installed extension in the existing disabled set.
+
+        Enabling still goes through ``add_extension``, which drops the id from
+        that set. This only refuses a disable when every catalog row for the id
+        is already incompatible.
+        """
+        matches = [item for item in self.list_extensions() if item.id == extension_id]
+        if not matches:
+            _error(
+                "SANKA_EXTENSION_NOT_FOUND",
+                "Extension is not in the trusted catalog",
+                extension_id=extension_id,
+            )
+        if not enabled and all("incompatible" in item.status for item in matches):
+            _error(
+                "SANKA_EXTENSION_INCOMPATIBLE",
+                "Refusing to disable an extension that is already incompatible",
+                extension_id=extension_id,
+            )
+        installed = {"installed", "locked", "disabled", "update_available"}
+        if not enabled and not any(installed.intersection(item.status) for item in matches):
+            _error(
+                "SANKA_EXTENSION_NOT_FOUND",
+                "Extension is not installed",
+                extension_id=extension_id,
+            )
+        with (
+            _locked(self.user_root, self._installation_path),
+            _locked(self.project_root, self._project_lock_path),
+        ):
+            disabled = self._load_disabled()
+            if enabled:
+                disabled.discard(extension_id)
+            else:
+                disabled.add(extension_id)
+            self._write_disabled(disabled)
 
     def _snapshot_for_lock(self, entry: LockEntry) -> Path:
         return self._confined(

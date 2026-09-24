@@ -32,7 +32,7 @@ def verify(release: Path, root: Path, mode: str) -> None:
         shutil.copyfile(release / filename, source / filename)
     wheels = {p.name: p.read_bytes() for p in release.glob("*.whl")}
     if mode == "corrupt-wheel":
-        wheels["sanka_extension_business_flows-0.1.0a1-py3-none-any.whl"] += b"changed"
+        wheels["sanka_extension_business_flows-0.1.0a2-py3-none-any.whl"] += b"changed"
     spec = json.loads(
         (
             Path(__file__).parent / "fixtures/flow/synthetic_native_order_billing_blueprint.json"
@@ -52,6 +52,8 @@ def verify(release: Path, root: Path, mode: str) -> None:
         _responses(patch, wheels)
         if mode == "old-runtime":
             patch.setattr("sanka.runtime.extensions.store.__version__", "0.2.12")
+        elif mode == "prior-runtime":
+            patch.setattr("sanka.runtime.extensions.store.__version__", "0.2.14")
         store = ExtensionStore(root / "project", user_root=root / "user")
         store.add_marketplace(source, name="business-candidate", trust=True)
         expected = {
@@ -86,7 +88,7 @@ def verify(release: Path, root: Path, mode: str) -> None:
                 assert mode == "missing-capability", str(error) + ": " + str(error.__cause__)
                 assert error.code == "SANKA_FLOW_EXTENSION_PROTOCOL"
             else:
-                assert mode == "success"
+                assert mode in {"success", "prior-runtime"}
                 assert isinstance(blueprint, Blueprint)
                 assert blueprint.resources[0].spec == profile.to_dict()
                 assert blueprint.extension.digest == before.manifest_digest
@@ -109,7 +111,9 @@ def verify(release: Path, root: Path, mode: str) -> None:
             assert store.resolve_locked("sanka/business-flows") == before
 
 
-@pytest.mark.parametrize("mode", ["success", "missing-capability", "corrupt-wheel", "old-runtime"])
+@pytest.mark.parametrize(
+    "mode", ["success", "prior-runtime", "missing-capability", "corrupt-wheel", "old-runtime"]
+)
 def test_real_business_package(
     extension_release: Path,
     tmp_path: Path,

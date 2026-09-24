@@ -137,6 +137,10 @@ def main(argv: list[str] | None = None, *, api_base: str | None = None) -> int:
         return 0
     if hasattr(args, "root_option"):
         args.root = args.root_option or args.root or "."
+    if _use_local_tui(args):
+        from sanka.cli.tui.launch import launch_local
+
+        return launch_local(args)
     try:
         return int(asyncio.run(args.handler(args)))
     except CliUsageError as error:
@@ -353,6 +357,20 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         choices=PLAN_ORMS,
         default=None,
         help="async SQL engine for native FastAPI (default: tortoise, closest to Django)",
+    )
+    swagger = plan.add_mutually_exclusive_group()
+    swagger.add_argument(
+        "--swagger-ui",
+        dest="swagger_ui",
+        action="store_true",
+        default=None,
+        help="enable FastAPI Swagger UI at /docs (default)",
+    )
+    swagger.add_argument(
+        "--no-swagger-ui",
+        dest="swagger_ui",
+        action="store_false",
+        help="omit FastAPI Swagger UI at /docs; keep OpenAPI and ReDoc",
     )
     extension_options(plan)
     presentation(plan)
@@ -838,6 +856,17 @@ def _interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+_TUI_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify", "status", "extension"})
+
+
+def _use_local_tui(args: argparse.Namespace) -> bool:
+    if args.command not in _TUI_COMMANDS:
+        return False
+    if getattr(args, "json", False) or getattr(args, "compact_dsl", False):
+        return False
+    return _interactive_terminal()
+
+
 def _prompt_choice(
     label: str,
     choices: tuple[tuple[str, str], ...],
@@ -877,6 +906,7 @@ def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
         ("generation", "generation"),
         ("package_manager", "package_manager"),
         ("orm", "orm"),
+        ("swagger_ui", "swagger_ui"),
         ("output", "output"),
         ("min_readiness", "min_readiness"),
         ("bench_candidate", "bench_candidate"),
@@ -961,6 +991,8 @@ def _print_application_result(
 
 async def _cmd_plan(args: argparse.Namespace) -> int:
     if _application_lifecycle_requested(args):
+        if args.swagger_ui is not None and args.to not in (None, "fastapi"):
+            raise CliUsageError("--swagger-ui/--no-swagger-ui requires --to fastapi")
         result = _application_lifecycle(args).plan(
             target=args.to,
             configuration=_extension_configuration(args),

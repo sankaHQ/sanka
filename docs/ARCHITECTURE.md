@@ -42,6 +42,22 @@ Local lifecycle arguments are forwarded directly to the mature parser. The
 default migration spec is `sanka.yaml`; there is no obsolete filename or
 executable fallback.
 
+A human terminal opens a Textual view for that lifecycle, the extension
+catalog, status, and cloud job monitoring. `--json` and non-interactive
+execution keep the versioned `sanka-cli/v1` contract. The view does not send
+endpoint selections to an extension until that extension publishes support for
+them.
+
+Cloud monitors keep the selected run and its exit status. Their lifecycle sidebar
+actions do not launch local work: quit and use the explicit `--cloud` command to
+continue. Paid cloud submission still requires the CLI's reviewed hash, budget,
+and consent options.
+
+Local Test and Verify accept generated files in the reviewed output directory
+only when excluding that directory reproduces the original source fingerprint.
+Pre-existing source files remain covered, and changing the output configuration
+still requires a new plan.
+
 ## Marketplace and extension host
 
 The official marketplace publishes immutable wheels as GitHub release assets,

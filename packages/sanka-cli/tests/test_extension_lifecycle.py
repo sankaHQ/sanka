@@ -262,6 +262,18 @@ def test_plan_selects_target_and_binds_a_generic_core_plan(tmp_path: Path) -> No
     assert plan["plan_hash"].startswith("sha256:")
 
 
+def test_plan_rejects_extension_that_ignores_swagger_choice(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    lifecycle.scan()
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.plan(target="fastapi", configuration={"swagger_ui": False})
+
+    assert raised.value.code == "SANKA_EXTENSION_PROTOCOL"
+    assert not (project / ".sanka" / "plan.json").exists()
+
+
 def test_plan_rejects_resolved_lock_identity_drift_before_dispatch(tmp_path: Path) -> None:
     project = _project(tmp_path)
     expected = _lock()
@@ -715,6 +727,34 @@ def test_apply_rejects_stale_fingerprint_and_wrong_core_hash(tmp_path: Path) -> 
     (project / "new.py").write_text("print('changed')\n", encoding="utf-8")
     with pytest.raises(ExtensionError) as raised:
         lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+    assert raised.value.code == "SANKA_FINGERPRINT_STALE"
+
+
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_generated_output_does_not_hide_source_fingerprint_changes(
+    tmp_path: Path,
+    existing_output: bool,
+) -> None:
+    project = _project(tmp_path)
+    output = project / "generated"
+    if existing_output:
+        output.mkdir()
+        (output / "source.py").write_text("import django\n")
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    planned = lifecycle.plan(target="fastapi", configuration={"output": "generated"})
+    lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
+    output.mkdir(exist_ok=True)
+    (output / "app.py").write_text("import fastapi\n")
+    if existing_output:
+        with pytest.raises(ExtensionError) as raised:
+            lifecycle.test()
+        assert raised.value.code == "SANKA_FINGERPRINT_STALE"
+        return
+    assert lifecycle.test().outcome == "success"
+    assert lifecycle.verify().outcome == "success"
+    (project / "new_source.py").write_text("import flask\n")
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.verify()
     assert raised.value.code == "SANKA_FINGERPRINT_STALE"
 
 

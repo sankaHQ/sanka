@@ -12,14 +12,14 @@ from pathlib import Path
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
-TAG = "business-flows-v0.1.0a1"
+TAG = "business-flows-v0.1.0a2"
 ARTIFACTS = (
-    ("extension.json", "c2204dcc71324f8ec8b75bfc4858fe0e1cebad744d4e16311b3ced00bada9985", 1698),
+    ("extension.json", "8661cc7c2edb0178a3b6f68277ffdd9ed1f43b0e708f22e84ac79c240bd1a53b", 1698),
     ("marketplace.json", "be924e66d48a8ec788409a65037b7e746839eb5fa37a99273240665c586a2bf1", 153),
     (
-        "sanka_extension_business_flows-0.1.0a1-py3-none-any.whl",
-        "9128a3a532f7873b2ee62a2a2d0442e7a1f298fdc1d74ad5bdc8cc5a819c1516",
-        18790,
+        "sanka_extension_business_flows-0.1.0a2-py3-none-any.whl",
+        "7424279a9a7691a3a5294974e404932b3995fba76fac779ff3ddd6ab5285100c",
+        18794,
     ),
     (
         "sanka_extension_sdk-0.1.0a5-py3-none-any.whl",

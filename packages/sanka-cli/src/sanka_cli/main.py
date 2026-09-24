@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import sys
+
 import click
 
 from sanka_cli import __version__
@@ -21,7 +23,7 @@ from sanka_cli.output import print_error
 from sanka_cli.state import CLIState
 
 
-@click.group()
+@click.group(context_settings={"help_option_names": ["-h", "--h", "--help"]})
 @click.version_option(__version__, prog_name="sanka")
 @click.option("--profile", default=None, help="Profile name to use.")
 @click.option("--base-url", default=None, help="Override API base URL.")
@@ -41,6 +43,20 @@ def cli(
     ctx.obj = CLIState(profile=profile, base_url=base_url, output=output)
 
 
+@cli.command("help")
+@click.argument("command", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def help_command(ctx: click.Context, command: tuple[str, ...]) -> None:
+    """Show help for any command, e.g. sanka help scan or sanka help cloud list."""
+    if any(part.startswith("-") for part in command):
+        raise click.UsageError("Use sanka <command> [options] --help for option-specific help.")
+    cli.main(
+        args=[*command, "--help"],
+        prog_name=ctx.find_root().info_name,
+        standalone_mode=False,
+    )
+
+
 cli.add_command(auth)
 cli.add_command(auth_login, "login")
 cli.add_command(auth_logout, "logout")
@@ -55,6 +71,25 @@ cli.add_command(cloud)
 cli.add_command(fix)
 cli.add_command(skill)
 cli.add_command(doctor)
+
+
+@cli.command("tui")
+@click.option(
+    "--extension-env",
+    multiple=True,
+    metavar="NAME",
+    help="Forward a named environment variable to local extensions (repeatable).",
+)
+@click.pass_obj
+def tui_command(state: CLIState, extension_env: tuple[str, ...]) -> None:
+    """Open the status dashboard for the project in the current directory."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print_error("sanka tui needs a terminal. Run sanka --help.")
+        raise SystemExit(2)
+    from sanka.cli.tui.launch import launch_dashboard
+
+    raise SystemExit(launch_dashboard(state=state, explicit_env_names=extension_env))
+
 
 attach_resource_group(cli, "companies", "/v2/public/companies")
 attach_resource_group(cli, "contacts", "/v2/public/contacts")

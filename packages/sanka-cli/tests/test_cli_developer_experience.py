@@ -45,6 +45,17 @@ def test_extension_parser_errors_keep_the_extension_outer_command(
     assert payload["data"]["error"]["code"] == "SANKA_USAGE"
 
 
+@pytest.mark.parametrize(
+    ("flag", "enabled"),
+    [("--swagger-ui", True), ("--no-swagger-ui", False)],
+)
+def test_fastapi_swagger_plan_flag_reaches_extension_configuration(
+    flag: str, enabled: bool
+) -> None:
+    args = _build_parser().parse_args(["plan", ".", "--to", "fastapi", flag])
+    assert cli._extension_configuration(args)["swagger_ui"] is enabled
+
+
 def test_generic_extension_configuration_reaches_the_application_lifecycle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -240,6 +251,7 @@ def test_sdk_command_functional_options_are_explicit() -> None:
             "generation",
             "package_manager",
             "orm",
+            "swagger_ui",
             "extension_config",
             "extension_env",
         },
