@@ -2121,7 +2121,7 @@ class ExtensionStore:
     def recommendations(self, fingerprint: Fingerprint) -> tuple[Recommendation, ...]:
         """Match only manifests read through the verified snapshot boundary."""
         catalog = self._catalog()
-        records = {(item.id, item.marketplace_identity): item for item in self.list_extensions()}
+        records = {(item.id, item.marketplace): item for item in self.list_extensions()}
         marketplaces = {item.identity: item for item in self.marketplaces()}
         locks = self._load_lock()
         installations = self._load_installations()
@@ -2129,13 +2129,24 @@ class ExtensionStore:
         recommendations: list[Recommendation] = []
         selected: list[tuple[MarketplaceRecord, Manifest, LockEntry | None]] = []
         covered_locks: set[str] = set()
+        catalog_snapshots = {
+            (manifest.id, source.identity, source.snapshot_digest) for source, manifest in catalog
+        }
         for marketplace, current in catalog:
             lock = locks.get(current.id)
             if lock is not None and lock.marketplace_identity == marketplace.identity:
-                selected.append((marketplace, self._manifest_for_lock(lock), lock))
-                covered_locks.add(lock.id)
-            else:
-                selected.append((marketplace, current, None))
+                exact = lock.snapshot_digest == marketplace.snapshot_digest
+                if exact and lock.id in covered_locks:
+                    continue
+                if lock.id not in covered_locks and (
+                    exact
+                    or (lock.id, lock.marketplace_identity, lock.snapshot_digest)
+                    not in catalog_snapshots
+                ):
+                    selected.append((marketplace, self._manifest_for_lock(lock), lock))
+                    covered_locks.add(lock.id)
+                    continue
+            selected.append((marketplace, current, None))
         for lock in locks.values():
             if lock.id in covered_locks or lock.marketplace_identity not in marketplaces:
                 continue
@@ -2151,7 +2162,7 @@ class ExtensionStore:
             if not matched:
                 continue
             if lock is None:
-                status = records[(manifest.id, marketplace.identity)].status
+                status = records[(manifest.id, marketplace.name)].status
                 snapshot_digest = marketplace.snapshot_digest
             else:
                 statuses = {"available", "locked"}
