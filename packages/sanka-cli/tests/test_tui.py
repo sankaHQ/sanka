@@ -8,11 +8,12 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from textual.widgets import DataTable, Input, OptionList, Select, Static, TextArea
+from textual.widgets import Button, DataTable, Input, OptionList, Select, Static, TextArea
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
     CloudMonitorScreen,
+    ExtensionDetailScreen,
     SankaApp,
     StageScreen,
     StatusScreen,
@@ -31,6 +32,7 @@ from sanka.cli.tui.model import (
     StageRun,
     parse_endpoints,
 )
+from sanka.cli.tui.services import HostServices, preferred_extension
 from sanka.cli.tui.widgets import CliLine, KeysBar
 from sanka.runtime.extensions.model import ExtensionError
 from sanka.runtime.extensions.store import ExtensionStore
@@ -64,6 +66,7 @@ class FakeServices:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
         self.installed: list[str] = []
+        self.installed_marketplaces: list[str | None] = []
         self.disabled: list[str] = []
         self.catalog: tuple[ExtensionChoice, ...] = (
             _choice("sanka/drf-to-fastapi", "1.2.0", installed=True, targets=("fastapi",)),
@@ -147,7 +150,7 @@ class FakeServices:
         return tuple(rows)
 
     def extension(self, extension_id: str) -> ExtensionChoice | None:
-        return next((item for item in self.catalog if item.id == extension_id), None)
+        return preferred_extension(self.catalog, extension_id)
 
     def marketplaces(self) -> tuple[MarketplaceView, ...]:
         return (
@@ -174,6 +177,7 @@ class FakeServices:
 
     def install(self, extension_id: str, marketplace: str | None = None) -> str:
         self.installed.append(extension_id)
+        self.installed_marketplaces.append(marketplace)
         self.catalog = tuple(
             replace(choice, status=frozenset({"available", "installed", "locked"}))
             if choice.id == extension_id
@@ -659,6 +663,54 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         highlighted = menu.highlighted
         assert highlighted is not None
         assert menu.get_option_at_index(highlighted).id == "marketplace"
+
+
+def test_extension_detail_prefers_newer_update_over_old_lock(tmp_path: Path) -> None:
+    services = HostServices(tmp_path)
+    locked = _choice("sanka/drf-to-fastapi", "0.1.0a17", installed=True, targets=("fastapi",))
+    update = replace(
+        locked, version="0.1.0a18", status=frozenset({"available", "update_available"})
+    )
+    services.extensions = lambda query="", **filters: (locked, update)  # type: ignore[method-assign]
+    assert services.extension(locked.id) == update
+    services.extensions = lambda query="", **filters: (update, locked)  # type: ignore[method-assign]
+    assert services.extension(locked.id) == update
+
+
+@pytest.mark.asyncio
+async def test_extension_update_appears_after_refresh_and_requires_confirmation() -> None:
+    services = FakeServices()
+    app = SankaApp(services, Session(project_root="/work/demo"), start="extensions")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.click("#details")
+        await pilot.pause()
+        assert not app.screen.query_one("#update", Button).display
+
+        current = services.catalog[0]
+        services.catalog = (
+            current,
+            replace(current, version="1.3.0", status=frozenset({"available", "update_available"})),
+            *services.catalog[1:],
+        )
+        assert isinstance(app.screen, ExtensionDetailScreen)
+        app.screen.on_catalog_refreshed()
+        await pilot.pause()
+        assert app.screen.query_one("#update", Button).display
+        await pilot.click("#update")
+        await pilot.pause()
+        assert "1.3.0" in str(app.screen.query_one("#confirm-message", Static).content)
+        assert services.installed == []
+        await pilot.press("escape")
+        await pilot.pause()
+        assert services.installed == []
+
+        await pilot.click("#update")
+        await pilot.click("#yes")
+        await app.workers.wait_for_complete()
+        assert services.installed == [current.id]
+        assert services.installed_marketplaces == [current.marketplace]
+        assert not app.screen.query_one("#update", Button).display
 
 
 @pytest.mark.asyncio
