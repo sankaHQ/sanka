@@ -33,7 +33,9 @@ The macOS/Linux uv prerequisite is `curl -LsSf https://astral.sh/uv/install.sh |
 follow its printed shell setup instructions. Advanced pip users should use a
 Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
 Bare `pip` can select an older system interpreter and report “No matching distribution found.”
-The installer first ships with CLI 0.2.11. See [installation and recovery](https://github.com/sankaHQ/sanka/blob/main/docs/install.md)
+Sanka CLI 0.3.0 includes the interactive TUI. The installer pins the CLI version
+of its release (`sh install.sh --version X.Y.Z` selects another). See
+[installation and recovery](https://github.com/sankaHQ/sanka/blob/main/docs/install.md)
 for Homebrew upgrades, PATH conflicts, and project environments.
 
 For AI agents using MCP, connect to the hosted Sanka MCP server at
