@@ -9,10 +9,11 @@ contracts unchanged. It embeds published Extension SDK `0.1.0a7` from
 Order billing verification and activation control; hosted execution still requires
 a separate native adapter. Blueprint v5 execution remains unsupported.
 
-The default Data/Code marketplace is pinned to Extensions PR #127 commit
-`e46aaffb6b1ec0b1c4f82bcaf09d2bb411baa7fa`, which restores the published
-FastAPI wheel hash in the 0.3-compatible catalog. PR #127 merged as
-`21819486f0a574362d69510fb2315f09805c36ab`. Existing project locks remain
+The default Data/Code marketplace is pinned to Extensions PR #133 merge
+`17e5f510ea8f76b403d1f4f35adf675eaadbe868`. Its immutable
+`extensions-v0.1.0a32` release provides DRF-to-FastAPI `0.1.0a18`, which honors
+the reviewed Swagger UI choice in both native and compatibility output. Publish
+and verify that release before publishing CLI 0.3.0. Existing project locks remain
 byte-for-byte unchanged on CLI upgrade; users explicitly refresh the catalog and
 re-add each extension to adopt its compatible manifest. The business-flow package
 is distributed separately; publishing the CLI does not install or activate it.
