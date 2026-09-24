@@ -80,6 +80,11 @@ worker's successful completion.
 
 ## Local extension environment
 
+For DRF → FastAPI, Plan configuration includes **Swagger UI at /docs**.
+It starts enabled; choosing Disabled removes `/docs` from the generated app
+while keeping `/openapi.json` and ReDoc. Review the plan summary before Apply.
+The equivalent CLI flag is `sanka plan . --to fastapi --no-swagger-ui`.
+
 Pass repeatable `--extension-env NAME` options when opening the dashboard or a
 lifecycle screen. Export the values in the launching terminal first:
 

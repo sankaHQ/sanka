@@ -527,6 +527,13 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                                 allow_blank=False,
                                 id=f"plan-{name}",
                             )
+                        yield Label("Swagger UI at /docs (OpenAPI stays available)")
+                        yield Select(
+                            [("Enabled", True), ("Disabled", False)],
+                            value=self.values.get("swagger_ui", True),
+                            allow_blank=False,
+                            id="plan-swagger-ui",
+                        )
                 with Collapsible(title="Advanced configuration", collapsed=self.drf):
                     if self.drf:
                         yield Label("Django settings module (optional; inferred when empty)")
@@ -534,7 +541,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                     yield Label("Additional extension configuration (JSON object)")
                     known = {"output", "settings_module"}
                     if self.target == "fastapi":
-                        known.update({"generation", "strategy", "package_manager"})
+                        known.update({"generation", "strategy", "package_manager", "swagger_ui"})
                     extra = {k: v for k, v in self.values.items() if not self.drf or k not in known}
                     yield TextArea(json.dumps(extra, indent=2), id="plan-extra")
             yield Static("", id="configuration-error", markup=False)
@@ -573,6 +580,11 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                         for name, choices in allowed.items():
                             if values[name] not in choices:
                                 raise ValueError(f"{name}: choose {', '.join(choices)}.")
+                        swagger_ui = self.query_one("#plan-swagger-ui", Select).value
+                        if not isinstance(swagger_ui, bool):
+                            raise ValueError("Choose whether to enable Swagger UI.")
+                        if not swagger_ui or "swagger_ui" in self.values:
+                            values["swagger_ui"] = swagger_ui
                     if destination.exists() and values.get("generation") != "update":
                         raise ValueError(
                             "Output already exists. Choose a new directory or update mode."

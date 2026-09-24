@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from textual.widgets import DataTable, Input, OptionList, Static, TextArea
+from textual.widgets import DataTable, Input, OptionList, Select, Static, TextArea
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
@@ -895,6 +895,21 @@ async def test_scan_configuration_forwards_source_settings(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_plan_default_swagger_uses_extension_default(tmp_path: Path) -> None:
+    service = FakeServices()
+    app = SankaApp(service, Session(project_root=str(tmp_path)), start="plan")
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.click("#save-configuration")
+        await pilot.pause()
+        await pilot.click("#run-stage")
+        await app.workers.wait_for_complete()
+        assert "swagger_ui" not in service.calls[0]["configuration"]
+
+
+@pytest.mark.asyncio
 async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: Path) -> None:
     from textual.widgets import Button
 
@@ -915,6 +930,7 @@ async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: P
             app.screen.query_one("#configuration-error", Static).content
         )
         app.screen.query_one("#plan-output", Input).value = "generated"
+        app.screen.query_one("#plan-swagger-ui", Select).value = False
         await pilot.pause(0.6)
         await pilot.click("#save-configuration")
         await pilot.pause()
@@ -922,6 +938,7 @@ async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: P
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert service.calls[0]["configuration"]["generation"] == "minimal"
+        assert service.calls[0]["configuration"]["swagger_ui"] is False
         assert app.screen.query_one("#setup").display is False
         assert app.screen.query_one("#result-scroll").region.height >= 4
         assert app.screen.query_one("#configure-stage", Button).region.bottom <= 21

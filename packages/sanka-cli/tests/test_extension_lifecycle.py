@@ -262,6 +262,18 @@ def test_plan_selects_target_and_binds_a_generic_core_plan(tmp_path: Path) -> No
     assert plan["plan_hash"].startswith("sha256:")
 
 
+def test_plan_rejects_extension_that_ignores_swagger_choice(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), FakeRunner())
+    lifecycle.scan()
+
+    with pytest.raises(ExtensionError) as raised:
+        lifecycle.plan(target="fastapi", configuration={"swagger_ui": False})
+
+    assert raised.value.code == "SANKA_EXTENSION_PROTOCOL"
+    assert not (project / ".sanka" / "plan.json").exists()
+
+
 def test_plan_rejects_resolved_lock_identity_drift_before_dispatch(tmp_path: Path) -> None:
     project = _project(tmp_path)
     expected = _lock()

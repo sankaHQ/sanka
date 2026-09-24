@@ -603,6 +603,16 @@ class ApplicationLifecycle:
                 "SANKA_EXTENSION_PROTOCOL",
                 "Extension plan response must include its plan_hash",
             )
+        swagger_ui = normalized.get("swagger_ui")
+        if (
+            selected_target == "fastapi"
+            and isinstance(swagger_ui, bool)
+            and result.data.get("swagger_ui") is not swagger_ui
+        ):
+            _error(
+                "SANKA_EXTENSION_PROTOCOL",
+                "The installed FastAPI extension did not honor the Swagger UI choice; update it",
+            )
         digests = {artifact: _artifact_digest(Path(artifact)) for artifact in result.artifacts}
         payload: dict[str, Any] = {
             "artifact_digests": digests,

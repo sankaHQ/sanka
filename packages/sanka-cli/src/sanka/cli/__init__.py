@@ -358,6 +358,20 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         default=None,
         help="async SQL engine for native FastAPI (default: tortoise, closest to Django)",
     )
+    swagger = plan.add_mutually_exclusive_group()
+    swagger.add_argument(
+        "--swagger-ui",
+        dest="swagger_ui",
+        action="store_true",
+        default=None,
+        help="enable FastAPI Swagger UI at /docs (default)",
+    )
+    swagger.add_argument(
+        "--no-swagger-ui",
+        dest="swagger_ui",
+        action="store_false",
+        help="omit FastAPI Swagger UI at /docs; keep OpenAPI and ReDoc",
+    )
     extension_options(plan)
     presentation(plan)
     plan.set_defaults(handler=_cmd_plan)
@@ -892,6 +906,7 @@ def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
         ("generation", "generation"),
         ("package_manager", "package_manager"),
         ("orm", "orm"),
+        ("swagger_ui", "swagger_ui"),
         ("output", "output"),
         ("min_readiness", "min_readiness"),
         ("bench_candidate", "bench_candidate"),
@@ -976,6 +991,8 @@ def _print_application_result(
 
 async def _cmd_plan(args: argparse.Namespace) -> int:
     if _application_lifecycle_requested(args):
+        if args.swagger_ui is not None and args.to not in (None, "fastapi"):
+            raise CliUsageError("--swagger-ui/--no-swagger-ui requires --to fastapi")
         result = _application_lifecycle(args).plan(
             target=args.to,
             configuration=_extension_configuration(args),

@@ -464,7 +464,15 @@ class HostServices:
             key: value
             for key, value in configuration.items()
             if key
-            in {"output", "generation", "strategy", "package_manager", "orm", "settings_module"}
+            in {
+                "output",
+                "generation",
+                "strategy",
+                "package_manager",
+                "orm",
+                "settings_module",
+                "swagger_ui",
+            }
         }
         self.record(
             HistoryEntry(

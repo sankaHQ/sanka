@@ -154,6 +154,9 @@ def _plan_lines(data: Mapping[str, Any], root: str | Path) -> list[str]:
     output = data.get("default_output") or data.get("output")
     if output:
         lines.append(f"  {'Output':<10} {_relative(output, root)}")
+    swagger_ui = data.get("swagger_ui")
+    if target == "FastAPI" and isinstance(swagger_ui, bool):
+        lines.append(f"  {'Swagger UI':<10} {'enabled (/docs)' if swagger_ui else 'disabled'}")
     native = _count(data.get("native_routes"))
     dropped = _count(data.get("dropped_alias_routes"))
     manual = _count(data.get("needs_adaptation_routes"))
