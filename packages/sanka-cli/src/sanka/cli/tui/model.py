@@ -95,6 +95,12 @@ class ExtensionChoice:
         return display_name(self.id)
 
     @property
+    def kind_label(self) -> str:
+        return {"connector": "Data", "migration": "Code", "flow": "Workflow"}.get(
+            self.kind, self.kind.title()
+        )
+
+    @property
     def status_label(self) -> str:
         if "disabled" in self.status:
             return "Disabled"

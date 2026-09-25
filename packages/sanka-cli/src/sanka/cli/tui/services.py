@@ -236,13 +236,18 @@ class HostServices:
         for record in records:
             runtime, commands = facts.get(record.id, ("", ()))
             choice = _choice_from_record(record, runtime_specifier=runtime, commands=commands)
-            if kind and choice.kind != kind:
+            if kind and kind.casefold() not in {
+                choice.kind.casefold(),
+                choice.kind_label.casefold(),
+            }:
                 continue
             if status and status not in choice.status and choice.status_label != status:
                 continue
             if target and target not in choice.targets:
                 continue
-            haystack = " ".join((choice.id, choice.kind, *choice.targets, choice.label)).lower()
+            haystack = " ".join(
+                (choice.id, choice.kind_label, *choice.targets, choice.label)
+            ).lower()
             if needle and needle not in haystack:
                 continue
             choices.append(choice)

@@ -10,7 +10,7 @@ Spec-driven flow (migration-as-code)::
 
 ``validate`` is write-free by construction: it samples live source records
 through the reviewed plan and reports rejects without ever resolving the
-destination connector, exiting non-zero when invalid records exist.
+destination data extension, exiting non-zero when invalid records exist.
 
 Shorthand and provider selection::
 
@@ -721,7 +721,7 @@ def _extension_result(
             [
                 (
                     str(record.get("id", "")),
-                    {"connector": "System access", "migration": "Code conversion"}.get(
+                    {"connector": "Data", "migration": "Code", "flow": "Workflow"}.get(
                         str(record.get("kind", "")), str(record.get("kind", ""))
                     ),
                     str(record.get("version", "")),
@@ -1260,8 +1260,8 @@ async def _cmd_assess(args: argparse.Namespace) -> int:
 
 
 def _infer_endpoint(value: str, *, role: str) -> EndpointSpec:
-    """Map a CLI shorthand to an endpoint: paths → file connectors, URL
-    schemes → the connector named by the scheme."""
+    """Map a CLI shorthand to an endpoint: paths → file extensions, URL
+    schemes → the data extension named by the scheme."""
     if "://" in value:
         scheme, _, rest = value.partition("://")
         scheme = scheme.lower()
@@ -1278,7 +1278,7 @@ def _infer_endpoint(value: str, *, role: str) -> EndpointSpec:
     if path.suffix in {".db", ".sqlite", ".sqlite3"}:
         return EndpointSpec(type="sqlite", connection=str(path))
     raise SpecError(
-        f"cannot infer the {role} connector from {value!r}; use a URL-style endpoint"
+        f"cannot infer the {role} data extension from {value!r}; use a URL-style endpoint"
         " (e.g. sqlite://out.db) or a directory path"
     )
 

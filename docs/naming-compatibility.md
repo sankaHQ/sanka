@@ -23,6 +23,12 @@ The canonical `sanka_extensions.data` facade and old Python imports resolve to t
 
 The public SDK is named **Sanka Extension SDK**, with one `sanka_extensions` namespace. The previously proposed `sanka_data` namespace was never released and is removed. The unified SDK owns `sanka_extensions` and the published code-contract module; its data facade uses the separately owned compatibility package so wheels do not overwrite each other's files.
 
+The canonical Data distributions are `sanka-extension-clickhouse`,
+`sanka-extension-csv`, `sanka-extension-markdown`, `sanka-extension-postgres`,
+and `sanka-extension-sqlite`. Their `sanka/<name>` install IDs are stable.
+New wheels retain `sanka_connector_*` import aliases; existing project locks
+still resolve against their immutable marketplace snapshots.
+
 `sanka_extensions.flow` adds the declarative business contract. The earlier
 `sanka_extensions.blueprints` suggestion was not implemented or published and
 does not need an alias. Isolated generators use their own `kind="flow"` manifest
@@ -34,7 +40,7 @@ see [Flow status and ownership](flow.md).
 
 | Contract retained | Consumer / reason | Removal condition |
 | --- | --- | --- |
-| `sanka-connector-sdk`, `sanka-connector-*` distributions and `sanka_connector_*` module paths | Immutable marketplace wheels and existing Python installations | A coordinated package release, migrated manifests, and tested rollback paths |
+| `sanka-connector-sdk`, old `sanka-connector-*` distributions and `sanka_connector_*` module paths | Immutable marketplace wheels and existing Python installations | Retain old locks and import aliases until an announced incompatible release |
 | `sanka_connector`, `sanka_extensions.systems` and their public submodules / old exported type names | Existing extension wheels and private cloud bridges | All supported consumers move to `sanka_extensions.data`; remove only in a documented incompatible SDK release |
 | `sanka_extension_sdk` and `sanka_extension_sdk.contract` | Published code-extension imports | Migrate consumers to `sanka_extensions.code` before a documented incompatible release |
 | `CONNECTOR` constant and `sanka.connectors` entry-point group | Existing manifests and hosts discover the published target | Versioned discovery transition with old-wheel acceptance tests |
