@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from packaging.version import Version
+
 from sanka.cli.tui.history import append_history, load_history
 from sanka.cli.tui.model import (
     EndpointChoice,
@@ -127,6 +129,18 @@ def _choice_from_record(
     )
 
 
+def preferred_extension(
+    choices: tuple[ExtensionChoice, ...], extension_id: str
+) -> ExtensionChoice | None:
+    matching = [item for item in choices if item.id == extension_id]
+    active = [item for item in matching if item.status.intersection({"locked", "update_available"})]
+    return max(
+        active or matching,
+        key=lambda item: (Version(item.version), "update_available" in item.status),
+        default=None,
+    )
+
+
 def read_plan_hash(root: Path, artifact_dir: str) -> str | None:
     path = root / artifact_dir / "plan.json"
     try:
@@ -235,7 +249,7 @@ class HostServices:
         return tuple(choices)
 
     def extension(self, extension_id: str) -> ExtensionChoice | None:
-        return next((item for item in self.extensions() if item.id == extension_id), None)
+        return preferred_extension(self.extensions(), extension_id)
 
     def marketplaces(self) -> tuple[MarketplaceView, ...]:
         store = self._store()

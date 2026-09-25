@@ -45,7 +45,7 @@ from sanka.cli.tui.model import (
     format_elapsed,
     parse_endpoints,
 )
-from sanka.cli.tui.services import TuiServices, cloud_exit_code
+from sanka.cli.tui.services import TuiServices, cloud_exit_code, preferred_extension
 from sanka.cli.tui.widgets import ActivityLog, CliLine, EmptyState, KeysBar, StageHeader
 from sanka_cli import __version__
 
@@ -1520,7 +1520,7 @@ class ExtensionListScreen(SankaScreen):
                 choice.id,
                 f"{choice.label}  {choice.kind}  {', '.join(choice.targets) or '-'}",
             )
-            for choice in self.sanka.services.extensions("")
+            for choice in self._choices()
         )
         self.app.push_screen(SearchModal("Search extensions", options), self._picked)
 
@@ -1531,9 +1531,18 @@ class ExtensionListScreen(SankaScreen):
         table.move_cursor(row=self._ids.index(extension_id))
         table.focus()
 
+    def _choices(self) -> tuple[ExtensionChoice, ...]:
+        catalog = self.sanka.services.extensions("")
+        return tuple(
+            choice
+            for extension_id in dict.fromkeys(item.id for item in catalog)
+            if (choice := preferred_extension(catalog, extension_id)) is not None
+        )
+
     def _fill(self) -> None:
-        choices = self.sanka.services.extensions("")
+        choices = self._choices()
         table = self.query_one(DataTable)
+        selected = self._selected() if hasattr(self, "_ids") else None
         table.clear()
         self._ids = [choice.id for choice in choices]
         for choice in choices:
@@ -1544,6 +1553,8 @@ class ExtensionListScreen(SankaScreen):
                 choice.status_label,
                 choice.version_label,
             )
+        if selected in self._ids:
+            table.move_cursor(row=self._ids.index(selected))
 
     def _selected(self) -> str | None:
         table = self.query_one(DataTable)
@@ -1578,7 +1589,9 @@ class ExtensionListScreen(SankaScreen):
             self.app.call_from_thread(self.notify, "That extension is incompatible with this CLI.")
             return
         try:
-            message = self.sanka.services.install(extension_id)
+            message = self.sanka.services.install(
+                extension_id, choice.marketplace if choice else None
+            )
         except Exception as error:
             message = str(error)
         self.app.call_from_thread(self._installed, message)
@@ -1590,6 +1603,10 @@ class ExtensionListScreen(SankaScreen):
     def on_catalog_refreshed(self) -> None:
         self._fill()
         self.query_one("#catalog-status", Static).update("")
+
+    def on_screen_resume(self) -> None:
+        super().on_screen_resume()
+        self._fill()
 
     def _remove(self, extension_id: str) -> None:
         self.run_worker(lambda: self._remove_work(extension_id), thread=True)
@@ -1624,6 +1641,13 @@ class ExtensionDetailScreen(SankaScreen):
         self.refresh_footer()
         self._show()
 
+    def on_catalog_refreshed(self) -> None:
+        self._show()
+
+    def on_screen_resume(self) -> None:
+        super().on_screen_resume()
+        self._show()
+
     def _choice(self) -> ExtensionChoice | None:
         return self.sanka.services.extension(self.extension_id)
 
@@ -1631,6 +1655,8 @@ class ExtensionDetailScreen(SankaScreen):
         choice = self._choice()
         if choice is None:
             self.query_one("#detail", Static).update(f"{self.extension_id} is not in the catalog.")
+            for action in ("install", "update", "enable", "disable", "uninstall"):
+                self.query_one(f"#{action}", Button).display = False
             return
         used = self.sanka.services.used_extension_id(self.sanka.session.target)
         used_line = (
@@ -1683,20 +1709,39 @@ class ExtensionDetailScreen(SankaScreen):
         if action == "disable":
             self._run("disable")
             return
-        if action in {"install", "update", "enable"}:
+        if action == "update":
+            choice = self._choice()
+            if choice is None or "update_available" not in choice.status:
+                self.notify("No update is available in the current marketplace snapshot.")
+                return
+            self.app.push_screen(
+                ConfirmScreen(
+                    f"Update {choice.id} to {choice.version} from {choice.marketplace}? "
+                    "This changes the project lock. Review a new plan before applying."
+                ),
+                callback=lambda yes: self._run("update", choice) if yes else None,
+            )
+            return
+        if action in {"install", "enable"}:
             self._run("install")
 
-    def _run(self, action: str) -> None:
-        self.run_worker(lambda: self._work(action), thread=True)
+    def _run(self, action: str, choice: ExtensionChoice | None = None) -> None:
+        self.run_worker(lambda: self._work(action, choice), thread=True)
 
-    def _work(self, action: str) -> None:
+    def _work(self, action: str, choice: ExtensionChoice | None = None) -> None:
         try:
+            if action == "update" and self._choice() != choice:
+                raise ValueError("The available extension changed. Review the update again.")
             if action == "remove":
                 message = self.sanka.services.remove(self.extension_id)
             elif action == "disable":
                 message = self.sanka.services.disable(self.extension_id)
             else:
-                message = self.sanka.services.install(self.extension_id)
+                choice = choice or self._choice()
+                message = self.sanka.services.install(
+                    self.extension_id,
+                    choice.marketplace if choice else None,
+                )
         except Exception as error:
             message = str(error)
         self.app.call_from_thread(self._done, message)
