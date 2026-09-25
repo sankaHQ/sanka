@@ -44,6 +44,8 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
             str(extension_release / f"sanka_extension_sdk-{sdk_version}-py3-none-any.whl"),
             str(extension_release / "sanka_connector_sdk-0.1.0a12-py3-none-any.whl"),
         ]
+    # Installed wheels share a package directory; separate zip paths need both
+    # the historical Flow SDK and the CLI's current app facade on __path__.
     result = subprocess.run(
         [
             sys.executable,
@@ -51,8 +53,14 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
             "-c",
             "import json, sys; from pathlib import Path; "
             "imports = json.loads(sys.argv[1]); sys.path[:0] = imports; "
+            "import sanka_extensions; "
+            "sanka_extensions.__path__.extend([imports[-2] + '/sanka_extensions'] "
+            "if len(imports) > 2 else []); "
             "import sanka, sanka_extensions.flow; "
             "assert sanka.__file__.startswith(imports[-2] + '/'), sanka.__file__; "
+            "import sanka_extensions.app; "
+            "assert sanka_extensions.app.__file__.startswith(imports[-2] + '/'), "
+            "sanka_extensions.app.__file__; "
             "assert sanka_extensions.flow.__file__.startswith(imports[0] + '/'), "
             "sanka_extensions.flow.__file__; "
             "from flow_wheel_acceptance import verify; "
