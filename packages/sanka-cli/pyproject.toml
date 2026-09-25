@@ -1,6 +1,6 @@
 [project]
 name = "sanka-cli"
-version = "0.3.1"
+version = "0.3.2"
 description = "Sanka command-line interface and migration runtime"
 readme = "README.md"
 requires-python = ">=3.12"

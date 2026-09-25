@@ -62,7 +62,7 @@ from sanka.runtime.execution.routes import (
 )
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.record_mapping import destination_properties, relationship_source_ids
-from sanka_extensions.data import Credentials, DataReader
+from sanka_extensions.app import Credentials, DataReader
 
 DEFAULT_VALIDATION_SAMPLE_SIZE = 10
 """Records sampled per route — the production dry-run ``maxRecords`` default."""

@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.model import MigrationMappingField
-from sanka_extensions.data import SourceFilter
+from sanka_extensions.app import SourceFilter
 
 MappingGroup = tuple[str, str, SourceFilter | None, list[MigrationMappingField]]
 MappingRouteManifest = list[dict[str, Any]]

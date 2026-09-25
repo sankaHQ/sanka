@@ -187,7 +187,7 @@ from sanka_connector import (
 from sanka_connector import (
     __version__ as __version__,
 )
-from sanka_extensions.data.records import require_identity_values as require_identity_values
+from sanka_extensions.app.records import require_identity_values as require_identity_values
 
 __all__ = [
     "ENTRY_POINT_GROUP",

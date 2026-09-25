@@ -33,8 +33,8 @@ from sanka.runtime.mapping.record_mapping import (
     mapping_group_key,
     mapping_groups,
 )
-from sanka_extensions.data import SourceFilter
-from sanka_extensions.data.schema import Inventory, ObjectSchema, SourceObject
+from sanka_extensions.app import SourceFilter
+from sanka_extensions.app.schema import Inventory, ObjectSchema, SourceObject
 
 MappingOrigin = Literal["auto", "identity"]
 

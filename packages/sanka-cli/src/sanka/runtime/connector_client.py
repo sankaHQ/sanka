@@ -23,7 +23,7 @@ from sanka.runtime.connector_host import (
     encode_value,
 )
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,

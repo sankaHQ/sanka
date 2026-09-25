@@ -629,6 +629,9 @@ async def test_plan_refresh_adds_a_marketplace_target() -> None:
 @pytest.mark.asyncio
 async def test_extension_marketplace_lists_installs_and_filters() -> None:
     services = FakeServices()
+    services.catalog += (
+        replace(_choice("sanka/postgres", "0.1.0", installed=False, targets=()), kind="connector"),
+    )
     app = SankaApp(services, Session(project_root="/work/demo"), start="extensions")
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
@@ -640,6 +643,7 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         table = _table_text(app.screen.query_one("#extensions"))
         assert "DRF to FastAPI" in table
         assert "Python to Go" in table
+        assert "Postgres" in table and "Data" in table and "connector" not in table
         await pilot.click("#search")
         await pilot.pause()
         modal = app.screen.query_one("#search-modal")

@@ -59,14 +59,14 @@ from sanka.runtime.planner import MigrationPlan, RoutePlan, build_plan
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, resolve_env
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES, RunStatus, StateStore
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     ConflictPolicy,
     CredentialProvider,
     Credentials,
     DataAccessError,
     SupportsRecordCounts,
 )
-from sanka_extensions.data.protocols import DataReader, DataWriter
+from sanka_extensions.app.protocols import DataReader, DataWriter
 
 MAX_WRITE_ATTEMPTS = 5
 _BACKOFF_BASE_SECONDS = 0.5
@@ -778,7 +778,7 @@ def _source_object_payload(obj: Any) -> dict[str, Any]:
 
 
 def _source_object_from_payload(payload: dict[str, Any]) -> Any:
-    from sanka_extensions.data.schema import SourceObject
+    from sanka_extensions.app.schema import SourceObject
 
     return SourceObject(
         key=payload["key"],
@@ -810,7 +810,7 @@ def _inventory_payload(inventory: Any) -> dict[str, Any]:
 
 
 def _inventory_from_payload(payload: dict[str, Any]) -> Any:
-    from sanka_extensions.data.schema import FieldSchema, Inventory, ObjectSchema
+    from sanka_extensions.app.schema import FieldSchema, Inventory, ObjectSchema
 
     return Inventory(
         provider=payload["provider"],

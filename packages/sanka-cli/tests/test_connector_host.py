@@ -15,7 +15,7 @@ from sanka.runtime.connector_host import (
     _describe,
     invoke_registration,
 )
-from sanka_extensions.data import ExtensionRegistration
+from sanka_extensions.app import ExtensionRegistration
 
 
 def run_host(site_packages: Path, request: dict[str, Any]) -> dict[str, Any]:

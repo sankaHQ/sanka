@@ -20,7 +20,7 @@ Hosted MCP runs as a separate service; the CLI does not depend on its server
 or transport packages.
 
 The embedded `sanka_connector` package is Sanka-owned Apache-2.0 source, not a
-separate runtime dependency. Connector and migration-extension wheels come
+separate runtime dependency. Data and Code extension wheels come
 from the verified GitHub marketplace. Their licenses and third-party driver
 dependencies are checked in `sankaHQ/extensions`; none are dependencies of the
 base CLI.

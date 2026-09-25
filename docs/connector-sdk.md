@@ -3,7 +3,7 @@
 The canonical Apache-2.0 Extension SDK and implementations live in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions). This repository
 embeds the byte-for-byte synchronized Sanka Extension SDK. New code uses
-`sanka_extensions.data` for data access and `sanka_extensions.code` for code migration.
+`sanka_extensions.app` for data access and `sanka_extensions.code` for code migration.
 See [the compatibility guide](naming-compatibility.md) for retained published imports.
 
 The Sanka Extension SDK defines data read/write roles, typed source and destination
@@ -11,14 +11,12 @@ protocols, optional capabilities, records, schemas, credentials, provisioning,
 registration, and stable errors. Its only package dependency preserves published SDK types; it never
 imports the AGPL `sanka` runtime.
 
-Provider implementations remain separate wheels because a migration should
-install only the drivers it needs. Those wheels are immutable GitHub release
-assets referenced by exact URL and SHA-256 digest in marketplace manifests;
-they are not installed from PyPI. Users select a reviewed component ID:
+Previously published application data implementations remain immutable wheels
+for existing locks. They are no longer offered by the current official
+marketplace. Users select current code extensions by reviewed component ID:
 
 ```bash
-sanka extension add sanka/markdown
-sanka extension add sanka/sqlite
+sanka extension add sanka/drf-to-fastapi
 ```
 
 The extension manager creates an isolated environment from the complete

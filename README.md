@@ -128,6 +128,11 @@ sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name
 sanka extension add sanka/drf-to-fastapi
 ```
 
+The revised official catalog offers code migration extensions. The CLI's default
+snapshot advances only after that catalog is reviewed and published; existing
+project locks continue to refer to their pinned snapshots.
+The embedded SDK exposes `sanka_extensions.app` for application data access.
+
 Sanka verifies each manifest, URL, SHA-256 digest, runtime constraint, and
 wheel identity before installing it in an isolated environment. PyPI is not a
 extension fallback. The official catalog defaults to the published bundle pinned by this

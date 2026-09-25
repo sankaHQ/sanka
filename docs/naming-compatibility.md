@@ -9,7 +9,7 @@ The shared `sanka` executable supports Sanka (data migrations), Sanka Flow (work
 | Previous name | Canonical name |
 | --- | --- |
 | `sanka_extension_sdk` code lifecycle imports | `sanka_extensions.code` |
-| `sanka_connector` / `sanka_extensions.systems` SDK imports | `sanka_extensions.data` |
+| `sanka_connector` / `sanka_extensions.systems` SDK imports | `sanka_extensions.app` |
 | `SourceConnector` / `SystemReader` | `DataReader` |
 | `DestinationConnector` / `SystemWriter` | `DataWriter` |
 | `ConnectorRegistration` | `ExtensionRegistration` |
@@ -19,9 +19,13 @@ The shared `sanka` executable supports Sanka (data migrations), Sanka Flow (work
 | `TransientProviderError` / `TransientSystemError` | `TransientDataError` |
 | `CONNECTOR` registration constant | `EXTENSION` |
 
-The canonical `sanka_extensions.data` facade and old Python imports resolve to the same classes. Implementation storage remains under the published SDK module path during the transition, preserving identity even when an older separately installed SDK is present. The data protocols and code contract each have one shared implementation. Preserve class identity and runtime capability checks across both paths. The runtime-owned registry is `ExtensionRegistry`; configured endpoint descriptors are `DataEndpoint`.
+The canonical `sanka_extensions.app` facade and old Python imports resolve to the same classes. Implementation storage remains under the published SDK module path during the transition, preserving identity even when an older separately installed SDK is present. The data protocols and code contract each have one shared implementation. Preserve class identity and runtime capability checks across both paths. The runtime-owned registry is `ExtensionRegistry`; configured endpoint descriptors are `DataEndpoint`.
 
 The public SDK is named **Sanka Extension SDK**, with one `sanka_extensions` namespace. The previously proposed `sanka_data` namespace was never released and is removed. The unified SDK owns `sanka_extensions` and the published code-contract module; its data facade uses the separately owned compatibility package so wheels do not overwrite each other's files.
+
+The revised official marketplace has no application data-access packages.
+Previously published wheels and project locks remain immutable; removing
+catalog entries does not delete existing installations.
 
 `sanka_extensions.flow` adds the declarative business contract. The earlier
 `sanka_extensions.blueprints` suggestion was not implemented or published and
@@ -34,8 +38,8 @@ see [Flow status and ownership](flow.md).
 
 | Contract retained | Consumer / reason | Removal condition |
 | --- | --- | --- |
-| `sanka-connector-sdk`, `sanka-connector-*` distributions and `sanka_connector_*` module paths | Immutable marketplace wheels and existing Python installations | A coordinated package release, migrated manifests, and tested rollback paths |
-| `sanka_connector`, `sanka_extensions.systems` and their public submodules / old exported type names | Existing extension wheels and private cloud bridges | All supported consumers move to `sanka_extensions.data`; remove only in a documented incompatible SDK release |
+| `sanka-connector-sdk`, old `sanka-connector-*` distributions and `sanka_connector_*` module paths | Immutable marketplace wheels and existing Python installations | Retain old locks and import aliases until an announced incompatible release |
+| `sanka_connector`, `sanka_extensions.systems` and their public submodules / old exported type names | Existing extension wheels and private cloud bridges | All supported consumers move to `sanka_extensions.app`; remove only in a documented incompatible SDK release |
 | `sanka_extension_sdk` and `sanka_extension_sdk.contract` | Published code-extension imports | Migrate consumers to `sanka_extensions.code` before a documented incompatible release |
 | `CONNECTOR` constant and `sanka.connectors` entry-point group | Existing manifests and hosts discover the published target | Versioned discovery transition with old-wheel acceptance tests |
 | Manifest `kind="connector"`, `providers`, `entry_point`; `kind="migration"` | Existing manifest parsers and immutable project locks | New schema with explicit dual-reader migration and retained old-lock support |

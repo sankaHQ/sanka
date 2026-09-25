@@ -364,14 +364,17 @@ class SearchModal(ModalScreen[str | None]):
         target = self.query_one("#target-filter", Input).value.strip()
         needle = query.strip().casefold()
         for choice in self._choices:
-            if kind and choice.kind != kind:
+            if kind and kind.casefold() not in {
+                choice.kind.casefold(),
+                choice.kind_label.casefold(),
+            }:
                 continue
             label = choice.status_label.lower()
             if status and status not in choice.status and label != status.lower():
                 continue
             if target and target not in choice.targets:
                 continue
-            prompt = f"{choice.label}  {choice.kind}  {', '.join(choice.targets) or '-'}"
+            prompt = f"{choice.label}  {choice.kind_label}  {', '.join(choice.targets) or '-'}"
             if needle and needle not in f"{choice.id} {prompt}".casefold():
                 continue
             listing.add_option(Option(prompt, id=choice.id))
@@ -1518,7 +1521,7 @@ class ExtensionListScreen(SankaScreen):
         options = tuple(
             (
                 choice.id,
-                f"{choice.label}  {choice.kind}  {', '.join(choice.targets) or '-'}",
+                f"{choice.label}  {choice.kind_label}  {', '.join(choice.targets) or '-'}",
             )
             for choice in self._choices()
         )
@@ -1548,7 +1551,7 @@ class ExtensionListScreen(SankaScreen):
         for choice in choices:
             table.add_row(
                 choice.label,
-                choice.kind,
+                choice.kind_label,
                 ", ".join(choice.targets) or "-",
                 choice.status_label,
                 choice.version_label,
@@ -1674,7 +1677,7 @@ class ExtensionDetailScreen(SankaScreen):
                 (
                     choice.label,
                     f"Id              {choice.id}",
-                    f"Type            {choice.kind}",
+                    f"Type            {choice.kind_label}",
                     f"Status          {choice.status_label}",
                     f"Version         {choice.version_label}",
                     f"Marketplace     {choice.marketplace}",
@@ -1821,7 +1824,7 @@ class MarketplaceScreen(SankaScreen):
             table.add_row(
                 choice.label,
                 choice.marketplace,
-                choice.kind,
+                choice.kind_label,
                 ", ".join(choice.targets) or "-",
                 choice.status_label,
                 choice.version_label,

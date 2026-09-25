@@ -6,7 +6,7 @@ Each provider distribution exposes its
 group::
 
     [project.entry-points."sanka.connectors"]
-    markdown = "sanka_connector_markdown:CONNECTOR"
+    app = "acme_app:EXTENSION"
 
 The runtime discovers registrations via ``importlib.metadata``. Extension
 source never imports the runtime, preserving the Apache-2.0 source boundary.

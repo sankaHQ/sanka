@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from sanka.runtime.extensions.model import ExtensionError
-from sanka_extensions.data import ExtensionRegistration
-from sanka_extensions.data.protocols import DataReader, DataWriter
+from sanka_extensions.app import ExtensionRegistration
+from sanka_extensions.app.protocols import DataReader, DataWriter
 
 HOSTED_SYSTEM_PROVIDERS = {
     "hubspot": "HubSpot",

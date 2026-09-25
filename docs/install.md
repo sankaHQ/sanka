@@ -109,7 +109,7 @@ other discovered binaries or claim an installed extension is authenticated.
 
 ```bash
 sanka doctor --json
-sanka doctor --expected-version 0.3.1
+sanka doctor --expected-version 0.3.2
 ```
 
 JSON uses `sanka-doctor/v1`. Errors (unsupported runtime or unexpected version)

@@ -50,7 +50,7 @@ the license already applicable to the files it modifies:
 
 Extension SDK and extension implementations belong in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions).
-Use `sanka_extensions.data` for data access, `sanka_extensions.flow` for
+Use `sanka_extensions.app` for data access, `sanka_extensions.flow` for
 declarative business requests and `sanka_extensions.code` for code migration.
 Flow's templates and SDK belong in Extensions; shared execution and recovery
 belong here. See [Flow runtime ownership](docs/flow.md) before implementing them.

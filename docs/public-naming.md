@@ -32,7 +32,7 @@ Moving PostgreSQL records is a Sanka data migration. Adapting the application's 
 | Register data read/write roles | `ExtensionRegistration` |
 | Data read/write protocols | `DataReader` / `DataWriter` |
 | Manifest's supported endpoint declaration | `EndpointSupport` |
-| Sanka Extension SDK imports | `sanka_extensions.data` / `sanka_extensions.flow` / `sanka_extensions.code` |
+| Sanka Extension SDK imports | `sanka_extensions.app` / `sanka_extensions.flow` / `sanka_extensions.code` |
 | Hosted dispatcher | `sanka_cli` |
 | Extension repository / IDs | `sankaHQ/extensions` / `sanka/<component>` |
 | Spec / local state | `sanka.yaml` / `.sanka/migrate/` |
@@ -49,7 +49,7 @@ The existing `sanka code` group retains its custom-function semantics as a compa
 Install by extension ID, not by a distribution name inferred from an endpoint type:
 
 ```bash
-sanka extension add sanka/postgres
+sanka extension add sanka/drf-to-fastapi
 ```
 
 A third-party extension may serve several endpoint types from an unrelated distribution name. Display locked manifest metadata. Reject overlapping enabled endpoint claims before downloading/installing or re-enabling an extension, and keep runtime resolution fail-closed.

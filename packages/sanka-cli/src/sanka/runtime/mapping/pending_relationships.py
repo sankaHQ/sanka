@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol
 
 from sanka.runtime.mapping.errors import MappingError
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     Credentials,
     DataWriter,
     RelationshipWrite,

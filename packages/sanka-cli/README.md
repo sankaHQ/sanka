@@ -61,11 +61,13 @@ manager:
 ```bash
 sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name sanka
 sanka extension add sanka/drf-to-fastapi
-sanka extension add sanka/markdown
-sanka extension add sanka/sqlite
 ```
 
 PyPI is not used as an extension fallback.
+The revised official catalog offers code migration extensions. The CLI's default
+snapshot advances only after that catalog is reviewed and published; existing
+data project locks continue to use their pinned marketplace snapshots.
+The embedded SDK exposes `sanka_extensions.app` for application data access.
 
 ## Local commands
 
@@ -83,17 +85,6 @@ shortcuts for Plan → Apply → Test → Verify; review Plan's hash before Appl
 Cloud / Account monitors hosted runs. See the [TUI guide](https://github.com/sankaHQ/sanka/blob/main/docs/tui.md)
 for configuration and shortcuts. Agents can use `--json` or `--compact-dsl`;
 pipes and CI keep non-interactive output.
-
-Data migrations default to `sanka.yaml`:
-
-```yaml
-source:
-  type: markdown
-  connection: ./content
-target:
-  type: sqlite
-  connection: content.db
-```
 
 `scan`, marketplace management, extension installation, local planning,
 testing, and verification never require a Sanka API token. Hosted resources,

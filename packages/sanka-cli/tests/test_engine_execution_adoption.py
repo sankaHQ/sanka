@@ -23,7 +23,7 @@ from sanka.runtime.planner import MigrationPlan, RoutePlan
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     BatchWriteInput,
     BatchWriteResult,
     Credentials,
