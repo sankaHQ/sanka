@@ -319,6 +319,9 @@ class HostServices:
         return parse_endpoints(payload)
 
     def install(self, extension_id: str, marketplace: str | None = None) -> str:
+        if marketplace is None:
+            choice = self.extension(extension_id)
+            marketplace = choice.marketplace if choice else None
         store = self._store()
         try:
             entry = store.add_extension(extension_id, marketplace=marketplace)
