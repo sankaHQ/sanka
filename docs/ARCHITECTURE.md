@@ -32,15 +32,16 @@ authentication:
 
 | Command surface | Execution | Authentication |
 |---|---|---|
-| local lifecycle, `connect`, and `extension` | in-process runtime or verified child component | no Sanka token |
-| explicit cloud migration selectors | hosted migration API | existing hosted token |
+| root `scan`, `plan`, `apply`, `test`, `verify` (Code) and `extension` | in-process runtime or verified child component | no Sanka token |
+| `sanka app` local data lifecycle and `connect` | in-process runtime | no Sanka token |
+| `sanka app <command> --program ID` or `--migration ID` | hosted migration API | existing hosted token |
 | hosted resources, workflows, AI, `functions` (custom functions) | hosted API | existing command rule |
 | public assessment | public API | credential-free |
 | Hosted MCP at `https://mcp.sanka.com/mcp` | hosted service, separate from the CLI | Connect Sanka account |
 
-Local lifecycle arguments are forwarded directly to the mature parser. The
-default migration spec is `sanka.yaml`; there is no obsolete filename or
-executable fallback.
+Local lifecycle arguments are forwarded to the Code or App parser. App defaults
+to `sanka.yaml`; root Code commands never infer App from that file. Explicit old
+root data selectors remain hidden compatibility aliases with a deprecation notice.
 
 A human terminal opens a Textual view for that lifecycle, the extension
 catalog, status, and cloud job monitoring. `--json` and non-interactive

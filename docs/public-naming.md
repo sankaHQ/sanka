@@ -39,6 +39,9 @@ Moving PostgreSQL records is a Sanka data migration. Adapting the application's 
 | CLI JSON protocol | `sanka-cli/v1` |
 | Custom function commands | `sanka functions` |
 | Code migration commands | `sanka scan`, `plan`, `apply`, `test`, `verify` |
+| App data migration commands | `sanka app plan`, `validate`, `apply`, `status`, `verify` |
+| Hosted App selection | `sanka app <command> --program ID` or `--migration ID` |
+| Flow workflow commands | `sanka workflows list`, `get`, `create`, `run` |
 | Optional hosted verification and repair | Sanka Fix / `sanka fix --cloud` |
 | Hosted MCP | `https://mcp.sanka.com/mcp` |
 

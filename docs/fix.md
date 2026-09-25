@@ -63,5 +63,6 @@ sanka cloud cancel --workspace 78165495 <fix-run-id>
 Downloads validate the declared size and SHA-256 and refuse to overwrite files.
 Use the returned Sanka Code URL to review changes and create a PR for the selected
 artifact. Fix does not merge or deploy a change. The original migration remains
-accessible through its parent run. Existing `sanka cloud repair`, `sanka repair`
-and custom-function `sanka code` semantics remain unchanged.
+accessible through its parent run. Existing `sanka cloud repair` and custom-function
+`sanka code` semantics remain unchanged. The root `sanka repair` data command is a
+hidden compatibility alias for `sanka app repair`.

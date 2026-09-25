@@ -69,7 +69,7 @@ snapshot advances only after that catalog is reviewed and published; existing
 data project locks continue to use their pinned marketplace snapshots.
 The embedded SDK exposes `sanka_extensions.app` for application data access.
 
-## Local commands
+## Sanka Code commands
 
 ```bash
 sanka scan .
@@ -88,9 +88,30 @@ pipes and CI keep non-interactive output.
 
 `scan`, marketplace management, extension installation, local planning,
 testing, and verification never require a Sanka API token. Hosted resources,
-workflows, AI, Custom Code, and explicitly cloud-selected migrations retain
+workflows, AI, Custom Code, and hosted migrations retain
 their existing authentication requirements. Add `--json` to local lifecycle
 commands for the stable `sanka-cli/v1` response envelope.
+
+## Sanka App data migrations
+
+Local data migrations use `sanka.yaml` and a local state file:
+
+```bash
+sanka app plan -f sanka.yaml
+sanka app validate -f sanka.yaml --json
+sanka app apply -f sanka.yaml --plan-hash sha256:<hash-from-plan>
+sanka app status -f sanka.yaml
+sanka app verify -f sanka.yaml
+```
+
+Hosted application migrations use the same `app` group with an explicit Program
+or migration ID, for example `sanka app plan --program ID` and
+`sanka app apply --migration ID --yes`. Hosted App commands require a Sanka API
+token. The existing root data commands remain hidden compatibility aliases and
+print a deprecation notice. Root `plan`, `apply`, and `verify` select Sanka Code;
+use `sanka app` when a `sanka.yaml` data spec is present.
+
+Sanka Flow operations remain under `sanka workflows list|get|create|run`.
 
 Custom functions use `sanka functions`; the old `sanka code` group keeps its original
 function operations as a compatibility alias. Sanka Code migration commands remain
