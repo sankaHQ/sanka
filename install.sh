@@ -4,7 +4,7 @@
 set -eu
 
 main() {
-    version=0.3.0
+    version=0.3.1
     coexist=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -19,7 +19,7 @@ main() {
             *) fail "Unknown argument: $1" ;;
         esac
     done
-    case "$version" in ''|*[!0-9.]*|.*|*..*|*.) fail 'Use an exact stable version such as 0.3.0' ;; esac
+    case "$version" in ''|*[!0-9.]*|.*|*..*|*.) fail 'Use an exact stable version such as 0.3.1' ;; esac
     case "$(uname -s)" in Darwin|Linux) ;; *) fail 'Use uv tool install --python 3.12 sanka-cli on this platform.' ;; esac
     root=${SANKA_INSTALL_DIR:-"$HOME/.local/share/sanka/cli"}
     bin=${SANKA_BIN_DIR:-"$HOME/.local/bin"}

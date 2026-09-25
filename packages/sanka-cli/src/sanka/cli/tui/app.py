@@ -1689,9 +1689,11 @@ class ExtensionDetailScreen(SankaScreen):
         )
         installed = bool(choice.status.intersection({"installed", "locked", "update_available"}))
         incompatible = "incompatible" in choice.status
-        self.query_one("#install", Button).display = not installed and not incompatible
+        self.query_one("#install", Button).display = (
+            not installed and "disabled" not in choice.status and not incompatible
+        )
         self.query_one("#update", Button).display = "update_available" in choice.status
-        self.query_one("#enable", Button).display = "disabled" in choice.status
+        self.query_one("#enable", Button).display = "disabled" in choice.status and not incompatible
         self.query_one("#disable", Button).display = installed and not incompatible
         self.query_one("#uninstall", Button).display = installed or "disabled" in choice.status
 
@@ -1781,7 +1783,7 @@ class MarketplaceScreen(SankaScreen):
         self.refresh_footer()
         catalog = self.query_one("#catalog", DataTable)
         catalog.cursor_type = "row"
-        catalog.add_columns("Name", "Type", "Targets", "Status", "Version")
+        catalog.add_columns("Name", "Marketplace", "Type", "Targets", "Status", "Version")
         snapshots = self.query_one("#snapshots", DataTable)
         snapshots.cursor_type = "row"
         snapshots.add_columns("Name", "Identity", "Revision", "Trusted")
@@ -1811,12 +1813,14 @@ class MarketplaceScreen(SankaScreen):
 
     def _fill(self) -> None:
         choices = self.sanka.services.extensions("")
+        self._choices = choices
         table = self.query_one("#catalog", DataTable)
         table.clear()
         self._ids = [choice.id for choice in choices]
         for choice in choices:
             table.add_row(
                 choice.label,
+                choice.marketplace,
                 choice.kind,
                 ", ".join(choice.targets) or "-",
                 choice.status_label,
@@ -1855,9 +1859,10 @@ class MarketplaceScreen(SankaScreen):
                 self.app.push_screen(ExtensionDetailScreen(extension_id))
             return
         if event.button.id == "install":
-            extension_id = self._selected()
-            if extension_id:
-                self.run_worker(lambda: self._install(extension_id), thread=True)
+            row = self.query_one("#catalog", DataTable).cursor_row
+            if row is not None and 0 <= row < len(self._choices):
+                choice = self._choices[row]
+                self.run_worker(lambda: self._install(choice), thread=True)
             return
         if event.button.id == "add-snapshot":
             source = self.query_one("#source", Input).value.strip()
@@ -1881,11 +1886,9 @@ class MarketplaceScreen(SankaScreen):
                 callback=lambda yes: self._drop_snapshot(name) if yes else None,
             )
 
-    def _install(self, extension_id: str) -> None:
-        choice = self.sanka.services.extension(extension_id)
-        marketplace = choice.marketplace_identity if choice else None
+    def _install(self, choice: ExtensionChoice) -> None:
         try:
-            message = self.sanka.services.install(extension_id, marketplace)
+            message = self.sanka.services.install(choice.id, choice.marketplace)
         except Exception as error:
             message = str(error)
         self.app.call_from_thread(self._done, message)

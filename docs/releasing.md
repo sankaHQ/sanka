@@ -1,6 +1,17 @@
 # Sanka release procedure
 
-## Published release and 0.3 candidate
+## 0.3.1 fix-forward
+
+Published `sanka-cli==0.3.0` cannot be replaced. Version 0.3.1 fixes TUI
+extension installation when the same ID appears in multiple marketplace snapshots.
+Run the local and package acceptance gates below against the reviewed 0.3.1
+candidate, including an upgrade from published 0.3.0. After merge and separate
+publication authorization, verify that `v0.3.1` and the PyPI version are absent,
+then tag the reviewed merge and dispatch `publish.yml` with confirmation
+`publish-v0.3.1`. Verify public package hashes and clean installation before
+updating Homebrew. Never move a release tag or reupload an existing artifact.
+
+## Historical 0.3.0 release
 
 Published `sanka-cli==0.2.16` is the upgrade baseline. The `0.3.0` candidate
 introduces the Textual terminal UI while keeping JSON and non-interactive output

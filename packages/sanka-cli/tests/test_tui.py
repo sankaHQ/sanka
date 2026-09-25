@@ -677,6 +677,63 @@ def test_extension_detail_prefers_newer_update_over_old_lock(tmp_path: Path) -> 
     assert services.extension(locked.id) == update
 
 
+def test_host_install_resolves_duplicate_marketplace_before_store_selection(tmp_path: Path) -> None:
+    services = HostServices(tmp_path)
+    choice = replace(
+        _choice("sanka/drf-to-fastapi", "0.1.0a18", installed=False, targets=("fastapi",)),
+        marketplace="fastapi-0-1-0a18",
+    )
+    services.extension = lambda _extension_id: choice  # type: ignore[assignment]
+
+    class Store:
+        def add_extension(self, extension_id: str, *, marketplace: str | None) -> Any:
+            assert (extension_id, marketplace) == (choice.id, choice.marketplace)
+            return choice
+
+        def close(self) -> None:
+            pass
+
+    services._store = Store  # type: ignore[method-assign]
+    assert services.install(choice.id) == f"Installed {choice.id} {choice.version}"
+
+
+@pytest.mark.asyncio
+async def test_disabled_extension_enables_from_its_selected_marketplace() -> None:
+    services = FakeServices()
+    custom = replace(
+        _choice("sanka/drf-to-fastapi", "0.1.0a18", installed=False, targets=("fastapi",)),
+        marketplace="fastapi-0-1-0a18",
+        status=frozenset({"available", "disabled"}),
+    )
+    services.catalog = (custom, replace(custom, marketplace="official"))
+    app = SankaApp(services, Session(project_root="/work/demo"), start="extensions")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.click("#details")
+        await pilot.pause()
+        assert not app.screen.query_one("#install", Button).display
+        assert app.screen.query_one("#enable", Button).display
+        await pilot.click("#enable")
+        await app.workers.wait_for_complete()
+        assert services.installed_marketplaces == [custom.marketplace]
+
+
+@pytest.mark.asyncio
+async def test_marketplace_installs_selected_snapshot_when_ids_repeat() -> None:
+    services = FakeServices()
+    custom = replace(
+        _choice("sanka/drf-to-fastapi", "0.1.0a18", installed=False, targets=("fastapi",)),
+        marketplace="fastapi-0-1-0a18",
+    )
+    services.catalog = (custom, replace(custom, marketplace="official"))
+    app = SankaApp(services, Session(project_root="/work/demo"), start="marketplace")
+    async with app.run_test(size=(120, 40)) as pilot:
+        table = app.screen.query_one("#catalog", DataTable)
+        table.move_cursor(row=1)
+        await pilot.click("#install")
+        await app.workers.wait_for_complete()
+        assert services.installed_marketplaces == ["official"]
+
+
 @pytest.mark.asyncio
 async def test_extension_update_appears_after_refresh_and_requires_confirmation() -> None:
     services = FakeServices()
