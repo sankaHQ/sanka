@@ -60,7 +60,7 @@ SDK release order: `sanka-connector-sdk` compatibility dependency, `sanka-extens
 | Manifest model `Provider` / `SystemSupport` | `EndpointSupport` | Source alias; serialized `providers` remains schema-compatible |
 | `Connection` / `SystemConfig`, `Sanka.connect` / `configure_system`, descriptor `provider` / `system_type` / `connection` | `DataEndpoint`, `Sanka.configure_endpoint`, `endpoint_type` / `endpoint_reference` | Preserve constructor/method keywords and properties; conflicting old/new endpoint values fail |
 | Spec `connection` and SDK data fields `provider` | Configured data endpoint and endpoint-type identity | Plan hashes, stored specs, and DTOs must remain stable; versioned schema migration required |
-| `sanka connect SYSTEM_TYPE` | Inspect installed data support | Compatibility command; output explicitly says authentication is not checked |
+| `sanka connect SYSTEM_TYPE` and root data lifecycle commands with `-f` or `--program` / `--migration` | `sanka app <command>` | Hidden compatibility aliases print a deprecation notice; remove only in an announced incompatible CLI release |
 | `sanka code ...` | `sanka functions ...` | Hidden help alias preserves all existing function operations and JSON stdout; no silent reinterpretation |
 | `SANKA_MIGRATE_API_BASE` | Global `--base-url` takes precedence | Existing full service-URL environment setting remains readable |
 | `SANKA_CONNECTOR_*` errors, host thread labels | Extension transport errors | Existing machine clients and diagnostics depend on codes; versioned transition required |

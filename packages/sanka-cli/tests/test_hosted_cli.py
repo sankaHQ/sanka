@@ -15,27 +15,94 @@ from sanka_cli.main import cli
 def test_migration_passthrough_delegates_in_process(runner: CliRunner, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_main(argv, *, api_base=None):
+    def _fake_main(argv, *, api_base=None, product="auto"):
         captured["argv"] = argv
+        captured["product"] = product
         return 0
 
     monkeypatch.setattr("sanka.cli.main", _fake_main)
     result = runner.invoke(cli, ["scan", ".", "--json"])
     assert result.exit_code == 0, result.output
     assert captured["argv"] == ["scan", ".", "--json"]
+    assert captured["product"] == "auto"
 
 
 def test_migration_passthrough_forwards_help(runner: CliRunner, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_main(argv, *, api_base=None):
+    def _fake_main(argv, *, api_base=None, product="auto"):
         captured["argv"] = argv
+        captured["product"] = product
         return 0
 
     monkeypatch.setattr("sanka.cli.main", _fake_main)
     result = runner.invoke(cli, ["plan", "--help"])
     assert result.exit_code == 0, result.output
     assert captured["argv"] == ["plan", "--help"]
+    assert captured["product"] == "code"
+
+
+def test_app_local_routes_to_data_parser(runner: CliRunner, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_main(argv, *, api_base=None, product="auto"):
+        captured["argv"] = argv
+        captured["product"] = product
+        return 0
+
+    monkeypatch.setattr("sanka.cli.main", _fake_main)
+    result = runner.invoke(cli, ["app", "plan", "--file", "custom.yaml"])
+    assert result.exit_code == 0, result.output
+    assert captured == {"argv": ["plan", "--file", "custom.yaml"], "product": "app"}
+
+
+def test_app_help_keeps_code_options_separate(runner: CliRunner, tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "sanka.yaml").write_text("source: example\n", encoding="utf-8")
+
+    app_help = runner.invoke(cli, ["app", "plan", "--help"])
+    assert app_help.exit_code == 0, app_help.output
+    assert "usage: sanka app plan" in app_help.output
+    assert "--to" not in app_help.output
+
+    code_help = runner.invoke(cli, ["plan", "--help"])
+    assert code_help.exit_code == 0, code_help.output
+    assert "--to" in code_help.output
+
+    selected: list[str] = []
+
+    def _fake_main(argv, *, api_base=None, product="auto"):
+        selected.append(product)
+        return 0
+
+    monkeypatch.setattr("sanka.cli.main", _fake_main)
+    code_plan = runner.invoke(cli, ["plan", "--json"])
+    assert code_plan.exit_code == 0, code_plan.output
+    assert selected == ["code"]
+
+
+def test_legacy_file_alias_warns_and_routes_to_app(runner: CliRunner, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_main(argv, *, api_base=None, product="auto"):
+        captured["product"] = product
+        return 0
+
+    monkeypatch.setattr("sanka.cli.main", _fake_main)
+    result = runner.invoke(cli, ["plan", "--file", "custom.yaml"])
+    assert result.exit_code == 0, result.output
+    assert "Deprecated: use `sanka app plan`" in result.output
+    assert captured["product"] == "app"
+
+
+def test_empty_app_selector_never_runs_local(runner: CliRunner, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "sanka.cli.main",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("local run")),
+    )
+    result = runner.invoke(cli, ["app", "apply", "--program", ""])
+    assert result.exit_code == 2
+    assert "require non-empty IDs" in result.output
 
 
 @pytest.mark.parametrize(
@@ -50,8 +117,9 @@ def test_local_passthrough_preserves_double_dash(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_main(argv, *, api_base=None):
+    def _fake_main(argv, *, api_base=None, product="auto"):
         captured["argv"] = argv
+        captured["product"] = product
         return 0
 
     monkeypatch.setattr("sanka.cli.main", _fake_main)
@@ -93,7 +161,7 @@ def test_cloud_plan_loads_credentials(monkeypatch, runner: CliRunner) -> None:
         "sanka_cli.config.get_tokens",
         lambda *_: {"access_token": None, "refresh_token": None},
     )
-    result = runner.invoke(cli, ["plan", "--program", "program-1"])
+    result = runner.invoke(cli, ["app", "plan", "--program", "program-1"])
     assert result.exit_code == 1
     assert "No access token configured" in result.output
 
@@ -140,13 +208,13 @@ def test_cloud_plan_creates_first_program_migration_and_waits(
     monkeypatch.setattr("sanka_cli.runtime.request_json", fake_request)
     result = runner.invoke(
         cli,
-        ["--output", "json", "plan", "--program", "program-1"],
+        ["--output", "json", "app", "plan", "--program", "program-1"],
     )
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["plan"]["plan_hash"] == "sha256:plan-1"
-    assert payload["next"] == ("sanka apply --program program-1 --migration migration-1")
+    assert payload["next"] == ("sanka app apply --program program-1 --migration migration-1")
     assert calls == [
         ("GET", "/v2/migrate/programs/program-1", {}),
         (
@@ -195,6 +263,7 @@ def test_cloud_apply_binds_current_plan_hash(runner: CliRunner, monkeypatch) -> 
         [
             "--output",
             "json",
+            "app",
             "apply",
             "--program",
             "program-1",
@@ -227,7 +296,7 @@ def test_cloud_program_with_multiple_migrations_requires_selector(
         },
     )
 
-    result = runner.invoke(cli, ["apply", "--program", "program-1", "--yes"])
+    result = runner.invoke(cli, ["app", "apply", "--program", "program-1", "--yes"])
 
     assert result.exit_code == 1
     assert "multiple migrations" in result.output
@@ -249,7 +318,7 @@ def test_cloud_status_program_reads_all_linked_migrations(runner: CliRunner, mon
     monkeypatch.setattr("sanka_cli.runtime.request_json", fake_request)
     result = runner.invoke(
         cli,
-        ["--output", "json", "status", "--program", "program-1"],
+        ["--output", "json", "app", "status", "--program", "program-1"],
     )
 
     assert result.exit_code == 0, result.output

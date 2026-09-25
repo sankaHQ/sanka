@@ -368,22 +368,24 @@ def test_spec_lifecycle_uses_the_versioned_json_contract(
 ) -> None:
     _spec_file_path, _db, base = _spec_file(tmp_path)
 
-    assert main(["plan", "--json", *base]) == 0
+    assert main(["plan", "--json", *base], product="app") == 0
     planned = json.loads(capsys.readouterr().out)
     assert planned["schema_version"] == "sanka-cli/v1"
     assert planned["command"] == "plan"
     assert planned["outcome"] == "success"
     assert planned["migration_state"] == "planned"
     plan_hash = planned["data"]["plan_hash"]
+    assert planned["next_actions"][0].startswith("sanka app apply ")
 
-    assert main(["apply", "--json", *base, "--plan-hash", plan_hash]) == 0
+    assert main(["apply", "--json", *base, "--plan-hash", plan_hash], product="app") == 0
     applied = json.loads(capsys.readouterr().out)
     assert applied["schema_version"] == "sanka-cli/v1"
     assert applied["command"] == "apply"
     assert applied["data"]["plan_hash"] == plan_hash
     assert applied["migration_state"] == "applied_not_verified"
+    assert applied["next_actions"][0].startswith("sanka app verify ")
 
-    assert main(["verify", "--json", *base]) == 0
+    assert main(["verify", "--json", *base], product="app") == 0
     verified = json.loads(capsys.readouterr().out)
     assert verified["schema_version"] == "sanka-cli/v1"
     assert verified["command"] == "verify"
@@ -465,7 +467,7 @@ def test_validate_requires_a_plan(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert main(["validate", *base]) == 1
 
     captured = capsys.readouterr()
-    assert "run `sanka plan` first" in captured.err
+    assert "run `sanka app plan` first" in captured.err
     assert not db.exists()
 
 

@@ -23,42 +23,42 @@ _EXECUTION_TERMINAL_STATUSES = {
 }
 
 _CLOUD_HELP: dict[str, str] = {
-    "plan": """Cloud usage: sanka plan --program ID [--migration ID] [--new]
+    "plan": """Cloud usage: sanka app plan --program ID [--migration ID] [--new]
        [--sample-size N] [--force] [--no-wait] [--timeout SECONDS]
 
-Without --program or --migration, this command runs locally.
+Without --program or --migration, this command uses a local sanka.yaml.
 When a Program has no migration, plan creates one. --new always creates one.
 """,
-    "apply": """Cloud usage: sanka apply --program ID [--migration ID] [--yes]
+    "apply": """Cloud usage: sanka app apply --program ID [--migration ID] [--yes]
        [--plan-hash HASH] [--route KEY ...] [--wait] [--timeout SECONDS]
 
-Without --program or --migration, this command runs locally.
+Without --program or --migration, this command uses a local sanka.yaml.
 Cloud apply fetches the reviewable plan and binds execution to its exact hash.
 """,
-    "status": """Cloud usage: sanka status --program ID [--migration ID]
-       sanka status --migration ID
+    "status": """Cloud usage: sanka app status --program ID [--migration ID]
+       sanka app status --migration ID
 
-Without --program or --migration, this command runs locally.
+Without --program or --migration, this command uses a local sanka.yaml.
 """,
-    "verify": """Cloud usage: sanka verify --program ID [--migration ID]
-       sanka verify --migration ID
+    "verify": """Cloud usage: sanka app verify --program ID [--migration ID]
+       sanka app verify --migration ID
 
-Without --program or --migration, this command runs locally.
+Without --program or --migration, this command uses a local sanka.yaml.
 """,
-    "repair": """Usage: sanka repair --program ID [--migration ID] [--yes]
+    "repair": """Usage: sanka app repair --program ID [--migration ID] [--yes]
        [--plan-hash HASH] [--wait] [--timeout SECONDS]
 """,
-    "review": """Usage: sanka review --program ID [--migration ID]
-       sanka review --migration ID
+    "review": """Usage: sanka app review --program ID [--migration ID]
+       sanka app review --migration ID
 """,
-    "pause": """Usage: sanka pause --program ID [--migration ID]
-       sanka pause --migration ID
+    "pause": """Usage: sanka app pause --program ID [--migration ID]
+       sanka app pause --migration ID
 """,
-    "resume": """Usage: sanka resume --program ID [--migration ID]
+    "resume": """Usage: sanka app resume --program ID [--migration ID]
        [--plan-hash HASH] [--wait] [--timeout SECONDS]
 """,
-    "cancel": """Usage: sanka cancel --program ID [--migration ID] [--yes]
-       sanka cancel --migration ID [--yes]
+    "cancel": """Usage: sanka app cancel --program ID [--migration ID] [--yes]
+       sanka app cancel --migration ID [--yes]
 """,
 }
 
@@ -195,7 +195,7 @@ def _parse_options(command: str, args: tuple[str, ...]) -> CloudOptions:
             continue
         raise click.ClickException(
             f"Unknown cloud option or argument: {raw}. "
-            f"Run `sanka {command} --program ID --help` for cloud usage."
+            f"Run `sanka app {command} --program ID --help` for cloud usage."
         )
     return options
 
@@ -285,7 +285,8 @@ def _resolve_migration(
 
     if not migration_ids:
         raise click.ClickException(
-            f"Program {program_id} has no migration. Run `sanka plan --program {program_id}` first."
+            f"Program {program_id} has no migration. "
+            f"Run `sanka app plan --program {program_id}` first."
         )
     if len(migration_ids) > 1:
         choices = ", ".join(migration_ids)
@@ -316,7 +317,7 @@ def _plan(
             {
                 "program_id": program_id,
                 "migration": migration,
-                "next": f"sanka status --migration {migration_id}",
+                "next": f"sanka app status --migration {migration_id}",
             },
             state,
         )
@@ -331,7 +332,7 @@ def _plan(
     if migration.get("status") != "requires_approval":
         raise click.ClickException(
             f"Cloud planning ended with status {migration.get('status')}. "
-            f"Inspect it with `sanka status --migration {migration_id}`."
+            f"Inspect it with `sanka app status --migration {migration_id}`."
         )
     plan = _get_plan(state, migration_id)
     runtime.emit_payload(
@@ -408,7 +409,7 @@ def _hash_bound_action(
         {
             "program_id": program_id,
             "migration": result,
-            "next": f"sanka status --migration {migration_id}",
+            "next": f"sanka app status --migration {migration_id}",
         },
         state,
     )
@@ -487,7 +488,7 @@ def _poll_migration(
         if time.monotonic() >= deadline:
             raise click.ClickException(
                 f"Timed out waiting for migration {migration_id}. "
-                f"Continue with `sanka status --migration {migration_id}`."
+                f"Continue with `sanka app status --migration {migration_id}`."
             )
         time.sleep(2)
 
@@ -508,5 +509,5 @@ def _idempotency_headers() -> dict[str, str]:
 
 def _next_apply(program_id: str | None, migration_id: str) -> str:
     if program_id:
-        return f"sanka apply --program {program_id} --migration {migration_id}"
-    return f"sanka apply --migration {migration_id}"
+        return f"sanka app apply --program {program_id} --migration {migration_id}"
+    return f"sanka app apply --migration {migration_id}"

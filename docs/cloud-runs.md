@@ -249,9 +249,10 @@ sanka verify --cloud --workspace 10483816 --run EXECUTION_RUN_ID
 `scan` runs **Scan + Plan** together and stops for approval. `apply` runs
 **Apply + Test + deterministic Verify** together against that approved source and
 plan. `plan`, `test`, and `verify` read the corresponding operation's evidence;
-they never start another paid operation. Without `--cloud`, local behavior is
-unchanged. Existing data migration commands with `--program` are separate and
-cannot be combined with these Code flags. Sanka Fix remains an optional follow-up
+they never start another paid operation. Without `--cloud`, these root commands
+use the local Code lifecycle. Hosted App data migrations use
+`sanka app <command> --program ID` or `sanka app <command> --migration ID` and
+cannot be combined with Code flags. Sanka Fix remains an optional follow-up
 through `sanka fix --cloud --run EXECUTION_RUN_ID` with its own consent and budget.
 
 ### Source selection

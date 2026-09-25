@@ -3,10 +3,10 @@
 
 Spec-driven flow (migration-as-code)::
 
-    sanka plan     -f sanka.yaml
-    sanka validate -f sanka.yaml
-    sanka apply --plan-hash sha256:... -f sanka.yaml
-    sanka verify   -f sanka.yaml
+    sanka app plan     -f sanka.yaml
+    sanka app validate -f sanka.yaml
+    sanka app apply --plan-hash sha256:... -f sanka.yaml
+    sanka app verify   -f sanka.yaml
 
 ``validate`` is write-free by construction: it samples live source records
 through the reviewed plan and reports rejects without ever resolving the
@@ -14,8 +14,8 @@ destination data extension, exiting non-zero when invalid records exist.
 
 Shorthand and provider selection::
 
-    sanka connect markdown
-    sanka migrate ./content sqlite://content.db
+    sanka app connect markdown
+    sanka app migrate ./content sqlite://content.db
 
 Django REST Framework to FastAPI compatibility flow::
 
@@ -114,13 +114,23 @@ class _CliArgumentParser(argparse.ArgumentParser):
         super().error(message)
 
 
-def main(argv: list[str] | None = None, *, api_base: str | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_base: str | None = None,
+    product: str = "auto",
+) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     json_errors = "--json" in arguments or "--compact-dsl" in arguments
-    parser = _build_parser(json_errors=json_errors)
+    parser = (
+        _build_app_parser(json_errors=json_errors)
+        if product == "app"
+        else _build_parser(json_errors=json_errors)
+    )
     try:
         args = parser.parse_args(arguments)
         args.api_base = api_base
+        args.product = product
     except CliUsageError as error:
         command = arguments[0] if arguments and arguments[0] in SDK_COMMANDS else "sanka"
         return _print_cli_error(
@@ -677,6 +687,66 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     return parser
 
 
+def _build_app_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
+    parser = _CliArgumentParser(prog="sanka app", json_errors=json_errors)
+    parser.set_defaults(command=None)
+    commands = parser.add_subparsers(dest="command")
+
+    def common(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument("-f", "--file", default=DEFAULT_SPEC_FILE, help="migration spec YAML")
+        sub.add_argument("--state", default=DEFAULT_STATE_FILE, help="run-state SQLite file")
+
+    def output(sub: argparse.ArgumentParser) -> None:
+        formats = sub.add_mutually_exclusive_group()
+        formats.add_argument("--json", action="store_true", help="print JSON")
+        formats.add_argument("--compact-dsl", action="store_true", help="print a compact result")
+        sub.add_argument("--no-color", action="store_true")
+        detail = sub.add_mutually_exclusive_group()
+        detail.add_argument("--quiet", action="store_true")
+        detail.add_argument("--verbose", action="store_true")
+
+    plan = commands.add_parser("plan", help="create a reviewable data migration plan")
+    common(plan)
+    output(plan)
+    plan.set_defaults(handler=_cmd_plan)
+
+    validate = commands.add_parser("validate", help="validate source records without writing")
+    common(validate)
+    validate.add_argument("--sample", type=int, default=DEFAULT_VALIDATION_SAMPLE_SIZE)
+    validate.add_argument("--full", action="store_true")
+    validate.add_argument("--json", action="store_true")
+    validate.set_defaults(handler=_cmd_validate)
+
+    apply_ = commands.add_parser("apply", help="apply the exact reviewed plan")
+    common(apply_)
+    apply_.add_argument("--plan-hash", required=True)
+    output(apply_)
+    apply_.set_defaults(handler=_cmd_apply)
+
+    status = commands.add_parser("status", help="show run and ledger status")
+    common(status)
+    status.set_defaults(handler=_cmd_status)
+
+    verify = commands.add_parser("verify", help="verify destination data against the source")
+    common(verify)
+    output(verify)
+    verify.set_defaults(handler=_cmd_verify)
+
+    migrate = commands.add_parser("migrate", help="plan, apply, and verify in one run")
+    migrate.add_argument("source")
+    migrate.add_argument("target")
+    migrate.add_argument("--state", default=DEFAULT_STATE_FILE)
+    migrate.set_defaults(handler=_cmd_migrate)
+
+    connect = commands.add_parser("connect", help="inspect installed data extension support")
+    connect.add_argument("provider")
+    connect.add_argument("--json", action="store_true")
+    connect.set_defaults(handler=_cmd_connect)
+
+    _set_json_errors(parser, json_errors)
+    return parser
+
+
 def _set_json_errors(parser: argparse.ArgumentParser, enabled: bool) -> None:
     if isinstance(parser, _CliArgumentParser):
         parser.json_errors = enabled
@@ -860,6 +930,8 @@ _TUI_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify", "status", 
 
 
 def _use_local_tui(args: argparse.Namespace) -> bool:
+    if getattr(args, "product", "auto") == "app":
+        return False
     if args.command not in _TUI_COMMANDS:
         return False
     if getattr(args, "json", False) or getattr(args, "compact_dsl", False):
@@ -950,6 +1022,10 @@ def _application_lifecycle(args: argparse.Namespace) -> ApplicationLifecycle:
 
 
 def _application_lifecycle_requested(args: argparse.Namespace) -> bool:
+    if getattr(args, "product", "auto") == "code":
+        return True
+    if getattr(args, "product", "auto") == "app":
+        return False
     return args.file == DEFAULT_SPEC_FILE and not Path(args.file).is_file()
 
 
@@ -1021,6 +1097,7 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
                     shlex.join(
                         [
                             "sanka",
+                            "app",
                             "apply",
                             "--file",
                             str(args.file),
@@ -1044,7 +1121,7 @@ async def _cmd_validate(args: argparse.Namespace) -> int:
     run_id = engine.create(spec)
     run = engine.store.get_run(run_id)
     if run.plan_json is None:
-        raise ExecutionError("no plan for this spec yet; run `sanka plan` first")
+        raise ExecutionError("no plan for this spec yet; run `sanka app plan` first")
     payload = await engine.validate(run_id, sample_size=args.sample, full=args.full)
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -1071,7 +1148,7 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
     run_id = engine.create(spec)
     run = engine.store.get_run(run_id)
     if run.plan_json is None:
-        raise ExecutionError("no plan for this spec yet; run `sanka plan` first")
+        raise ExecutionError("no plan for this spec yet; run `sanka app plan` first")
     await engine.apply(run_id, plan_hash=args.plan_hash)
     if args.json or getattr(args, "compact_dsl", False):
         _print_result(
@@ -1088,6 +1165,7 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
                     shlex.join(
                         [
                             "sanka",
+                            "app",
                             "verify",
                             "--file",
                             str(args.file),
@@ -1304,7 +1382,7 @@ def _print_plan(run_id: str, plan: MigrationPlan) -> None:
     if plan.candidate_hash:
         print(f"candidate hash: {plan.candidate_hash}")
     print(f"plan hash: {plan.plan_hash}")
-    print("Review the plan, then run `sanka apply --plan-hash <hash>`.")
+    print("Review the plan, then run `sanka app apply --plan-hash <hash>`.")
 
 
 def _validation_invalid(payload: dict[str, Any]) -> bool:
