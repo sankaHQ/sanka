@@ -3,13 +3,13 @@
 ## 0.3.2 candidate
 
 The 0.3.2 source changes the embedded application data SDK facade to
-`sanka_extensions.app` and removes current data-package examples. Publish the
-reviewed Extension SDK a8 first, then pin this CLI's embedded source to that
-immutable Extensions commit. The default marketplace revision must advance to
-the reviewed code-only catalog commit before publication; old project locks
-retain their existing snapshots. Verify the built CLI shows no retired data
-packages in a fresh official catalog, while an existing lock still resolves its
-pinned artifacts. Publication requires separate authorization.
+`sanka_extensions.app` and removes current data-package examples. Its embedded
+SDK matches the immutable source commit in merged Extensions PR #138, and its
+default marketplace revision pins that PR's code-only catalog merge. Old project
+locks retain their existing snapshots. Publish the reviewed Extension SDK a8
+and marketplace a33 before publishing CLI 0.3.2. Verify the built CLI shows no
+retired data packages in a fresh official catalog, while an existing lock still
+resolves its pinned artifacts. Publication requires separate authorization.
 
 ## 0.3.1 fix-forward
 
