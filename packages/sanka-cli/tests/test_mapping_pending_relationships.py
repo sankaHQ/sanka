@@ -15,7 +15,7 @@ from sanka.runtime.mapping import (
     resolve_destination_record_ids,
     retry_pending_relationships,
 )
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     BatchRelationshipWriteResult,
     Credentials,
     Inventory,
@@ -24,7 +24,7 @@ from sanka_extensions.data import (
     WriteOptions,
     WriteResult,
 )
-from sanka_extensions.data.records import BatchRelationshipStatus
+from sanka_extensions.app.records import BatchRelationshipStatus
 
 _CREDENTIALS = Credentials(provider="stub-crm")
 

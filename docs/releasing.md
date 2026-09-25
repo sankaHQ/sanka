@@ -1,5 +1,16 @@
 # Sanka release procedure
 
+## 0.3.2 candidate
+
+The 0.3.2 source changes the embedded application data SDK facade to
+`sanka_extensions.app` and removes current data-package examples. Publish the
+reviewed Extension SDK a8 first, then pin this CLI's embedded source to that
+immutable Extensions commit. The default marketplace revision must advance to
+the reviewed code-only catalog commit before publication; old project locks
+retain their existing snapshots. Verify the built CLI shows no retired data
+packages in a fresh official catalog, while an existing lock still resolves its
+pinned artifacts. Publication requires separate authorization.
+
 ## 0.3.1 fix-forward
 
 Published `sanka-cli==0.3.0` cannot be replaced. Version 0.3.1 fixes TUI
@@ -88,9 +99,10 @@ that reviewed Extensions package before publishing CLI 0.3.0. Ordinary source
 CI does not require this new public release while both PRs are under review.
 These checks prove real package loading and planning, not provider execution.
 
-Also clean-install the candidate, resolve the official public marketplace, install
-Data/Code extensions, exercise a bounded data plan and code scan, and verify that a
-catalog refresh does not rewrite project locks. Do not run a full local migration.
+Also clean-install the candidate, resolve the official public marketplace,
+install a code extension, exercise a code scan, and verify that a catalog
+refresh does not rewrite project locks. Preserve a historical data lock as a
+separate compatibility check. Do not run a full local migration.
 
 ## Publication
 

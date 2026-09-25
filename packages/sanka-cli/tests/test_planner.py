@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sanka.runtime.mapping.model import MigrationMappingField, ValueMapEntry
 from sanka.runtime.planner import MigrationPlan, RoutePlan, build_plan
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     FieldSchema,
     Inventory,
     ObjectSchema,

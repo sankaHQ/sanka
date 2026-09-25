@@ -40,7 +40,7 @@ from sanka.runtime.mapping import (
     pending_relationship_key,
 )
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,

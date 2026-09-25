@@ -9,7 +9,7 @@ from sanka.runtime.engine import ExecutionError, MigrationEngine
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     Credentials,
     ExtensionRegistration,
     FieldSchema,

@@ -8,8 +8,8 @@ import pytest
 from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions import store as extension_store
 from sanka.runtime.registry import ExtensionRegistry, UnknownEndpointError
-from sanka_extensions.data import ExtensionRegistration
-from sanka_extensions.data.protocols import DataReader
+from sanka_extensions.app import ExtensionRegistration
+from sanka_extensions.app.protocols import DataReader
 
 SOURCE = cast(DataReader, object())
 

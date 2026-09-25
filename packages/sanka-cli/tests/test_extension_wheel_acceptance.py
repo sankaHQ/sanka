@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import sysconfig
@@ -19,15 +18,6 @@ from sanka.runtime.extensions.store import ExtensionStore
 
 EXTENSION_ID = "sanka/drf-to-fastapi"
 EXTENSION_MODULES = ("sanka_extension_sdk", "sanka_extension_drf_to_fastapi")
-CONNECTOR_IDS = ("sanka/markdown", "sanka/sqlite")
-CONNECTOR_MODULES = ("sanka_connector_markdown", "sanka_connector_sqlite")
-ALL_CONNECTOR_IDS = (
-    "sanka/clickhouse",
-    "sanka/csv",
-    "sanka/markdown",
-    "sanka/postgres",
-    "sanka/sqlite",
-)
 
 
 def _site_packages(environment: Path) -> Path:
@@ -308,89 +298,4 @@ def test_default_extension_full_chain_from_wheels(
             "outcome"
         ]
         == "success"
-    )
-
-
-def test_markdown_to_sqlite_lifecycle(
-    tmp_path: Path,
-    extension_release: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    project.chmod(0o700)
-    content = project / "content"
-    content.mkdir()
-    (content / "a.md").write_text(
-        "---\ntitle: A\n---\nAlpha body\n",
-        encoding="utf-8",
-    )
-    (content / "b.md").write_text(
-        "---\ntitle: B\n---\nBeta body\n",
-        encoding="utf-8",
-    )
-    destination = project / "destination.db"
-    spec = project / "sanka.yaml"
-    spec.write_text(
-        f"source:\n  type: markdown\n  connection: {content}\n"
-        f"target:\n  type: sqlite\n  connection: {destination}\n",
-        encoding="utf-8",
-    )
-    state = project / "state.db"
-    environment = create_test_environment(
-        tmp_path,
-        extension_release,
-        project,
-        extension_ids=CONNECTOR_IDS,
-    )
-    monkeypatch.chdir(project)
-
-    for extension_id in CONNECTOR_IDS:
-        run_json(environment, "extension", "add", extension_id, "--json")
-
-    site_packages = _site_packages(environment)
-    assert all(not (site_packages / module).exists() for module in CONNECTOR_MODULES)
-    assert all(module not in sys.modules for module in CONNECTOR_MODULES)
-
-    base = ("-f", str(spec), "--state", str(state), "--json")
-    plan = run_json(environment, "plan", *base)
-    plan_hash = cast(dict[str, object], plan["data"])["plan_hash"]
-    run_json(environment, "apply", *base, "--plan-hash", str(plan_hash))
-    verified = run_json(environment, "verify", *base)
-
-    assert verified["outcome"] == "success"
-    assert all(module not in sys.modules for module in CONNECTOR_MODULES)
-    with sqlite3.connect(destination) as database:
-        rows = database.execute(
-            "SELECT path, slug, title, content FROM documents ORDER BY path"
-        ).fetchall()
-    assert rows == [
-        ("a.md", "a", "A", "Alpha body\n"),
-        ("b.md", "b", "B", "Beta body\n"),
-    ]
-
-
-def test_all_connector_wheel_closures_install(
-    tmp_path: Path,
-    extension_release: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir(mode=0o700)
-    environment = create_test_environment(
-        tmp_path,
-        extension_release,
-        project,
-        extension_ids=ALL_CONNECTOR_IDS,
-    )
-    monkeypatch.chdir(project)
-
-    for extension_id in ALL_CONNECTOR_IDS:
-        run_json(environment, "extension", "add", extension_id, "--json")
-
-    listed = run_json(environment, "extension", "list", "--json")
-    records = {record["id"]: record for record in cast(dict[str, Any], listed["data"])["records"]}
-    assert all(
-        records[extension_id]["status"] == ["available", "installed", "locked"]
-        for extension_id in ALL_CONNECTOR_IDS
     )

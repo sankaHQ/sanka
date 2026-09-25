@@ -15,7 +15,7 @@ from sanka.runtime.planner import MigrationPlan
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec, SpecError
 from sanka.runtime.state import RunStatus, SqliteStateStore
-from sanka_extensions.data import CredentialProvider
+from sanka_extensions.app import CredentialProvider
 
 
 @dataclass(frozen=True, slots=True, kw_only=True, init=False)

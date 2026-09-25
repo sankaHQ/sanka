@@ -15,7 +15,7 @@ from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-from sanka_extensions.data import (
+from sanka_extensions.app import (
     ENTRY_POINT_GROUP,
     BatchRelationshipWriteResult,
     BatchWriteInput,

@@ -53,7 +53,7 @@ from sanka.runtime.extensions.model import (
 )
 from sanka.runtime.hashing import content_hash
 from sanka_cli import __version__
-from sanka_extensions.data import ENTRY_POINT_GROUP, ExtensionRegistration
+from sanka_extensions.app import ENTRY_POINT_GROUP, ExtensionRegistration
 
 OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"

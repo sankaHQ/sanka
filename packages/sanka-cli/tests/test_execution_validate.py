@@ -35,8 +35,8 @@ from sanka.runtime.mapping import MappingError, MigrationMappingField, mapping_g
 from sanka.runtime.registry import ExtensionRegistry
 from sanka.runtime.spec import EndpointSpec, MigrationSpec
 from sanka.runtime.state import SqliteStateStore
-from sanka_extensions.data import Credentials, RecordPage, SourceFilter, SourceObject
-from sanka_extensions.data.protocols import DataReader, DataWriter
+from sanka_extensions.app import Credentials, RecordPage, SourceFilter, SourceObject
+from sanka_extensions.app.protocols import DataReader, DataWriter
 
 pytestmark = pytest.mark.usefixtures("trusted_connector_discovery")
 

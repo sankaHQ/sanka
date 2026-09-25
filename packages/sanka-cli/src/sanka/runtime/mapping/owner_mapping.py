@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from sanka.runtime.mapping.errors import MappingError
 from sanka.runtime.mapping.model import MigrationMappingField
-from sanka_extensions.data import OwnerProfile
+from sanka_extensions.app import OwnerProfile
 
 MissingOwnerPolicy = Literal["block", "leave_empty", "fallback"]
 

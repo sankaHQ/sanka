@@ -70,7 +70,7 @@ from sanka.runtime.mapping.record_mapping import (
     mapping_group_key,
     mapping_route_manifest,
 )
-from sanka_extensions.data import SourceFilter
+from sanka_extensions.app import SourceFilter
 
 HEARTBEAT_FRESHNESS = timedelta(minutes=5)
 """An execution job counts as active while its heartbeat is this recent."""
