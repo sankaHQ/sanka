@@ -132,11 +132,6 @@ def _run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_boundaries_pass_on_repo() -> None:
-    result = _run("check_import_boundaries.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 def test_boundaries_catch_canonical_sdk_importing_runtime_namespace() -> None:
     fixture = ROOT / "tests" / "fixtures" / "sdk_boundary_violation"
     result = _run("check_import_boundaries.py", str(fixture))
@@ -174,16 +169,6 @@ def test_boundaries_catch_target_logic_in_the_runtime(tmp_path: Path) -> None:
     assert "target-specific" in result.stdout
 
 
-def test_license_headers_pass_on_repo() -> None:
-    result = _run("check_license_headers.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_public_naming_passes_on_repo() -> None:
-    result = _run("check_public_naming.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 def test_public_naming_finds_mixed_case_retired_names(
     tmp_path: Path,
     monkeypatch,
@@ -195,11 +180,6 @@ def test_public_naming_finds_mixed_case_retired_names(
     assert check_public_naming._tree_references(check_public_naming.RETIRED_TOKEN) == [
         "content: active.md"
     ]
-
-
-def test_dependency_licenses_pass_on_workspace() -> None:
-    result = _run("check_dependency_licenses.py")
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,18 @@
 UV ?= uv
+# Bounded pytest-xdist workers for the subprocess-heavy suites; never -n auto.
+TEST_WORKERS ?= 4
+ifeq ($(strip $(TEST_WORKERS)),)
+$(error TEST_WORKERS must be 1, 2, 3, or 4)
+endif
+ifneq ($(filter $(TEST_WORKERS),1 2 3 4),$(TEST_WORKERS))
+$(error TEST_WORKERS must be 1, 2, 3, or 4)
+endif
+PYTEST_IGNORE = \
+	--ignore=packages/sanka-cli/tests/test_extension_wheel_acceptance.py \
+	--ignore=packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
+	--ignore=packages/sanka-cli/tests/test_business_flow_extension_acceptance.py
 
-.PHONY: check lint format typecheck test boundaries headers naming licenses connector-sdk-sync build-release quickstart-acceptance flow-wheel-acceptance
+.PHONY: check lint format typecheck test test-slow boundaries headers naming licenses connector-sdk-sync build-release quickstart-acceptance flow-wheel-acceptance
 
 check: lint typecheck test boundaries headers naming licenses connector-sdk-sync
 
@@ -15,11 +27,12 @@ format:
 typecheck:
 	$(UV) run mypy packages scripts
 
+# Tests marked slow build real extension environments; CI runs them with test-slow.
 test:
-	$(UV) run -- python -m pytest \
-		--ignore=packages/sanka-cli/tests/test_extension_wheel_acceptance.py \
-		--ignore=packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py \
-		--ignore=packages/sanka-cli/tests/test_business_flow_extension_acceptance.py
+	$(UV) run -- python -m pytest -n $(TEST_WORKERS) -m "not slow" $(PYTEST_IGNORE)
+
+test-slow:
+	$(UV) run -- python -m pytest -n $(TEST_WORKERS) -m slow $(PYTEST_IGNORE)
 
 boundaries:
 	$(UV) run python scripts/check_import_boundaries.py
@@ -49,7 +62,7 @@ quickstart-acceptance:
 
 # Run after build-release; verify original v1/v2/v3 wheels and a7 v4 generation.
 flow-wheel-acceptance:
-	$(UV) run python scripts/check_flow_wheels.py --cli-wheel dist/sanka_cli-*-py3-none-any.whl
+	$(UV) run python scripts/check_flow_wheels.py --cli-wheel dist/sanka_cli-*-py3-none-any.whl --workers $(TEST_WORKERS)
 
 .PHONY: business-flow-acceptance
 # Publication uses public assets; local PR review can supply the exact candidate.

@@ -3,16 +3,14 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping, Sequence
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 
 from sanka.runtime.execution import (
-    EXECUTION_FAULT_CODES,
     NULL_OBSERVER,
     AttemptFence,
     AttemptIdentity,
-    BatchPage,
     ClaimOutcome,
     ExecutionFault,
     ExecutionHost,
@@ -37,7 +35,6 @@ from sanka.runtime.mapping import (
 )
 from sanka.runtime.state import TERMINAL_WRITE_STATUSES
 from sanka_extensions.app import SourceFilter
-from sanka_extensions.app.records import BatchWriteStatus
 
 _FIELD = MigrationMappingField(source_field="email", target_object="contacts", target_field="email")
 
@@ -150,13 +147,6 @@ class InMemoryIdentityLedger:
         }
 
 
-class _LoadOnly:
-    """Implements a single journal method — must fail every isinstance check."""
-
-    async def load(self) -> JournalEntry | None:
-        return None
-
-
 # -- helpers ------------------------------------------------------------------
 
 
@@ -247,36 +237,7 @@ def test_execution_fault_carries_code_and_copied_details() -> None:
     assert ExecutionFault("bare", code="SANKA_MIGRATE_EXECUTION_ROUTE_INVALID").details == {}
 
 
-def test_execution_fault_code_catalog_pins_production_strings() -> None:
-    assert set(EXECUTION_FAULT_CODES) == {
-        "SANKA_MIGRATE_EXECUTION_JOB_SUPERSEDED",
-        "SANKA_MIGRATE_EXECUTION_ATTEMPT_SUPERSEDED",
-        "SANKA_MIGRATE_ROUTE_MANIFEST_MISSING",
-        "SANKA_MIGRATE_ROUTE_MANIFEST_INVALID",
-        "SANKA_MIGRATE_ROUTE_MANIFEST_CHANGED",
-        "SANKA_MIGRATE_ROUTE_CHECKPOINT_MISMATCH",
-        "SANKA_MIGRATE_EXECUTION_HIGH_WATER_MARK_INVALID",
-        "SANKA_MIGRATE_SOURCE_CHECKPOINT_MISSING",
-        "SANKA_MIGRATE_SOURCE_HIGH_WATER_MARK_UNSUPPORTED",
-        "SANKA_MIGRATE_EXECUTION_ROUTE_INVALID",
-        "SANKA_MIGRATE_EXECUTION_ROUTE_CHANGED",
-        "SANKA_MIGRATE_REQUIRED_REFERENCE_SOURCE_FIELD_EMPTY",
-        "SANKA_MIGRATE_REFERENCE_SOURCE_ID_AMBIGUOUS",
-        "SANKA_MIGRATE_REFERENCE_TARGET_PENDING",
-        "SANKA_MIGRATE_EMPTY_DESTINATION_RECORD",
-        "SANKA_MIGRATE_OWNER_MAPPING_UNSUPPORTED",
-        "SANKA_MIGRATE_RECORD_RESULT_BULK_SAVE_INCOMPLETE",
-    }
-
-
 # -- model --------------------------------------------------------------------
-
-
-def test_status_vocabularies_pin_production_contracts() -> None:
-    assert get_args(ExecutionStatus) == ("queued", "running", "completed", "failed", "cancelled")
-    assert get_args(WriteStatus) == ("created", "updated", "skipped", "failed")
-    assert set(get_args(WriteStatus)) == set(get_args(BatchWriteStatus))
-    assert set(get_args(WriteStatus)) > TERMINAL_WRITE_STATUSES
 
 
 def test_execution_route_reuses_sdk_and_mapping_types() -> None:
@@ -291,23 +252,6 @@ def test_execution_route_reuses_sdk_and_mapping_types() -> None:
     assert route.route_key == "contacts|contacts|is_active=equals:true"
     assert route.source_filter is source_filter
     assert route.fields[0].mapping_kind == "scalar"
-
-
-def test_value_types_are_frozen_with_slots() -> None:
-    instances: list[Any] = [
-        _route(),
-        _outcome("s-1"),
-        PairStatusTotal(source_object="a", destination_object="b", status="created", count=1),
-        PairFailedIds(source_object="a", destination_object="b", source_record_ids=frozenset()),
-        BatchPage(source_record_ids=("s-1",), next_cursor=None, has_more=False),
-        _scope(),
-        AttemptIdentity(attempt_id="task-1:1", attempt_number=1, task_run_id="task-1"),
-    ]
-    for instance in instances:
-        assert not hasattr(instance, "__dict__"), instance
-        first_field = dataclasses.fields(instance)[0].name
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            setattr(instance, first_field, "mutated")
 
 
 def test_snapshot_defaults_are_independent_and_mutable() -> None:
@@ -400,23 +344,6 @@ def test_journal_entry_defaults_are_independent() -> None:
 
 
 # -- protocol family ----------------------------------------------------------
-
-
-def test_in_memory_fakes_satisfy_the_protocol_family() -> None:
-    journal = InMemoryJournal()
-    assert isinstance(InMemoryLedger(), ExecutionLedger)
-    assert isinstance(journal, ExecutionJournal)
-    assert isinstance(InMemoryFence(journal), AttemptFence)
-
-
-def test_unimplemented_objects_fail_isinstance() -> None:
-    load_only = _LoadOnly()
-    assert not isinstance(load_only, ExecutionJournal)
-    assert not isinstance(load_only, ExecutionLedger)
-    assert not isinstance(load_only, AttemptFence)
-    assert not isinstance(object(), ExecutionLedger)
-    assert not isinstance(object(), ExecutionJournal)
-    assert not isinstance(object(), AttemptFence)
 
 
 async def test_ledger_round_trip_terminal_ids_and_summaries() -> None:

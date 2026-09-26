@@ -46,6 +46,7 @@ dev = [
   "tortoise-orm>=1.1,<2",
   "aiosqlite>=0.20,<1",
   "sqlalchemy>=2.0,<3",
+  "pytest-xdist>=3.6",
 ]
 
 [tool.ruff]
@@ -92,4 +93,7 @@ asyncio_mode = "auto"
 testpaths = [
   "packages/sanka-cli/tests",
   "tests",
+]
+markers = [
+  "slow: builds a real extension environment (venv + pip); run by `make test-slow` and CI",
 ]

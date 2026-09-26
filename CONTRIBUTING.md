@@ -94,6 +94,7 @@ to provide their documented local behavior.
 ```bash
 uv sync --all-packages
 make check     # lint + typecheck + tests + boundaries + headers
+make test-slow # tests that build real extension environments (CI runs them too)
 make format    # auto-format
 ```
 
