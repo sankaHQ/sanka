@@ -26,6 +26,7 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --all-packages --all-extras
       - run: make check
+      - run: make test-slow
       - run: make build-release
       - run: make flow-wheel-acceptance
       - run: make quickstart-acceptance

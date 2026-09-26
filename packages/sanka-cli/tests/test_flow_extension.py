@@ -121,6 +121,7 @@ def generate(runner: FlowExtensionRunner) -> BlueprintInput:
     )
 
 
+@pytest.mark.slow
 def test_flow_runs_verified_wheel_in_private_env_without_inheriting_credentials(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -158,6 +159,7 @@ def test_flow_runs_verified_wheel_in_private_env_without_inheriting_credentials(
         "print('{\"duplicate\":true}')",
     ],
 )
+@pytest.mark.slow
 def test_changed_or_uncorrelated_results_are_never_accepted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -169,6 +171,7 @@ def test_changed_or_uncorrelated_results_are_never_accepted(
     assert raised.value.code == "SANKA_FLOW_EXTENSION_PROTOCOL"
 
 
+@pytest.mark.slow
 def test_real_generator_deadline_is_enforced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -178,6 +181,7 @@ def test_real_generator_deadline_is_enforced(
     assert raised.value.code == "SANKA_EXTENSION_TIMEOUT"
 
 
+@pytest.mark.slow
 def test_unsupported_type_is_rejected_before_process_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -222,6 +226,7 @@ def test_flow_manifest_rejects_unsupported_protocol_or_capabilities(
     assert raised.value.code == "SANKA_EXTENSION_MANIFEST_INVALID"
 
 
+@pytest.mark.slow
 def test_missing_released_sdk_fails_before_any_extension_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -242,6 +247,7 @@ def test_missing_released_sdk_fails_before_any_extension_execution(
     assert raised.value.code == "SANKA_FLOW_SDK_REQUIRED"
 
 
+@pytest.mark.slow
 def test_generation_rejects_an_environment_changed_by_its_executable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -260,6 +266,7 @@ def test_generation_rejects_an_environment_changed_by_its_executable(
         {"kind": "migration"},
     ],
 )
+@pytest.mark.slow
 def test_flow_lock_cannot_reinterpret_a_code_protocol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

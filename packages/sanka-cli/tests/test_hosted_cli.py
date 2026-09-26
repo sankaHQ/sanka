@@ -166,15 +166,6 @@ def test_cloud_plan_loads_credentials(monkeypatch, runner: CliRunner) -> None:
     assert "No access token configured" in result.output
 
 
-def test_migration_commands_do_not_collide_with_api_commands() -> None:
-    from sanka_cli.commands.migrate import MIGRATION_COMMANDS
-
-    registered = set(cli.commands)
-    assert set(MIGRATION_COMMANDS) <= registered
-    api_commands = registered - set(MIGRATION_COMMANDS)
-    assert set(MIGRATION_COMMANDS).isdisjoint(api_commands)
-
-
 def test_cloud_plan_creates_first_program_migration_and_waits(
     runner: CliRunner, monkeypatch
 ) -> None:

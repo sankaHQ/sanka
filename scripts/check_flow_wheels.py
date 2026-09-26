@@ -43,6 +43,13 @@ SDK_WHEELS = (
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli-wheel", type=Path, required=True)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        choices=(1, 2, 3, 4),
+        default=4,
+        help="pytest-xdist workers; each case is an independent child interpreter",
+    )
     args = parser.parse_args()
     cli = args.cli_wheel.resolve()
     if not cli.is_file() or cli.suffix != ".whl":
@@ -64,6 +71,8 @@ def main() -> None:
                 sys.executable,
                 "-m",
                 "pytest",
+                "-n",
+                str(args.workers),
                 "packages/sanka-cli/tests/test_flow_extension_wheel_acceptance.py",
                 "--extension-release",
                 str(directory),

@@ -283,6 +283,7 @@ def _connector_marketplace(root: Path) -> tuple[Path, dict[str, bytes]]:
     return root, {sdk_name: sdk, connector_name: connector}
 
 
+@pytest.mark.slow
 def test_connector_add_resolve_remove_and_readd_uses_isolated_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -342,6 +343,7 @@ def test_connector_runtime_incompatibility_fails_before_artifact_fetch(
     assert raised.value.code == "SANKA_EXTENSION_INCOMPATIBLE"
 
 
+@pytest.mark.slow
 def test_connector_lock_rejects_non_string_roles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1169,6 +1171,7 @@ def test_non_purelib_data_scheme_in_dependency_is_rejected_before_materializatio
     assert raised.value.details == {"artifact": sdk_name, "scheme": scheme}
 
 
+@pytest.mark.slow
 def test_purelib_data_scheme_is_installed_and_verified(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1194,6 +1197,7 @@ def test_purelib_data_scheme_is_installed_and_verified(
 
 
 @pytest.mark.parametrize("distribution", ["example-demo", "example_demo", "example.demo"])
+@pytest.mark.slow
 def test_only_the_exact_normalized_prerelease_wheel_data_root_is_materialized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1694,6 +1698,7 @@ def test_offline_cache_miss_fails_closed(tmp_path: Path, monkeypatch: pytest.Mon
     assert raised.value.code == "SANKA_EXTENSION_NOT_CACHED"
 
 
+@pytest.mark.slow
 def test_verified_wheel_installs_in_an_offline_system_site_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1841,6 +1846,7 @@ def test_venv_normalization_accepts_python_314_unicode_launcher(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+@pytest.mark.slow
 def test_add_rebuilds_an_orphaned_environment_with_an_unverified_symlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1862,6 +1868,7 @@ def test_add_rebuilds_an_orphaned_environment_with_an_unverified_symlink(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+@pytest.mark.slow
 def test_add_rejects_an_unverified_symlink_in_a_recorded_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1884,6 +1891,7 @@ def test_add_rejects_an_unverified_symlink_in_a_recorded_environment(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX venv launcher sealing only")
+@pytest.mark.slow
 def test_real_posix_materializer_installs_without_a_venv_test_hook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1913,6 +1921,7 @@ def test_real_posix_materializer_installs_without_a_venv_test_hook(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor dispatch only")
+@pytest.mark.slow
 def test_real_materializer_dispatches_through_the_bound_executable_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2928,6 +2937,7 @@ def _two_extensions(root: Path) -> tuple[Path, dict[str, bytes]]:
     return source, wheels
 
 
+@pytest.mark.slow
 def test_conflicting_system_claim_fails_before_download_or_state_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2955,6 +2965,7 @@ def test_conflicting_system_claim_fails_before_download_or_state_changes(
     assert store.resolve_locked(original.id) == original
 
 
+@pytest.mark.slow
 def test_readding_disabled_extension_checks_system_conflict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3001,6 +3012,7 @@ def test_reserved_hosted_system_claim_fails_before_download(
     assert store._load_lock() == {}
 
 
+@pytest.mark.slow
 def test_system_metadata_uses_manifest_distribution_for_third_party_extension(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

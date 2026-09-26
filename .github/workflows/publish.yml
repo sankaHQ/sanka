@@ -35,6 +35,8 @@ jobs:
         run: uv sync --frozen --all-packages --all-extras
       - name: Run repository checks
         run: make check
+      - name: Run the extension-environment tests
+        run: make test-slow
       - name: Build and stage release
         run: make build-release
       - name: Verify published Flow SDK compatibility
