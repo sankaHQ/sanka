@@ -17,10 +17,13 @@ Read `docs/public-naming.md`, `docs/naming-compatibility.md`, and `CONTRIBUTING.
 
 ## Tests
 
-Follow the workspace `test-audit` skill.
+Use the `test-audit` skill from the sanka-project workspace when it is
+available; in a standalone checkout the rules below are complete on their own.
 
-- Before adding a test, state in the PR which real bug it catches and why no
-  existing test at a stronger boundary already catches it. No answer, no test.
+- Before adding a test, state in the PR which failure it catches (for new
+  behaviour: the specified behaviour not holding) and why no existing test at a
+  stronger boundary already catches it. Tests for new behaviour go at the single
+  boundary that owns it; a test that cannot name a failure is not added.
 - One owner per behaviour. User-visible behaviour is owned by a command-level
   test that runs the CLI or runtime entrypoint against real files, processes or
   a local database. Unit tests are for pure logic with real branching: parsers,
@@ -31,6 +34,9 @@ Follow the workspace `test-audit` skill.
   asserts `hasattr`/`callable`/`isinstance`; asserts that a command or alias
   exists or is registered; or computes the expected value with the code under
   test.
+- Documented compatibility contracts are the exception to the literal rule:
+  published fault codes, protocol and version values, retained URLs and
+  compatibility flags are asserted exactly, once, at their owning boundary.
 - Do not write unit tests after the code to cover a diff. A regression test must
   fail on the pre-fix code; say so in the PR.
 - Test lines added in a PR may not exceed non-test lines added unless the PR
