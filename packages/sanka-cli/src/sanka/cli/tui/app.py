@@ -7,6 +7,7 @@ import json
 import shlex
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -467,6 +468,80 @@ class MissingExtensionScreen(ModalScreen[str | None]):
             self.dismiss("marketplace")
             return
         self.dismiss(None)
+
+
+class ExtensionInstallScreen(ModalScreen[str | None]):
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "back", "Back")]
+
+    def __init__(
+        self,
+        extension_id: str,
+        marketplace: str | None,
+        reviewed: ExtensionChoice | None,
+    ) -> None:
+        super().__init__()
+        self.extension_id, self.marketplace, self.reviewed = extension_id, marketplace, reviewed
+        self.message: str | None = None
+
+    @property
+    def sanka(self) -> SankaApp:
+        app = self.app
+        assert isinstance(app, SankaApp)
+        return app
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="extension-install-modal"):
+            action = "Updating" if self.reviewed else "Installing"
+            yield Static(f"{action} {self.extension_id}", id="install-title", markup=False)
+            yield ProgressBar(
+                total=None, show_percentage=False, show_eta=False, id="install-progress"
+            )
+            with VerticalScroll():
+                yield Static(
+                    "Preparing the extension environment…\n"
+                    "Wait for installation to finish before running another stage.",
+                    id="install-status",
+                    markup=False,
+                )
+            yield Button("Please wait", id="install-close", disabled=True)
+
+    def on_mount(self) -> None:
+        self.run_worker(self._install, thread=True)
+
+    def _install(self) -> None:
+        try:
+            if self.reviewed and self.sanka.services.extension(self.extension_id) != self.reviewed:
+                raise ValueError("The available extension changed. Review the update again.")
+            message = self.sanka.services.install(self.extension_id, self.marketplace)
+        except Exception as error:
+            self.app.call_from_thread(self._finished, str(error), False)
+        else:
+            self.app.call_from_thread(self._finished, message, True)
+
+    def _finished(self, message: str, succeeded: bool) -> None:
+        self.sanka.session.busy = False
+        self.message = message if succeeded else None
+        self.query_one("#install-progress").display = False
+        self.query_one("#install-title", Static).update(
+            "Extension installed" if succeeded else "Extension installation failed"
+        )
+        status = self.query_one("#install-status", Static)
+        status.update(message)
+        status.add_class("result-success" if succeeded else "result-failure")
+        button = self.query_one("#install-close", Button)
+        button.label = "Continue" if succeeded else "Back"
+        button.disabled = False
+        button.focus()
+
+    def action_back(self) -> None:
+        if self.sanka.session.busy:
+            self.notify("The extension is still installing. Please wait.")
+        else:
+            self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "install-close" and not self.sanka.session.busy:
+            self.dismiss(self.message)
 
 
 class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
@@ -1448,16 +1523,12 @@ class StageScreen(SankaScreen):
             return
         if not choice:
             return
-        self.run_worker(lambda: self._install_then_plan(choice), thread=True)
+        self.sanka.install_extension(choice, self._plan_installed)
 
-    def _install_then_plan(self, extension_id: str) -> None:
-        try:
-            message = self.sanka.services.install(extension_id)
-        except Exception as error:
-            self.app.call_from_thread(self._log, str(error))
-            return
-        self.app.call_from_thread(self._log, message)
-        self.app.call_from_thread(self._start)
+    def _plan_installed(self, message: str | None) -> None:
+        if message:
+            self._log(message)
+            self._start()
 
     def _missing_closed(self, choice: str | None) -> None:
         if choice == "marketplace":
@@ -1465,14 +1536,12 @@ class StageScreen(SankaScreen):
             return
         if not choice:
             return
-        self.run_worker(lambda: self._install(choice), thread=True)
+        self.sanka.install_extension(choice, self._extension_installed)
 
-    def _install(self, extension_id: str) -> None:
-        try:
-            message = self.sanka.services.install(extension_id)
-        except Exception as error:
-            message = str(error)
-        self.app.call_from_thread(self._log, message)
+    def _extension_installed(self, message: str | None) -> None:
+        if message:
+            self._log(message)
+            self.query_one("#run-stage", Button).focus()
 
 
 class ExtensionListScreen(SankaScreen):
@@ -1502,7 +1571,7 @@ class ExtensionListScreen(SankaScreen):
         if self.sanka.session.pending_action == "add" and self.sanka.session.pending_extension_id:
             extension_id = self.sanka.session.pending_extension_id
             self.sanka.session.pending_action = None
-            self.run_worker(lambda: self._install(extension_id), thread=True)
+            self._install(extension_id)
         elif (
             self.sanka.session.pending_action == "remove"
             and self.sanka.session.pending_extension_id
@@ -1580,7 +1649,7 @@ class ExtensionListScreen(SankaScreen):
         if event.button.id == "details":
             self.app.push_screen(ExtensionDetailScreen(extension_id))
         elif event.button.id == "install":
-            self.run_worker(lambda: self._install(extension_id), thread=True)
+            self._install(extension_id)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.cursor_row < len(self._ids):
@@ -1589,15 +1658,11 @@ class ExtensionListScreen(SankaScreen):
     def _install(self, extension_id: str) -> None:
         choice = self.sanka.services.extension(extension_id)
         if choice is not None and "incompatible" in choice.status:
-            self.app.call_from_thread(self.notify, "That extension is incompatible with this CLI.")
+            self.notify("That extension is incompatible with this CLI.")
             return
-        try:
-            message = self.sanka.services.install(
-                extension_id, choice.marketplace if choice else None
-            )
-        except Exception as error:
-            message = str(error)
-        self.app.call_from_thread(self._installed, message)
+        self.sanka.install_extension(
+            extension_id, marketplace=choice.marketplace if choice else None
+        )
 
     def _installed(self, message: str) -> None:
         self.notify(message)
@@ -1731,22 +1796,22 @@ class ExtensionDetailScreen(SankaScreen):
             self._run("install")
 
     def _run(self, action: str, choice: ExtensionChoice | None = None) -> None:
-        self.run_worker(lambda: self._work(action, choice), thread=True)
+        if action in {"install", "update"}:
+            selected = choice or self._choice()
+            self.sanka.install_extension(
+                self.extension_id,
+                marketplace=selected.marketplace if selected else None,
+                reviewed=choice,
+            )
+        else:
+            self.run_worker(lambda: self._work(action), thread=True)
 
-    def _work(self, action: str, choice: ExtensionChoice | None = None) -> None:
+    def _work(self, action: str) -> None:
         try:
-            if action == "update" and self._choice() != choice:
-                raise ValueError("The available extension changed. Review the update again.")
             if action == "remove":
                 message = self.sanka.services.remove(self.extension_id)
-            elif action == "disable":
-                message = self.sanka.services.disable(self.extension_id)
             else:
-                choice = choice or self._choice()
-                message = self.sanka.services.install(
-                    self.extension_id,
-                    choice.marketplace if choice else None,
-                )
+                message = self.sanka.services.disable(self.extension_id)
         except Exception as error:
             message = str(error)
         self.app.call_from_thread(self._done, message)
@@ -1865,7 +1930,7 @@ class MarketplaceScreen(SankaScreen):
             row = self.query_one("#catalog", DataTable).cursor_row
             if row is not None and 0 <= row < len(self._choices):
                 choice = self._choices[row]
-                self.run_worker(lambda: self._install(choice), thread=True)
+                self.sanka.install_extension(choice.id, marketplace=choice.marketplace)
             return
         if event.button.id == "add-snapshot":
             source = self.query_one("#source", Input).value.strip()
@@ -1888,13 +1953,6 @@ class MarketplaceScreen(SankaScreen):
                 ConfirmScreen(f"Remove marketplace {name}?"),
                 callback=lambda yes: self._drop_snapshot(name) if yes else None,
             )
-
-    def _install(self, choice: ExtensionChoice) -> None:
-        try:
-            message = self.sanka.services.install(choice.id, choice.marketplace)
-        except Exception as error:
-            message = str(error)
-        self.app.call_from_thread(self._done, message)
 
     def _add_snapshot(
         self,
@@ -1940,6 +1998,10 @@ class MarketplaceScreen(SankaScreen):
 
     def on_catalog_refreshed(self) -> None:
         self.query_one("#catalog-status", Static).update("")
+        self._fill()
+
+    def on_screen_resume(self) -> None:
+        super().on_screen_resume()
         self._fill()
 
 
@@ -2343,7 +2405,13 @@ class SankaApp(App[int]):
     }
     #run-stage:disabled { background: $panel; color: $text-muted; }
     ReportScreen, PlanConfiguration, VerifyConfiguration,
-    CloudAction, ConfirmScreen { align: center middle; }
+    CloudAction, ConfirmScreen, ExtensionInstallScreen { align: center middle; }
+    #extension-install-modal {
+        width: 70; max-width: 95%; height: 14; max-height: 90%;
+        background: $surface; border: solid $primary; padding: 1;
+    }
+    #install-title { height: auto; text-style: bold; }
+    #install-progress { height: 1; margin: 1 0; }
     #configuration-modal {
         width: 70; max-width: 95%; height: 90%;
         background: $surface; border: solid $primary; padding: 1;
@@ -2453,6 +2521,19 @@ class SankaApp(App[int]):
             self.notify("Wait for the current stage to finish or detach.")
             return True
         return False
+
+    def install_extension(
+        self,
+        extension_id: str,
+        callback: Callable[[str | None], None] | None = None,
+        *,
+        marketplace: str | None = None,
+        reviewed: ExtensionChoice | None = None,
+    ) -> None:
+        if self._busy():
+            return
+        self.session.busy = True
+        self.push_screen(ExtensionInstallScreen(extension_id, marketplace, reviewed), callback)
 
     def action_stage(self, command: str) -> None:
         if self._busy():
