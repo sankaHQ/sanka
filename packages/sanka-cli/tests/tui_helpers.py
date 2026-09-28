@@ -104,6 +104,9 @@ class FakeServices:
             rows.append(choice)
         return tuple(rows)
 
+    def extension_settings(self, extension_id: str) -> Any:
+        return getattr(self, "settings", {}).get(extension_id)
+
     def extension(self, extension_id: str) -> ExtensionChoice | None:
         return preferred_extension(self.catalog, extension_id)
 
@@ -247,3 +250,44 @@ def _choice(
         commands=("scan", "plan", "apply", "test", "verify"),
         runtime_specifier=">=0.2",
     )
+
+
+# A settings declaration as an extension wheel ships it.
+DECLARATION = {
+    "schema_version": "sanka-extension-settings/v1",
+    "display": {"name": {"en": "DRF to Flask", "ja": "DRF から Flask"}},
+    "settings": [
+        {
+            "id": "orm",
+            "stage": "plan",
+            "type": "choice",
+            "default": "django",
+            "label": {"en": "ORM", "ja": "ORM"},
+            "choices": [
+                {"value": "django", "label": {"en": "Django", "ja": "Django"}},
+                {"value": "sqlalchemy", "label": {"en": "SQLAlchemy", "ja": "SQLAlchemy"}},
+            ],
+        },
+        {
+            "id": "generation",
+            "stage": "plan",
+            "type": "choice",
+            "default": "minimal",
+            "label": {"en": "Generation layout", "ja": "生成レイアウト"},
+            "when": {"orm": "sqlalchemy"},
+            "choices": [
+                {"value": "minimal", "label": {"en": "Minimal", "ja": "最小"}},
+                {"value": "full", "label": {"en": "Full", "ja": "フル"}},
+            ],
+        },
+        {
+            "id": "min_readiness",
+            "stage": "plan",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 100,
+            "label": {"en": "Minimum readiness (%)", "ja": "最低移行準備度 (%)"},
+        },
+    ],
+}

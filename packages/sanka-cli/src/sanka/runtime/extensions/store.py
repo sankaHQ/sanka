@@ -51,6 +51,7 @@ from sanka.runtime.extensions.model import (
     Recommendation,
     Wheel,
 )
+from sanka.runtime.extensions.settings import ExtensionSettings, read_wheel_settings
 from sanka.runtime.hashing import content_hash
 from sanka_cli import __version__
 from sanka_extensions.app import ENTRY_POINT_GROUP, ExtensionRegistration
@@ -2074,6 +2075,28 @@ class ExtensionStore:
                 )
             )
         return tuple(sorted(records, key=lambda item: (item.id, item.version, item.marketplace)))
+
+    @_store_operation
+    def extension_settings(self, extension_id: str) -> ExtensionSettings | None:
+        """Plan settings the installed extension declares in its own verified wheel."""
+        installations = [
+            item for item in self._load_installations() if item.get("id") == extension_id
+        ]
+        lock = self._load_lock().get(extension_id)
+        if lock is not None:
+            installations = [
+                item
+                for item in installations
+                if item.get("manifest_digest") == lock.manifest_digest
+            ] or installations
+        if not installations:
+            return None
+        declared = [
+            settings
+            for wheel in installations[-1]["wheels"]
+            if (settings := read_wheel_settings(self.user_root / wheel["path"], wheel["sha256"]))
+        ]
+        return declared[0] if len(declared) == 1 else None
 
     @_store_operation
     def installation_health(self) -> tuple[dict[str, Any], ...]:

@@ -832,6 +832,46 @@ async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_plan_form_follows_the_extension_declared_settings(tmp_path: Path) -> None:
+    from tui_helpers import DECLARATION
+
+    from textual.widgets import Button
+
+    from sanka.cli.tui.app import PlanConfiguration
+    from sanka.runtime.extensions.settings import parse_settings
+
+    service = FakeServices()
+    service.settings = {"sanka/drf-to-fastapi": parse_settings(DECLARATION)}
+    app = SankaApp(service, Session(project_root=str(tmp_path)), start="plan")
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, PlanConfiguration)
+        # Built-in FastAPI fields give way to the declaration.
+        assert not app.screen.query("#plan-swagger-ui")
+        assert app.screen.query_one("#plan-field-generation").display is False
+        app.screen.query_one("#plan-set-orm", Select).value = "sqlalchemy"
+        await pilot.pause()
+        assert app.screen.query_one("#plan-field-generation").display is True
+        app.screen.query_one("#plan-set-min_readiness", Input).value = "101"
+        app.screen.query_one("#save-configuration", Button).press()
+        await pilot.pause()
+        assert "from 0 to 100" in str(app.screen.query_one("#configuration-error", Static).content)
+        app.screen.query_one("#plan-set-min_readiness", Input).value = "60"
+        app.screen.query_one("#save-configuration", Button).press()
+        await pilot.pause()
+        await pilot.click("#run-stage")
+        await app.workers.wait_for_complete()
+        configuration = service.calls[0]["configuration"]
+        assert {key: configuration[key] for key in ("orm", "generation", "min_readiness")} == {
+            "orm": "sqlalchemy",
+            "generation": "minimal",
+            "min_readiness": 60,
+        }
+
+
+@pytest.mark.asyncio
 async def test_flask_verify_configuration_forwards_scenario_replay(tmp_path: Path) -> None:
     from sanka.cli.tui.app import VerifyConfiguration
 
