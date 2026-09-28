@@ -3,8 +3,9 @@
 ## Endpoint planning release 0.3.3
 
 Version 0.3.3 ships the endpoint picker and review-bound partial migration from
-PR #165. Publish matching Extensions bundles `extensions-v0.1.0a34` and
-`api-converters-v0.1.0a10` before public endpoint-selection acceptance. Generated
+PR #165. The default catalog pins Extensions commit
+`1d79a34a647fec4646a255ab47fc487dccb53ea8`, with published bundles
+`extensions-v0.1.0a34` and `api-converters-v0.1.0a10`. Generated
 labels require apply receipts and matching files; verification remains separate.
 Never replace existing 0.3.2 artifacts. Run the exact-tag workflow and verify
 PyPI, installer and public partial/incremental acceptance before announcing it.
