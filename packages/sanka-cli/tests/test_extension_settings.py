@@ -14,7 +14,9 @@ from tui_helpers import DECLARATION
 from sanka.runtime.extensions.settings import read_wheel_settings
 
 
-def wheel(tmp_path: Path, content: bytes, name: str = "ext/sanka-extension-settings.json"):
+def wheel(
+    tmp_path: Path, content: bytes, name: str = "ext/sanka-extension-settings.json"
+) -> tuple[Path, str]:
     path = tmp_path / "ext-1.0-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(name, content)

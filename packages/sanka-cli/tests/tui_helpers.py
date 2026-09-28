@@ -19,6 +19,7 @@ from sanka.cli.tui.services import preferred_extension
 
 class FakeServices:
     def __init__(self) -> None:
+        self.settings: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
         self.installed: list[str] = []
         self.installed_marketplaces: list[str | None] = []
@@ -105,7 +106,7 @@ class FakeServices:
         return tuple(rows)
 
     def extension_settings(self, extension_id: str) -> Any:
-        return getattr(self, "settings", {}).get(extension_id)
+        return self.settings.get(extension_id)
 
     def extension(self, extension_id: str) -> ExtensionChoice | None:
         return preferred_extension(self.catalog, extension_id)
