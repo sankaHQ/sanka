@@ -299,3 +299,68 @@ def test_default_extension_full_chain_from_wheels(
         ]
         == "success"
     )
+
+
+def test_endpoint_selection_from_installed_wheel(
+    tmp_path: Path,
+    extension_release: Path,
+    drf_extension_fixture: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = create_test_environment(tmp_path, extension_release, drf_extension_fixture)
+    monkeypatch.chdir(drf_extension_fixture)
+    run_json(environment, "extension", "add", EXTENSION_ID, "--json")
+    output = drf_extension_fixture / "generated"
+    config = {
+        "generation": "minimal",
+        "output": str(output),
+        "package_manager": "uv",
+        "strategy": "native",
+    }
+    env_args = ("--extension-env", "PYTHONPATH", "--json")
+    for selected in (["GET /api/health/"], ["GET /api/health/", "POST /api/health/"]):
+        planned = run_json(
+            environment,
+            "plan",
+            str(drf_extension_fixture),
+            "--to",
+            "fastapi",
+            "--extension-config",
+            json.dumps(config | {"selected_endpoints": selected}),
+            *env_args,
+        )
+        data = cast(dict[str, Any], planned["data"])
+        assert data["endpoint_scope"]["effective_ids"] == selected
+        assert data["endpoint_scope"]["retained_ids"] == (
+            [] if len(selected) == 1 else ["GET /api/health/"]
+        )
+        run_json(
+            environment,
+            "apply",
+            "--root",
+            str(drf_extension_fixture),
+            "--plan-hash",
+            data["plan_hash"],
+            *env_args,
+        )
+        assert (
+            run_json(environment, "test", str(drf_extension_fixture), *env_args)["outcome"]
+            == "success"
+        )
+        assert (
+            run_json(environment, "verify", str(drf_extension_fixture), *env_args)["outcome"]
+            == "success"
+        )
+    (output / "app.py").write_text("# user repair\n")
+    status, _ = _run_json_process(
+        environment,
+        "plan",
+        str(drf_extension_fixture),
+        "--to",
+        "fastapi",
+        "--extension-config",
+        json.dumps(config | {"selected_endpoints": selected}),
+        *env_args,
+    )
+    assert status != 0
+    assert (output / "app.py").read_text() == "# user repair\n"

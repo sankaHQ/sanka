@@ -315,6 +315,13 @@ class HostServices:
         reviewed = read_plan_hash(self.root, self.artifact_dir)
         return (reviewed,) if reviewed else ()
 
+    def saved_configuration(self) -> dict[str, Any]:
+        if read_plan_hash(self.root, self.artifact_dir) is None:
+            return {}
+        payload = json_loads(self.root / self.artifact_dir / "plan.json")
+        values = payload.get("configuration")
+        return dict(values) if isinstance(values, dict) else {}
+
     def saved_endpoints(self) -> tuple[EndpointChoice, ...]:
         path = self.root / self.artifact_dir / "scan.json"
         try:
@@ -400,9 +407,7 @@ class HostServices:
         from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
         from sanka.runtime.extensions.runner import ExtensionRunner
 
-        cleaned = {
-            key: value for key, value in dict(configuration).items() if key != "selected_endpoints"
-        }
+        cleaned = dict(configuration)
         on_activity("Checking the project fingerprint")
         on_activity("Checking the extension lock")
         self._stderr = ""

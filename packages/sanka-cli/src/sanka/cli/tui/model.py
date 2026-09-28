@@ -135,6 +135,8 @@ class EndpointChoice:
     path: str
     implementation: str
     selected: bool
+    locked: bool = False
+    blocked: bool = False
 
     @property
     def implementation_label(self) -> str:
@@ -150,6 +152,9 @@ def parse_endpoints(data: object) -> tuple[EndpointChoice, ...]:
     """Read a future extension payload. Unknown shapes yield no rows."""
     if not isinstance(data, dict):
         return ()
+    scope = data.get("endpoint_scope")
+    if isinstance(scope, dict) and scope.get("schema") == "sanka.endpoint-scope/v1":
+        data = scope
     raw = data.get("endpoints")
     if not isinstance(raw, list):
         return ()
@@ -171,7 +176,9 @@ def parse_endpoints(data: object) -> tuple[EndpointChoice, ...]:
                 method=method,
                 path=path,
                 implementation=str(implementation),
-                selected=implementation == "not_migrated",
+                selected=bool(item.get("selected", implementation == "not_migrated")),
+                locked=item.get("locked") is True,
+                blocked=item.get("blocked") is True,
             )
         )
     return tuple(choices)

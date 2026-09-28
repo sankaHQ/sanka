@@ -36,6 +36,7 @@ from textual.worker import get_current_worker
 from sanka.cli._summary import application_summary
 from sanka.cli.tui.model import (
     LIFECYCLE_COMMANDS,
+    EndpointChoice,
     ExtensionChoice,
     HistoryEntry,
     JobRef,
@@ -544,6 +545,86 @@ class ExtensionInstallScreen(ModalScreen[str | None]):
             self.dismiss(self.message)
 
 
+class EndpointSelection(ModalScreen[list[str] | None]):
+    """Select HTTP scope without allowing generated endpoints to be removed."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, endpoints: list[EndpointChoice]) -> None:
+        super().__init__()
+        self.endpoints = endpoints
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="configuration-modal"):
+            yield Label("Choose endpoints for this plan")
+            yield Input(placeholder="Filter by method or path", id="endpoint-filter")
+            yield Static("Generated endpoints stay selected. Bulk actions include hidden rows.")
+            with VerticalScroll():
+                for index, item in enumerate(self.endpoints):
+                    label = f"{item.method} {item.path}"
+                    if item.locked:
+                        label += "  · Generated (locked)"
+                    elif item.blocked:
+                        label += "  · Requires manual adaptation"
+                    yield Checkbox(
+                        label,
+                        value=(item.selected and not item.blocked) or item.locked,
+                        disabled=item.locked or item.blocked,
+                        id=f"endpoint-{index}",
+                    )
+            yield Static("", id="endpoint-count")
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Select all", id="endpoints-all")
+                yield Button("Deselect all", id="endpoints-none")
+                yield Button("Review plan", id="endpoints-save", variant="primary")
+                yield Button("Cancel", id="endpoints-cancel")
+
+    def on_mount(self) -> None:
+        self._count()
+
+    def _selected(self) -> list[str]:
+        return [
+            item.id
+            for index, item in enumerate(self.endpoints)
+            if item.locked or self.query_one(f"#endpoint-{index}", Checkbox).value
+        ]
+
+    def _count(self) -> None:
+        count = len(self._selected())
+        locked = sum(item.locked for item in self.endpoints)
+        self.query_one("#endpoint-count", Static).update(
+            f"{count} selected · {locked} generated (locked) · {count - locked} new"
+        )
+        self.query_one("#endpoints-save", Button).disabled = count == 0 or count == locked
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        self._count()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "endpoint-filter":
+            for index, item in enumerate(self.endpoints):
+                self.query_one(f"#endpoint-{index}", Checkbox).display = (
+                    event.value.casefold() in f"{item.method} {item.path}".casefold()
+                )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        identity = event.button.id
+        if identity in {"endpoints-all", "endpoints-none"}:
+            for index, item in enumerate(self.endpoints):
+                if not item.locked and not item.blocked:
+                    self.query_one(f"#endpoint-{index}", Checkbox).value = (
+                        identity == "endpoints-all"
+                    )
+            self._count()
+        elif identity == "endpoints-save":
+            self.dismiss(self._selected())
+        elif identity == "endpoints-cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
     """Editable configuration before execution, with DRF recipe choices."""
 
@@ -663,10 +744,6 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                             raise ValueError("Choose whether to enable Swagger UI.")
                         if not swagger_ui or "swagger_ui" in self.values:
                             values["swagger_ui"] = swagger_ui
-                    if destination.exists() and values.get("generation") != "update":
-                        raise ValueError(
-                            "Output already exists. Choose a new directory or update mode."
-                        )
                     settings = self.query_one("#plan-settings", Input).value.strip()
                     if settings:
                         values["settings_module"] = settings
@@ -987,6 +1064,7 @@ class StageScreen(SankaScreen):
                 yield Button("Next", id="next-stage", variant="primary", disabled=True)
                 yield Button("Details", id="stage-details")
                 yield Button("Configure", id="configure-stage")
+                yield Button("Endpoints", id="select-endpoints")
                 yield Button("Command", id="copy-command")
                 yield Button("Copy hash", id="copy-hash")
             yield ProgressBar(id="progress", total=100, show_eta=False)
@@ -1013,6 +1091,7 @@ class StageScreen(SankaScreen):
             self._set_result(_review_text(session))
             self.refresh_footer()
             return
+        self.query_one("#select-endpoints").display = self.command == "plan"
         session.stage = session.stages.get(self.command, StageRun(command=self.command))
         self._run = session.stage
         self.query_one("#configure-stage").display = self.command in {"scan", "plan", "verify"}
@@ -1061,7 +1140,9 @@ class StageScreen(SankaScreen):
     def _next_stage(self) -> str | None:
         if self._run.phase != "succeeded":
             return None
-        if self.command == "plan" and self._run.result_data.get("generated") is False:
+        if self.command == "plan" and (
+            self._run.result_data.get("generated") is False or not self.sanka.session.plan_hash
+        ):
             return None
         return {"scan": "plan", "plan": "apply", "apply": "test", "test": "verify"}.get(
             self.command
@@ -1237,10 +1318,26 @@ class StageScreen(SankaScreen):
             self.sanka.session.target = None
             return
         option = listing.get_option_at_index(listing.highlighted)
-        self.sanka.session.target = str(option.id)
+        session = self.sanka.session
+        if session.target != str(option.id):
+            for key in ("selected_endpoints", "target", "target_framework"):
+                session.configuration.pop(key, None)
+            session.endpoints = []
+            session.plan_hash = None
+        session.target = str(option.id)
         self.refresh_footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "select-endpoints":
+            if self.sanka.session.busy:
+                return
+            if not self.sanka.session.endpoints:
+                self.notify("Run Plan to load endpoints. If none appear, update the extension.")
+                return
+            self.app.push_screen(
+                EndpointSelection(self.sanka.session.endpoints), self._endpoints_selected
+            )
+            return
         if event.button.id == "next-stage":
             next_stage = self._next_stage()
             if next_stage:
@@ -1280,6 +1377,17 @@ class StageScreen(SankaScreen):
             return
         self._start()
 
+    def _endpoints_selected(self, selected: list[str] | None) -> None:
+        if selected is None:
+            return
+        session = self.sanka.session
+        session.configuration["selected_endpoints"] = selected
+        session.plan_hash = None
+        session.stages.pop("apply", None)
+        session.stages.pop("test", None)
+        session.stages.pop("verify", None)
+        self._start()
+
     def _configure_scan(self) -> None:
         self.app.push_screen(
             PlanConfiguration("", self.sanka.session.configuration, drf=False, stage="Scan"),
@@ -1308,8 +1416,14 @@ class StageScreen(SankaScreen):
     def _configured(self, target: str, values: dict[str, Any] | None) -> None:
         if values is None:
             return
-        self.sanka.session.configuration = values
+        session = self.sanka.session
+        if values.get("output") != session.configuration.get("output"):
+            values.pop("selected_endpoints", None)
+            session.endpoints = []
+        session.configuration = values
+        session.plan_hash = None
         self._configured_target = target
+        self._result_actions()
         self._set_result("Configuration saved. Review the values with Configure, then run Plan.")
         self.refresh_footer()
 
@@ -1355,11 +1469,7 @@ class StageScreen(SankaScreen):
         )
 
     def _configuration(self) -> dict[str, Any]:
-        configuration = {
-            key: value
-            for key, value in self.sanka.session.configuration.items()
-            if key != "selected_endpoints"
-        }
+        configuration = dict(self.sanka.session.configuration)
         for name in self._input_names:
             if self.query(f"#cfg-{name}"):
                 configuration[name] = self.query_one(f"#cfg-{name}", Input).value
@@ -1493,7 +1603,7 @@ class StageScreen(SankaScreen):
         if outcome.run.plan_hash:
             session.plan_hash = outcome.run.plan_hash
         discovered = parse_endpoints(outcome.run.result_data)
-        if discovered:
+        if self.command == "plan" or discovered:
             session.endpoints = list(discovered)
         self.query_one(StageHeader).show_stage(outcome.run, root=session.project_root)
         self._show_progress(outcome.run.progress)
@@ -2842,6 +2952,14 @@ def _summary_text(run: StageRun, plan: StageRun | None = None, *, root: str | Pa
         endpoints = parse_endpoints(data)
         if endpoints:
             lines.append(f"Reported endpoints: {len(endpoints)}")
+    scope = data.get("endpoint_scope")
+    if isinstance(scope, dict) and scope.get("schema") == "sanka.endpoint-scope/v1":
+        selected = len(scope.get("effective_ids", []))
+        retained = len(scope.get("retained_ids", []))
+        omitted = len(scope.get("omitted_ids", []))
+        lines.append(
+            f"Endpoint scope: {selected} selected, {retained} generated, {omitted} omitted."
+        )
     if data.get("output") and "Output" not in summarized:
         lines.append(f"Output folder: {Path(str(data['output'])).name}")
     if run.command in {"test", "verify"}:
