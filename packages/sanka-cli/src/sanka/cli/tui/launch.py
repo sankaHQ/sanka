@@ -31,10 +31,14 @@ def launch_dashboard(
     explicit_env_names: tuple[str, ...] = (),
 ) -> int:
     project = (root or Path(".")).expanduser().resolve()
+    services = HostServices(project, cli_state=state)
+    configuration = services.saved_configuration()
     app = SankaApp(
-        HostServices(project, cli_state=state),
+        services,
         Session(
             project_root=str(project),
+            configuration=configuration,
+            target=configuration.get("target"),
             explicit_env_names=explicit_env_names,
             profile=state.profile if state else None,
             base_url=state.base_url if state else None,
@@ -82,7 +86,12 @@ def launch_local(args: Any) -> int:
 
         session.target = getattr(args, "to", None)
         session.plan_hash = getattr(args, "plan_hash", None)
-        session.configuration = _extension_configuration(args)
+        saved = services.saved_configuration()
+        if session.target is not None and session.target != saved.get("target"):
+            saved = {}
+        session.configuration = {**saved, **_extension_configuration(args)}
+        if session.target is None:
+            session.target = session.configuration.get("target")
         session.explicit_env_names = tuple(getattr(args, "extension_env", ()) or ())
         session.stage = StageRun(command=command)
         session.endpoints = list(services.saved_endpoints())

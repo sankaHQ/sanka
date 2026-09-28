@@ -597,6 +597,22 @@ class ApplicationLifecycle:
                 normalized[name] = answer
                 seen_inputs.add(name)
             request["configuration"] = normalized
+        requested = normalized.get("selected_endpoints")
+        if requested is not None:
+            scope = result.data.get("endpoint_scope")
+            if (
+                not isinstance(requested, list)
+                or not requested
+                or any(not isinstance(item, str) for item in requested)
+                or len(set(requested)) != len(requested)
+                or not isinstance(scope, dict)
+                or scope.get("schema") != "sanka.endpoint-scope/v1"
+                or scope.get("effective_ids") != sorted(requested)
+            ):
+                _error(
+                    "SANKA_EXTENSION_PROTOCOL",
+                    "The extension did not honor the endpoint selection; update it before applying",
+                )
         extension_plan_hash = result.data.get("plan_hash")
         if not isinstance(extension_plan_hash, str) or not extension_plan_hash:
             _error(
@@ -613,6 +629,20 @@ class ApplicationLifecycle:
                 "SANKA_EXTENSION_PROTOCOL",
                 "The installed FastAPI extension did not honor the Swagger UI choice; update it",
             )
+        scope = result.data.get("endpoint_scope")
+        if (
+            isinstance(scope, dict)
+            and scope.get("schema") == "sanka.endpoint-scope/v1"
+            and scope.get("retained_ids")
+        ):
+            # Only a receipt-aware extension can attest to an existing generated directory.
+            output = normalized.get("output") or result.data.get("default_output")
+            if isinstance(output, str) and output:
+                candidate = (self.project_root / output).resolve()
+                if candidate != self.project_root and candidate.is_relative_to(self.project_root):
+                    fingerprint = fingerprint_repository(
+                        self.project_root, excluded_directory=candidate
+                    )
         digests = {artifact: _artifact_digest(Path(artifact)) for artifact in result.artifacts}
         payload: dict[str, Any] = {
             "artifact_digests": digests,
@@ -753,6 +783,8 @@ class ApplicationLifecycle:
         data = dict(result.data)
         data["extension"] = result.data
         data["plan_hash"] = core_hash
+        if scope := extension_plan.get("endpoint_scope"):
+            data["endpoint_scope"] = scope
         return ExtensionResult(
             outcome="success",
             data=data,
@@ -796,7 +828,13 @@ class ApplicationLifecycle:
     ) -> ExtensionResult:
         normalized = _normalized_json_object(configuration)
         if normalized.get("scenarios") is not None:
-            return self._replay(normalized, explicit_env_names)
+            # A scoped migration must keep replay bound to the reviewed selection.
+            plan_path = self.artifact_root / "plan.json"
+            scoped = plan_path.exists() and bool(
+                self._load_plan().get("extension_plan", {}).get("endpoint_scope")
+            )
+            if not scoped:
+                return self._replay(normalized, explicit_env_names)
         return self._dispatch(
             "verify",
             configuration=configuration,
