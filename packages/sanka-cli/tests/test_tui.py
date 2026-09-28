@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 from textual.widgets import Button, DataTable, Input, OptionList, Select, Static, TextArea
-from tui_helpers import FakeServices, _choice
+from tui_helpers import DECLARATION, FakeServices, _choice
 
 from sanka.cli import main
 from sanka.cli.tui.app import (
@@ -833,8 +833,6 @@ async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: P
 
 @pytest.mark.asyncio
 async def test_plan_form_follows_the_extension_declared_settings(tmp_path: Path) -> None:
-    from tui_helpers import DECLARATION
-
     from textual.widgets import Button
 
     from sanka.cli.tui.app import PlanConfiguration
