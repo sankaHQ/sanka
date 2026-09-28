@@ -32,17 +32,27 @@ def main():
     payload["extension"] = request.extension.to_dict()
     payload["parameters"] = request.blueprint_parameters
     blueprint = flow.Blueprint.from_dict(payload)
-    response = flow.BlueprintResponse.success(request, blueprint)
+    if request.request_id == "missing-identity":
+        response = flow.BlueprintResponse(request.request_id, request.digest,
+            request.extension, 'success', blueprint)
+    else:
+        response = flow.BlueprintResponse.success(request, blueprint)
     output = response.to_dict()
-    MUTATION
+    if request.request_id == "template-tamper":
+        output['blueprint']['origin']['identity']['revision'] = 'changed'
+    elif request.request_id == "schema-tamper":
+        output['blueprint']['schema_version'] = 'sanka-flow-blueprint/unknown'
+    elif request.request_id == "configuration-tamper":
+        output['blueprint']['resources'][0]['spec']['source_endpoint_id'] = \
+            '22222222-2222-4222-8222-222222222222'
+    elif request.request_id == "fixture-tamper":
+        output['blueprint']['scenarios'][0]['fixture']['digest'] = 'sha256:' + 'c' * 64
     print(json.dumps(output))
     return 0
 """
 
 
-def verify(
-    release: Path, root: Path, version: str, mode: str, generator_sdk: str | None = None
-) -> None:
+def verify(release: Path, root: Path, version: str, generator_sdk: str | None = None) -> None:
     if version == "v4":
         from test_flow_native_lifecycle import make_blueprint
         from test_flow_native_verification import ArtifactReader
@@ -62,32 +72,10 @@ def verify(
         or {"v1": "0.1.0a4", "v2": "0.1.0a4", "v3": "0.1.0a5", "v4": "0.1.0a7"}[version]
     )
     blueprint = flow.Blueprint.from_dict(json.loads(fixture_text))
-    mutation = {
-        "success": "pass",
-        "missing-identity": "pass",
-        "template-tamper": "output['blueprint']['origin']['identity']['revision'] = 'changed'",
-        "schema-tamper": "output['blueprint']['schema_version'] = 'sanka-flow-blueprint/unknown'",
-        "configuration-tamper": (
-            "output['blueprint']['resources'][0]['spec']['source_endpoint_id'] = "
-            "'22222222-2222-4222-8222-222222222222'"
-        ),
-        "fixture-tamper": (
-            "output['blueprint']['scenarios'][0]['fixture']['digest'] = 'sha256:' + 'c' * 64"
-        ),
-    }[mode]
-    generator_source = GENERATOR.replace("MUTATION", mutation)
-    if mode == "missing-identity":
-        # A generator may ignore target admission. The host must still reject its
-        # well-formed, correlated output for a capability the target cannot honor.
-        generator_source = generator_source.replace(
-            "flow.BlueprintResponse.success(request, blueprint)",
-            "flow.BlueprintResponse(request.request_id, request.digest, "
-            "request.extension, 'success', blueprint)",
-        )
     source, generator = _marketplace(
         root / "source",
         requires=(f"sanka-extension-sdk=={sdk_version}",),
-        cli_source=generator_source,
+        cli_source=GENERATOR,
         extra_members=(("example_demo/blueprint.json", fixture_text),),
     )
     manifest_path = source / "example-demo.json"
@@ -125,15 +113,6 @@ def verify(
             }
         )
     manifest_path.write_text(json.dumps(manifest))
-    capabilities = list(reversed(blueprint.required_capabilities))
-    if mode == "missing-identity":
-        capabilities.remove(
-            "flow.native.order-billing-verification/v1"
-            if version == "v4"
-            else "flow.native.interval-minutes/v1"
-            if version == "v3"
-            else "flow.record-identity/v1"
-        )
     definition = flow.create(type=blueprint.origin.identity.id)
     if version in {"v3", "v4"}:
         profile = flow.NativeOrderBillingWorkflow.from_dict(blueprint.resources[0].spec)
@@ -154,43 +133,66 @@ def verify(
         store.add_marketplace(source, name="fixture", trust=True)
         store.add_extension("example/demo")
         before = store.resolve_locked("example/demo")
-        try:
-            result = FlowExtensionRunner(store).generate(
-                "example/demo",
-                request_id="generation-1",
-                definition=flow.encode_definition(definition),
-                target={"id": "synthetic-workspace", "revision": "1", "capabilities": capabilities},
-                references=[r.to_dict() for r in blueprint.references],
-                values={},
-            )
-        except ExtensionError as error:
-            assert mode != "success", str(error) + ": " + str(error.__cause__)
-            assert error.code == "SANKA_FLOW_EXTENSION_PROTOCOL", error.code
+        modes = ["success", "missing-identity", "template-tamper", "schema-tamper"]
+        if version in {"v3", "v4"}:
+            modes.append("configuration-tamper")
+        if version == "v4":
+            modes.append("fixture-tamper")
+        # Each response still runs in a fresh isolated process. Only the immutable
+        # installed wheel environment is shared between requests.
+        for mode in modes:
+            capabilities = list(reversed(blueprint.required_capabilities))
             if mode == "missing-identity":
-                assert "Target lacks required Flow capabilities" in str(error.__cause__)
-        else:
-            assert mode == "success", "Rejected input unexpectedly produced a Blueprint"
-            assert isinstance(result, flow.Blueprint)
-            assert result.schema_version == blueprint.schema_version
-            assert result.resources == blueprint.resources
-            assert result.scenarios == blueprint.scenarios
-            assert result.extension.digest == before.manifest_digest
-            if version in {"v3", "v4"}:
-                # Structural planning against a synthetic observation proves
-                # shared-runtime consumption, not native provider execution.
-                observed = TargetSnapshot(
-                    "synthetic-workspace", "1", (), frozenset({"workflow"}), Document({})
+                capabilities.remove(
+                    "flow.native.order-billing-verification/v1"
+                    if version == "v4"
+                    else "flow.native.interval-minutes/v1"
+                    if version == "v3"
+                    else "flow.record-identity/v1"
                 )
-                plan = plan_reconstruction(
-                    blueprint=result,
-                    installation=Installation("native-installation", observed.target),
-                    observed=observed,
+            try:
+                result = FlowExtensionRunner(store).generate(
+                    "example/demo",
+                    request_id=mode,
+                    definition=flow.encode_definition(definition),
+                    target={
+                        "id": "synthetic-workspace",
+                        "revision": "1",
+                        "capabilities": capabilities,
+                    },
+                    references=[r.to_dict() for r in blueprint.references],
+                    values={},
                 )
-                assert plan.applicable
-                payload = plan.to_dict()
-                assert payload["construction"] == "inactive"
-                assert len(payload["operations"]) == 1
-                operation = payload["operations"][0]
-                assert operation["action"] == "create"
-                assert operation["configuration"] == blueprint.resources[0].spec
-        assert store.resolve_locked("example/demo") == before
+            except ExtensionError as error:
+                assert mode != "success", f"{mode}: {error}: {error.__cause__}"
+                assert error.code == "SANKA_FLOW_EXTENSION_PROTOCOL", (mode, error.code)
+                if mode == "missing-identity":
+                    assert "Target lacks required Flow capabilities" in str(error.__cause__)
+            else:
+                assert mode == "success", (
+                    f"{mode}: rejected input unexpectedly produced a Blueprint"
+                )
+                assert isinstance(result, flow.Blueprint)
+                assert result.schema_version == blueprint.schema_version
+                assert result.resources == blueprint.resources
+                assert result.scenarios == blueprint.scenarios
+                assert result.extension.digest == before.manifest_digest
+                if version in {"v3", "v4"}:
+                    # Structural planning against a synthetic observation proves
+                    # shared-runtime consumption, not native provider execution.
+                    observed = TargetSnapshot(
+                        "synthetic-workspace", "1", (), frozenset({"workflow"}), Document({})
+                    )
+                    plan = plan_reconstruction(
+                        blueprint=result,
+                        installation=Installation("native-installation", observed.target),
+                        observed=observed,
+                    )
+                    assert plan.applicable
+                    payload = plan.to_dict()
+                    assert payload["construction"] == "inactive"
+                    assert len(payload["operations"]) == 1
+                    operation = payload["operations"][0]
+                    assert operation["action"] == "create"
+                    assert operation["configuration"] == blueprint.resources[0].spec
+            assert store.resolve_locked("example/demo") == before

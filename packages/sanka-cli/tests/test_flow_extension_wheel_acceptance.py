@@ -16,16 +16,20 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("version", ["v1", "v2", "v3", "v4"])
-@pytest.mark.parametrize("host_sdk", ["embedded", "standalone", "standalone-a7", "generator-a7"])
 @pytest.mark.parametrize(
-    "mode", ["success", "missing-identity", "template-tamper", "schema-tamper"]
+    "version,host_sdk",
+    [
+        (version, host_sdk)
+        for version in ("v1", "v2", "v3")
+        for host_sdk in ("embedded", "standalone", "standalone-a7", "generator-a7")
+    ]
+    # V4 already uses a7: standalone == standalone-a7 and embedded == generator-a7.
+    + [("v4", "embedded"), ("v4", "standalone-a7")],
 )
 def test_canonical_sdk_accepts_only_exact_supported_generation(
     extension_release: Path,
     tmp_path: Path,
     version: str,
-    mode: str,
     host_sdk: str,
     request: pytest.FixtureRequest,
 ) -> None:
@@ -64,13 +68,11 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
             "assert sanka_extensions.flow.__file__.startswith(imports[0] + '/'), "
             "sanka_extensions.flow.__file__; "
             "from flow_wheel_acceptance import verify; "
-            "verify(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5], "
-            "sys.argv[6] or None)",
+            "verify(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4], sys.argv[5] or None)",
             json.dumps(imports),
             str(extension_release),
             str(tmp_path),
             version,
-            mode,
             "0.1.0a7" if host_sdk == "generator-a7" else "",
         ],
         capture_output=True,
@@ -78,29 +80,3 @@ def test_canonical_sdk_accepts_only_exact_supported_generation(
         timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.parametrize("host_sdk", ["embedded", "standalone", "standalone-a7", "generator-a7"])
-@pytest.mark.parametrize("version", ["v3", "v4"])
-def test_native_generator_cannot_substitute_endpoint_with_unchanged_request_metadata(
-    extension_release: Path,
-    tmp_path: Path,
-    host_sdk: str,
-    version: str,
-    request: pytest.FixtureRequest,
-) -> None:
-    test_canonical_sdk_accepts_only_exact_supported_generation(
-        extension_release, tmp_path, version, "configuration-tamper", host_sdk, request
-    )
-
-
-@pytest.mark.parametrize("host_sdk", ["embedded", "standalone-a7"])
-def test_native_generator_cannot_replace_independently_admitted_fixture(
-    extension_release: Path,
-    tmp_path: Path,
-    host_sdk: str,
-    request: pytest.FixtureRequest,
-) -> None:
-    test_canonical_sdk_accepts_only_exact_supported_generation(
-        extension_release, tmp_path, "v4", "fixture-tamper", host_sdk, request
-    )
