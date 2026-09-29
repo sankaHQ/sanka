@@ -843,7 +843,7 @@ async def test_plan_form_follows_the_extension_declared_settings(
     from sanka.runtime.extensions.settings import parse_settings
 
     service = FakeServices()
-    declaration = deepcopy(DECLARATION)
+    declaration: dict[str, Any] = deepcopy(DECLARATION)
     monkeypatch.setattr("sanka.cli.tui.app.locale.getlocale", lambda: ("ja_JP", "UTF-8"))
     declaration["settings"][0]["label"]["ja"] = "Localized setting"
     if bounds == "zero":
