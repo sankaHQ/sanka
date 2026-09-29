@@ -28,6 +28,7 @@ from sanka.cli.tui.model import (
     progress_fraction,
 )
 from sanka.runtime.extensions.model import ExtensionError
+from sanka.runtime.extensions.settings import ExtensionSettings
 from sanka.runtime.hashing import content_hash
 
 Activity = Callable[[str], None]
@@ -46,6 +47,8 @@ class TuiServices(Protocol):
     ) -> tuple[ExtensionChoice, ...]: ...
 
     def extension(self, extension_id: str) -> ExtensionChoice | None: ...
+
+    def extension_settings(self, extension_id: str) -> ExtensionSettings | None: ...
 
     def marketplaces(self) -> tuple[MarketplaceView, ...]: ...
 
@@ -274,6 +277,19 @@ class HostServices:
             )
             for record in records
         )
+
+    def extension_settings(self, extension_id: str) -> ExtensionSettings | None:
+        try:
+            store = self._store()
+        except ExtensionError:
+            return None
+        try:
+            settings: ExtensionSettings | None = store.extension_settings(extension_id)
+            return settings
+        except ExtensionError:
+            return None
+        finally:
+            store.close()
 
     def used_extension_id(self, target: str | None = None) -> str | None:
         try:

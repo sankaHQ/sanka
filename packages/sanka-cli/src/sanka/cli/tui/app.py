@@ -49,6 +49,7 @@ from sanka.cli.tui.model import (
 )
 from sanka.cli.tui.services import TuiServices, cloud_exit_code, preferred_extension
 from sanka.cli.tui.widgets import ActivityLog, CliLine, EmptyState, KeysBar, StageHeader
+from sanka.runtime.extensions.settings import Setting
 from sanka_cli import __version__
 
 _SETTLED = frozenset({"succeeded", "failed", "cancelled"})
@@ -631,10 +632,100 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel", "Cancel")]
 
     def __init__(
-        self, target: str, values: dict[str, Any], *, drf: bool, stage: str = "Plan"
+        self,
+        target: str,
+        values: dict[str, Any],
+        *,
+        drf: bool,
+        stage: str = "Plan",
+        declared: tuple[Setting, ...] = (),
     ) -> None:
         super().__init__()
         self.target, self.values, self.drf, self.stage = target, values, drf, stage
+        # Settings the installed extension declares in its wheel replace the built-in form.
+        self.declared = declared
+
+    def _declared_field(self, setting: Setting) -> ComposeResult:
+        with Vertical(id=f"plan-field-{setting.id}"):
+            yield Label(setting.text(setting.label))
+            current = self.values.get(setting.id, setting.default)
+            widget = f"plan-set-{setting.id}"
+            if setting.type == "choice":
+                values = [choice.value for choice in setting.choices]
+                yield Select(
+                    [(setting.text(choice.label), choice.value) for choice in setting.choices],
+                    value=current if current in values else setting.default,
+                    allow_blank=False,
+                    id=widget,
+                )
+            elif setting.type == "boolean":
+                yield Select(
+                    [("Enabled", True), ("Disabled", False)],
+                    value=current if isinstance(current, bool) else setting.default,
+                    allow_blank=False,
+                    id=widget,
+                )
+            else:
+                yield Input("" if current is None else str(current), id=widget)
+            if setting.description:
+                yield Static(setting.text(setting.description), markup=False)
+
+    def _raw_values(self) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for setting in self.declared:
+            widget = self.query_one(f"#plan-set-{setting.id}")
+            values[setting.id] = widget.value if isinstance(widget, (Select, Input)) else None
+        return values
+
+    def _refresh_visibility(self) -> None:
+        if not self.declared:
+            return
+        values = self._raw_values()
+        for setting in self.declared:
+            self.query_one(f"#plan-field-{setting.id}").display = setting.visible(values)
+
+    def on_mount(self) -> None:
+        self._refresh_visibility()
+
+    def on_select_changed(self, _event: Select.Changed) -> None:
+        self._refresh_visibility()
+
+    def _declared_values(self, values: dict[str, Any]) -> dict[str, Any]:
+        raw = self._raw_values()
+        for setting in self.declared:
+            if not setting.visible(raw):
+                continue
+            value, name = raw[setting.id], setting.text(setting.label)
+            if setting.type == "choice":
+                if value not in {choice.value for choice in setting.choices}:
+                    raise ValueError(f"{name}: choose one of the listed values.")
+            elif setting.type == "boolean":
+                if not isinstance(value, bool):
+                    raise ValueError(f"{name}: choose Enabled or Disabled.")
+            elif setting.type == "integer":
+                try:
+                    value = int(str(value).strip())
+                except ValueError:
+                    raise ValueError(f"{name}: enter a whole number.") from None
+                if not (setting.minimum or 0) <= value <= (setting.maximum or value):
+                    raise ValueError(
+                        f"{name}: enter a number from {setting.minimum} to {setting.maximum}."
+                    )
+            else:
+                value = str(value).strip()
+                if not value:
+                    if setting.optional:
+                        continue
+                    raise ValueError(f"{name}: enter a value.")
+                if setting.type == "path":
+                    app = self.app
+                    assert isinstance(app, SankaApp)
+                    root = Path(app.session.project_root).resolve()
+                    destination = (root / value).resolve()
+                    if destination == root or not destination.is_relative_to(root):
+                        raise ValueError(f"{name}: choose a path inside the project.")
+            values[setting.id] = value
+        return values
 
     def compose(self) -> ComposeResult:
         with Vertical(id="configuration-modal"):
@@ -642,7 +733,11 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 f"{self.stage} configuration" + (f" — {self.target}" if self.target else "")
             )
             with VerticalScroll():
-                if self.drf:
+                if self.declared:
+                    for setting in self.declared:
+                        if not setting.advanced:
+                            yield from self._declared_field(setting)
+                elif self.drf:
                     yield Label("Output directory (inside this project)")
                     yield Input(
                         str(self.values.get("output", f"{self.target}-app")), id="plan-output"
@@ -693,15 +788,24 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                             allow_blank=False,
                             id="plan-swagger-ui",
                         )
-                with Collapsible(title="Advanced configuration", collapsed=self.drf):
-                    if self.drf:
+                with Collapsible(
+                    title="Advanced configuration", collapsed=self.drf or bool(self.declared)
+                ):
+                    for setting in self.declared:
+                        if setting.advanced:
+                            yield from self._declared_field(setting)
+                    if self.drf and not self.declared:
                         yield Label("Django settings module (optional; inferred when empty)")
                         yield Input(str(self.values.get("settings_module", "")), id="plan-settings")
                     yield Label("Additional extension configuration (JSON object)")
-                    known = {"output", "settings_module"}
+                    known = {"output", "settings_module"} | {item.id for item in self.declared}
                     if self.target == "fastapi":
                         known.update({"generation", "strategy", "package_manager", "swagger_ui"})
-                    extra = {k: v for k, v in self.values.items() if not self.drf or k not in known}
+                    extra = {
+                        k: v
+                        for k, v in self.values.items()
+                        if not (self.drf or self.declared) or k not in known
+                    }
                     yield TextArea(json.dumps(extra, indent=2), id="plan-extra")
             yield Static("", id="configuration-error", markup=False)
             with Horizontal(classes="dialog-actions"):
@@ -719,7 +823,9 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 values = json.loads(self.query_one("#plan-extra", TextArea).text)
                 if not isinstance(values, dict):
                     raise ValueError("Additional configuration must be a JSON object.")
-                if self.drf:
+                if self.declared:
+                    values = self._declared_values(values)
+                elif self.drf:
                     output = self.query_one("#plan-output", Input).value.strip()
                     app = self.app
                     assert isinstance(app, SankaApp)
@@ -1408,8 +1514,17 @@ class StageScreen(SankaScreen):
             return
         choices = self.sanka.services.extensions(target=target)
         drf = any(item.id == f"sanka/drf-to-{target}" for item in choices)
+        extension = (
+            f"sanka/drf-to-{target}" if drf else self.sanka.services.used_extension_id(target)
+        )
+        settings = self.sanka.services.extension_settings(extension) if extension else None
         self.app.push_screen(
-            PlanConfiguration(target, self.sanka.session.configuration, drf=drf),
+            PlanConfiguration(
+                target,
+                self.sanka.session.configuration,
+                drf=drf,
+                declared=settings.for_stage("plan") if settings else (),
+            ),
             lambda values: self._configured(target, values),
         )
 
