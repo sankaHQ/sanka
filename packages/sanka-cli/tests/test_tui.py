@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -832,31 +833,44 @@ async def test_plan_configuration_precedes_execution_and_is_editable(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_plan_form_follows_the_extension_declared_settings(tmp_path: Path) -> None:
+@pytest.mark.parametrize("bounds, invalid, valid", [("positive", "101", "60"), ("zero", "1", "-1")])
+async def test_plan_form_follows_the_extension_declared_settings(
+    tmp_path: Path, bounds: str, invalid: str, valid: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from textual.widgets import Button
 
     from sanka.cli.tui.app import PlanConfiguration
     from sanka.runtime.extensions.settings import parse_settings
 
     service = FakeServices()
-    service.settings = {"sanka/drf-to-fastapi": parse_settings(DECLARATION)}
+    declaration = deepcopy(DECLARATION)
+    monkeypatch.setattr("sanka.cli.tui.app.locale.getlocale", lambda: ("ja_JP", "UTF-8"))
+    declaration["settings"][0]["label"]["ja"] = "Localized setting"
+    if bounds == "zero":
+        setting = next(item for item in declaration["settings"] if item["id"] == "min_readiness")
+        setting.update(minimum=-100, maximum=0, default=0)
+    service.settings = {"sanka/drf-to-fastapi": parse_settings(declaration)}
     app = SankaApp(service, Session(project_root=str(tmp_path)), start="plan")
     async with app.run_test(size=(80, 30)) as pilot:
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, PlanConfiguration)
+        field = declaration["settings"][0]["id"]
+        assert "Localized setting" in str(
+            app.screen.query_one(f"#plan-field-{field} Label").render()
+        )
         # Built-in FastAPI fields give way to the declaration.
         assert not app.screen.query("#plan-swagger-ui")
         assert app.screen.query_one("#plan-field-generation").display is False
         app.screen.query_one("#plan-set-orm", Select).value = "sqlalchemy"
         await pilot.pause()
         assert app.screen.query_one("#plan-field-generation").display is True
-        app.screen.query_one("#plan-set-min_readiness", Input).value = "101"
+        app.screen.query_one("#plan-set-min_readiness", Input).value = invalid
         app.screen.query_one("#save-configuration", Button).press()
         await pilot.pause()
-        assert "from 0 to 100" in str(app.screen.query_one("#configuration-error", Static).content)
-        app.screen.query_one("#plan-set-min_readiness", Input).value = "60"
+        assert str(app.screen.query_one("#configuration-error", Static).content)
+        app.screen.query_one("#plan-set-min_readiness", Input).value = valid
         app.screen.query_one("#save-configuration", Button).press()
         await pilot.pause()
         await pilot.click("#run-stage")
@@ -865,7 +879,7 @@ async def test_plan_form_follows_the_extension_declared_settings(tmp_path: Path)
         assert {key: configuration[key] for key in ("orm", "generation", "min_readiness")} == {
             "orm": "sqlalchemy",
             "generation": "minimal",
-            "min_readiness": 60,
+            "min_readiness": int(valid),
         }
 
 
