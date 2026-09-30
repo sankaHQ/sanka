@@ -514,7 +514,7 @@ def test_plan_refreshes_the_full_plan_only_recommendation_envelope(
     active = _recommendation(active_lock, marketplace="a", targets=("fastapi",))
     observed = _recommendation(observed_lock, marketplace="b", targets=("flask",))
 
-    class Store:
+    class Store(FakeStore):
         recommendations_value = (observed, active)
 
         def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
