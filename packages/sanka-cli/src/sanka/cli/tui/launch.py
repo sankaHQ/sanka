@@ -81,13 +81,14 @@ def launch_local(args: Any) -> int:
     autostart = False
     if command in _LIFECYCLE:
         from sanka.cli import _extension_configuration
+        from sanka.runtime.extensions.lifecycle import resolve_plan_configuration
 
         session.target = getattr(args, "to", None)
         session.plan_hash = getattr(args, "plan_hash", None)
         saved = services.saved_configuration()
         if session.target is not None and session.target != saved.get("target"):
             saved = {}
-        session.configuration = {**saved, **_extension_configuration(args)}
+        session.configuration = resolve_plan_configuration(saved, _extension_configuration(args))
         if session.target is None:
             session.target = session.configuration.get("target")
         session.explicit_env_names = tuple(getattr(args, "extension_env", ()) or ())

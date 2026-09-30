@@ -769,6 +769,7 @@ def _dispatch_lifecycle(
         return lifecycle.plan(
             target=target,
             configuration=configuration,
+            replace_configuration=True,
             explicit_env_names=explicit_env_names,
             **selection,
         )

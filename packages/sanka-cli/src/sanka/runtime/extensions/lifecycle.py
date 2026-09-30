@@ -80,6 +80,22 @@ def saved_configuration(
     return dict(values)
 
 
+def resolve_plan_configuration(
+    saved: dict[str, Any],
+    explicit: dict[str, Any],
+    *,
+    replace_configuration: bool = False,
+    reset_scope: bool = False,
+) -> dict[str, Any]:
+    """CLI values override saved state; an edited form replaces it completely."""
+    normalized = dict(explicit) if replace_configuration else {**saved, **explicit}
+    if reset_scope or ("output" in explicit and explicit["output"] != saved.get("output")):
+        normalized.pop("selected_endpoints", None)
+        if "selected_endpoints" in explicit:
+            normalized["selected_endpoints"] = explicit["selected_endpoints"]
+    return normalized
+
+
 def _evidence(value: MatchedEvidence) -> dict[str, str]:
     return {"kind": value.kind, "path": value.path, "value": value.value}
 
@@ -500,6 +516,7 @@ class ApplicationLifecycle:
         explicit_env_names: tuple[str, ...] = (),
         endpoint_ids: tuple[str, ...] = (),
         all_endpoints: bool = False,
+        replace_configuration: bool = False,
     ) -> ExtensionResult:
         explicit_env_names = _canonical_environment_names(explicit_env_names)
         explicit = _normalized_json_object(configuration)
@@ -512,11 +529,9 @@ class ApplicationLifecycle:
         if len(set(endpoint_ids)) != len(endpoint_ids):
             _error("SANKA_USAGE", "--endpoint IDs must be unique")
         saved = saved_configuration(self.project_root, str(self.artifact_root), target)
-        normalized = {**saved, **explicit}
-        if convenience or ("output" in explicit and explicit["output"] != saved.get("output")):
-            normalized.pop("selected_endpoints", None)
-            if "selected_endpoints" in explicit:
-                normalized["selected_endpoints"] = explicit["selected_endpoints"]
+        normalized = resolve_plan_configuration(
+            saved, explicit, replace_configuration=replace_configuration, reset_scope=convenience
+        )
         target = target or normalized.get("target")
         fingerprint = fingerprint_repository(self.project_root)
         self._ensure_enabled(
@@ -527,12 +542,6 @@ class ApplicationLifecycle:
             recommendations = self._recommendations(fingerprint)
             if recommendations and not self._enabled(recommendations):
                 self._required(fingerprint, recommendations)
-            self._current_scan_locked(
-                fingerprint,
-                recommendations,
-                normalized,
-                explicit_env_names,
-            )
             return self._plan_locked(
                 fingerprint,
                 recommendations,
@@ -541,6 +550,7 @@ class ApplicationLifecycle:
                 explicit_env_names,
                 endpoint_ids,
                 all_endpoints,
+                frozenset(explicit),
             )
 
     def _plan_locked(
@@ -552,6 +562,7 @@ class ApplicationLifecycle:
         explicit_env_names: tuple[str, ...],
         endpoint_ids: tuple[str, ...] = (),
         all_endpoints: bool = False,
+        explicit_keys: frozenset[str] = frozenset(),
     ) -> ExtensionResult:
         enabled = self._enabled(recommendations)
         targets = tuple(sorted({target for item in enabled for target in item.targets}))
@@ -585,14 +596,17 @@ class ApplicationLifecycle:
                 target=selected_target,
                 configured=configured_target,
             )
-        # An extension that advertises several targets learns the selection here. The
-        # reviewed core plan records it, so apply, test and verify receive the same value.
-        normalized = {**normalized, "target": selected_target}
         lock = self.store.resolve_locked(selected[0].id)
         self._verify_selection(lock, selected[0])
         declaration = self.store.extension_settings(lock.id)
         settings = declaration.for_stage("plan") if declaration else ()
         normalized = setting_defaults(settings, normalized)
+        for setting in settings:
+            if setting.id not in explicit_keys and not setting.visible(normalized):
+                normalized.pop(setting.id, None)
+        self._current_scan_locked(fingerprint, recommendations, normalized, explicit_env_names)
+        # Later stages use the same reviewed target and configuration.
+        normalized = {**normalized, "target": selected_target}
         request = self._request(lock, "plan", fingerprint, normalized)
         extension_root = Path(request["artifact_root"])
         seen_inputs: set[str] = set()

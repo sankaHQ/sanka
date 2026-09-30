@@ -105,3 +105,61 @@ def test_endpoint_plan_contract_and_review_binding(tmp_path: Path, honored: bool
             configuration={"scenarios": "cases.json", "selected_endpoints": ["GET /two"]}
         )
     assert lifecycle.apply(reviewed_plan_hash=planned.data["plan_hash"]).outcome == "success"
+
+
+def test_changed_output_has_the_same_cli_and_tui_scope(tmp_path: Path, monkeypatch: Any) -> None:
+    import sanka.cli as local
+    from sanka.cli.tui import launch
+    from sanka.cli.tui.services import _dispatch_lifecycle
+
+    class Runner(FakeRunner):
+        def run(self, lock: LockEntry, request: dict[str, Any], **kwargs: Any) -> ExtensionResult:
+            result = super().run(lock, request, **kwargs)
+            if request["command"] == "plan":
+                result = replace(
+                    result,
+                    data=result.data
+                    | {
+                        "endpoint_scope": {
+                            "schema": "sanka.endpoint-scope/v1",
+                            "effective_ids": request["configuration"].get(
+                                "selected_endpoints", ["GET /one", "GET /two"]
+                            ),
+                        }
+                    },
+                )
+            return result
+
+    project = _project(tmp_path)
+    lifecycle = _lifecycle(project, FakeStore(installed=True), Runner())
+    lifecycle.plan(
+        target="fastapi", configuration={"output": "old", "selected_endpoints": ["GET /one"]}
+    )
+
+    def inspect(app: Any) -> int:
+        assert app.session.configuration["output"] == "new"
+        assert "selected_endpoints" not in app.session.configuration
+        _dispatch_lifecycle(
+            lifecycle,
+            "plan",
+            target=app.session.target,
+            plan_hash=None,
+            configuration=app.session.configuration,
+        )
+        assert "selected_endpoints" not in lifecycle.runner.calls[-1][1]["configuration"]
+        return 0
+
+    monkeypatch.setattr(launch, "_run", inspect)
+    launch.launch_local(
+        local._build_parser().parse_args(
+            [
+                "plan",
+                str(project),
+                "--to",
+                "fastapi",
+                "--output",
+                "new",
+                "--tui",
+            ]
+        )
+    )
