@@ -38,6 +38,136 @@ from sanka_cli import __version__
 from sanka_cli.main import cli
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [stage, *(["--root", ".", "--plan-hash", "sha256:reviewed"] if stage == "apply" else ["."])]
+        for stage in ("scan", "plan", "apply", "test", "verify")
+    ]
+    + [
+        ["status"],
+        ["extension", "list"],
+        ["extension", "add", "vendor/demo"],
+        ["extension", "remove", "vendor/demo"],
+        ["extension", "marketplace", "list"],
+        ["extension", "marketplace", "add", "./catalog"],
+        ["extension", "marketplace", "upgrade", "demo"],
+        ["extension", "marketplace", "remove", "demo"],
+    ],
+)
+def test_terminal_does_not_choose_interface(arguments: list[str], monkeypatch: Any) -> None:
+    import sanka.cli as local
+
+    monkeypatch.setattr(local, "_interactive_terminal", lambda: True)
+    for suffix, expected in (([], False), (["--tui"], True)):
+        args = local._build_parser().parse_args([*arguments, *suffix])
+        assert local._use_local_tui(args) is expected
+
+
+@pytest.mark.parametrize("placement", ["leading", "trailing"])
+@pytest.mark.parametrize("stage", ["scan", "plan", "apply", "test", "verify", "status"])
+def test_explicit_tui_preserves_stage_and_inputs(
+    stage: str, placement: str, tmp_path: Path, monkeypatch: Any
+) -> None:
+    import sanka.cli as local
+    from sanka.cli.tui import launch
+
+    monkeypatch.setattr(local, "_interactive_terminal", lambda: True)
+    arguments = [stage]
+    if stage != "status":
+        arguments += [
+            *(["--root"] if stage == "apply" else []),
+            str(tmp_path),
+            "--extension-env",
+            "SOURCE_PYTHON",
+        ]
+    if stage == "apply":
+        arguments += ["--plan-hash", "sha256:reviewed"]
+    arguments = ["--tui", *arguments] if placement == "leading" else [*arguments, "--tui"]
+
+    def inspect(app: SankaApp) -> int:
+        assert app.session.command == stage
+        assert app.session.profile == "review"
+        assert app.session.base_url == "https://api.example.test"
+        if stage != "status":
+            assert app.session.project_root == str(tmp_path)
+            assert app.session.explicit_env_names == ("SOURCE_PYTHON",)
+        if stage == "apply":
+            assert app.session.plan_hash == "sha256:reviewed"
+        return 7
+
+    monkeypatch.setattr(launch, "_run", inspect)
+    result = CliRunner().invoke(
+        cli, ["--profile", "review", "--base-url", "https://api.example.test", *arguments]
+    )
+    assert result.exit_code == 7, result.output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--tui", "extension", "list"],
+        ["extension", "list", "--tui"],
+        ["extension", "marketplace", "list", "--tui"],
+        ["doctor", "--tui"],
+        ["--output", "json", "tui"],
+        ["scan", ".", "--tui", "--json"],
+        ["scan", ".", "--tui", "--compact-dsl"],
+        ["--tui", "whoami"],
+        ["--tui", "app", "plan"],
+    ],
+)
+def test_invalid_tui_request_fails_before_execution(arguments: list[str]) -> None:
+    result = CliRunner().invoke(cli, arguments)
+    assert result.exit_code == 2, result.output
+    assert "tui" in result.output.lower()
+
+
+def test_tui_help_and_literal_option_values_are_not_dispatch(monkeypatch: Any) -> None:
+    for arguments in (["--tui", "scan", "--help"], ["doctor", "--tui", "--help"]):
+        result = CliRunner().invoke(cli, arguments)
+        assert result.exit_code == 0, result.output
+        assert "--tui" in result.output
+
+    captured: list[list[str]] = []
+
+    def inspect(argv: list[str], **_kwargs: Any) -> int:
+        captured.append(argv)
+        return 0
+
+    monkeypatch.setattr("sanka.cli.main", inspect)
+    arguments = [
+        "plan",
+        "--output",
+        "--tui",
+        "--extension-config",
+        '{"value":"--tui"}',
+        "--",
+        "--tui",
+    ]
+    result = CliRunner().invoke(cli, arguments)
+    assert result.exit_code == 0, result.output
+    assert captured == [arguments]
+
+
+def test_plain_terminal_commands_keep_cli_results(tmp_path: Path, monkeypatch: Any) -> None:
+    import sanka.cli as local
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SANKA_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(local, "_interactive_terminal", lambda: True)
+    for arguments, code, output in (
+        ([], 0, "Commands:"),
+        (["extension", "list"], 0, "Extensions"),
+        (["extension", "remove", "vendor/missing"], 0, "Removed vendor/missing"),
+        (["extension", "marketplace", "list"], 0, "Marketplaces"),
+        (["status", "--file", "missing.yaml"], 1, "missing.yaml"),
+    ):
+        result = CliRunner().invoke(cli, arguments)
+        assert result.exit_code == code, result.output
+        assert output in result.output
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("theme", ["textual-dark", "textual-light"])
 async def test_brand_header_stays_visible_and_renders_paths_literally(theme: str) -> None:

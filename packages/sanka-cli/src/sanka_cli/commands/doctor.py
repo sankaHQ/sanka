@@ -18,7 +18,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 from sanka_cli import __version__
-from sanka_cli.state import CLIState
+from sanka_cli.state import CLIState, tui_option, validate_tui
 
 
 def executables_on_path() -> list[dict[str, str]]:
@@ -184,6 +184,7 @@ def installation_report(expected_version: str | None = None) -> dict[str, Any]:
 
 
 @click.command()
+@tui_option
 @click.option("--json", "as_json", is_flag=True, help="Emit the sanka-doctor/v1 diagnostic report.")
 @click.option(
     "--expected-version", help="Fail if the running CLI does not match this exact version."
@@ -191,11 +192,10 @@ def installation_report(expected_version: str | None = None) -> dict[str, Any]:
 @click.pass_obj
 def doctor(state: CLIState, as_json: bool, expected_version: str | None) -> None:
     """Check installation, Python, PATH and cached extension environments locally."""
-    if not as_json and state.output != "json" and not os.environ.get("CI"):
-        from sanka.cli.tui.launch import launch_doctor, use_human_tui
+    if validate_tui(state, machine_output=as_json):
+        from sanka.cli.tui.launch import launch_doctor
 
-        if use_human_tui(state):
-            raise SystemExit(launch_doctor(state, expected_version))
+        raise SystemExit(launch_doctor(state, expected_version))
     report = installation_report(expected_version)
     if as_json or state.output == "json":
         click.echo(json.dumps(report, ensure_ascii=False, indent=2))

@@ -2,6 +2,7 @@
 # mypy: disable-error-code="no-untyped-def"
 import io
 import zipfile
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import click
@@ -91,6 +92,40 @@ def test_review_never_submits(api, stage, kind):
     result = CliRunner().invoke(cli, [*args(stage), "--run", RUN])
     assert result.exit_code == 0, result.output
     assert api.call_count == 1 and api.call_args.args[1] == "GET"
+
+
+def test_cloud_monitor_is_explicit_and_invalid_ui_never_requests(api, monkeypatch):
+    from sanka.cli.tui import launch
+
+    tty = SimpleNamespace(isatty=lambda: True)
+    streams = SimpleNamespace(stdin=tty, stdout=tty)
+    monkeypatch.setattr("sanka_cli.state.sys", streams)
+    monkeypatch.setattr(launch, "sys", streams)
+    api.return_value = operation("execute", "failed")
+
+    def inspect(app):
+        assert app.session.command == "verify"
+        assert app.session.workspace == "10101010"
+        assert app.session.job.run_id == RUN
+        return 4
+
+    monkeypatch.setattr(launch, "_run", inspect)
+    base = ["verify", "--cloud", "--workspace", "10101010", "--run", RUN]
+    for command in (
+        ["--output", "table", *base],
+        ["--output", "table", "--tui", *base],
+        ["--output", "table", *base, "--tui"],
+    ):
+        api.reset_mock()
+        result = CliRunner().invoke(cli, command)
+        assert result.exit_code == 4, result.output
+        assert api.call_count == 1 and api.call_args.args[1] == "GET"
+        if "--tui" not in command:
+            assert "failed" in result.output
+    api.reset_mock()
+    result = CliRunner().invoke(cli, [*args("scan"), "--tui", *paid()])
+    assert result.exit_code == 2, result.output
+    api.assert_not_called()
 
 
 @pytest.mark.parametrize(

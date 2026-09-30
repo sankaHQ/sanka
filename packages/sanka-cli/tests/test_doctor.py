@@ -155,11 +155,12 @@ def test_machine_output_and_help_never_launch_tui(
     assert CliRunner().invoke(cli, args).exit_code == 0
 
 
-def test_doctor_routes_human_tty_and_preserves_exit_code(
+def test_doctor_requires_explicit_tui_and_preserves_exit_code(
     installed: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("CI", raising=False)
-    monkeypatch.setattr("sanka.cli.tui.launch.use_human_tui", lambda state: True)
+    monkeypatch.setattr("sanka_cli.state.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sanka_cli.state.sys.stdout.isatty", lambda: True)
     seen: list[str | None] = []
 
     def launch(state: object, expected: str | None) -> int:
@@ -168,6 +169,12 @@ def test_doctor_routes_human_tty_and_preserves_exit_code(
 
     monkeypatch.setattr("sanka.cli.tui.launch.launch_doctor", launch)
     result = CliRunner().invoke(cli, ["doctor", "--expected-version", "0.0.0"])
+    assert result.exit_code == 1
+    assert "Sanka" in result.output
+    assert seen == []
+    # CliRunner replaces stdout; force terminal permission at this boundary only.
+    monkeypatch.setattr("sanka_cli.commands.doctor.validate_tui", lambda state, **kwargs: state.tui)
+    result = CliRunner().invoke(cli, ["doctor", "--expected-version", "0.0.0", "--tui"])
     assert result.exit_code == 1
     assert seen == ["0.0.0"]
 

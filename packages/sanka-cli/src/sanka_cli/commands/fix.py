@@ -19,7 +19,7 @@ import httpx
 import sanka_cli.runtime as runtime
 from sanka_cli.commands.cloud import ROOT, WORKSPACE, _data, _digest, _headers, _intent_key, _read
 from sanka_cli.config import config_path
-from sanka_cli.state import CLIState
+from sanka_cli.state import CLIState, tui_option, validate_tui
 
 
 def _interactive() -> bool:
@@ -129,6 +129,7 @@ def _follow(state: CLIState, workspace: str, run: dict[str, Any], seconds: int) 
 
 
 @click.command()
+@tui_option
 @click.option("--cloud", "use_cloud", is_flag=True, help="Execute in Sanka Cloud (required).")
 @WORKSPACE
 @click.option(
@@ -160,6 +161,7 @@ def fix(
     wait_timeout: int,
 ) -> None:
     """Run optional paid Sanka Fix on an eligible retained Sanka Code migration."""
+    validate_tui(state)
     if not use_cloud:
         raise click.UsageError(
             "Sanka Fix executes in Sanka Cloud. Add --cloud; run sanka login first."

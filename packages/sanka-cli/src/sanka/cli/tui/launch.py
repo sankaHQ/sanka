@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Open the Textual app from a TTY. ``--json`` and pipes stay on the CLI."""
+"""Open Textual only for an explicit TUI request."""
 
 from __future__ import annotations
 
@@ -17,11 +17,9 @@ _LIFECYCLE = frozenset({"scan", "plan", "apply", "test", "verify"})
 
 
 def use_human_tui(state: Any) -> bool:
-    from sanka_cli.output import resolve_output_format
+    from sanka_cli.state import validate_tui
 
-    return (
-        resolve_output_format(state.output) != "json" and sys.stdin.isatty() and sys.stdout.isatty()
-    )
+    return validate_tui(state, terminal=sys.stdin.isatty() and sys.stdout.isatty())
 
 
 def launch_dashboard(

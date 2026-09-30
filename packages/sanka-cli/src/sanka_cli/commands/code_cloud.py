@@ -21,7 +21,7 @@ from sanka_cli.cloud_source import package_source
 from sanka_cli.commands.cloud import WORKSPACE, _data, _digest, _headers, _intent_key, _read
 from sanka_cli.commands.cloud_github import SOURCE_ROOT, select_repository
 from sanka_cli.config import config_path
-from sanka_cli.state import CLIState
+from sanka_cli.state import CLIState, tui_option, validate_tui
 
 ROOT = "/v2/migrate/code-plans"
 STAGES = {"scan", "plan", "apply", "test", "verify"}
@@ -163,6 +163,7 @@ def make_command(stage: str) -> click.Command:
         ),
     )
     @WORKSPACE
+    @tui_option
     @click.argument("source", required=False, type=click.Path(path_type=Path))
     @click.option(
         "--run", type=click.UUID, help="Plan run for apply; stage operation run for review."
@@ -204,6 +205,7 @@ def make_command(stage: str) -> click.Command:
         wait: bool,
         wait_timeout: int,
     ) -> None:
+        validate_tui(state)
         headers = _headers(workspace)
         if stage in {"plan", "test", "verify"}:
             if (
