@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import locale
 import shlex
 import sys
 import time
@@ -644,16 +645,20 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
         self.target, self.values, self.drf, self.stage = target, values, drf, stage
         # Settings the installed extension declares in its wheel replace the built-in form.
         self.declared = declared
+        self.locale = (locale.getlocale()[0] or "en").split("_")[0]
 
     def _declared_field(self, setting: Setting) -> ComposeResult:
         with Vertical(id=f"plan-field-{setting.id}"):
-            yield Label(setting.text(setting.label))
+            yield Label(setting.text(setting.label, self.locale))
             current = self.values.get(setting.id, setting.default)
             widget = f"plan-set-{setting.id}"
             if setting.type == "choice":
                 values = [choice.value for choice in setting.choices]
                 yield Select(
-                    [(setting.text(choice.label), choice.value) for choice in setting.choices],
+                    [
+                        (setting.text(choice.label, self.locale), choice.value)
+                        for choice in setting.choices
+                    ],
                     value=current if current in values else setting.default,
                     allow_blank=False,
                     id=widget,
@@ -668,7 +673,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
             else:
                 yield Input("" if current is None else str(current), id=widget)
             if setting.description:
-                yield Static(setting.text(setting.description), markup=False)
+                yield Static(setting.text(setting.description, self.locale), markup=False)
 
     def _raw_values(self) -> dict[str, Any]:
         values: dict[str, Any] = {}
@@ -695,7 +700,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
         for setting in self.declared:
             if not setting.visible(raw):
                 continue
-            value, name = raw[setting.id], setting.text(setting.label)
+            value, name = raw[setting.id], setting.text(setting.label, self.locale)
             if setting.type == "choice":
                 if value not in {choice.value for choice in setting.choices}:
                     raise ValueError(f"{name}: choose one of the listed values.")
@@ -707,7 +712,9 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                     value = int(str(value).strip())
                 except ValueError:
                     raise ValueError(f"{name}: enter a whole number.") from None
-                if not (setting.minimum or 0) <= value <= (setting.maximum or value):
+                if (setting.minimum is not None and value < setting.minimum) or (
+                    setting.maximum is not None and value > setting.maximum
+                ):
                     raise ValueError(
                         f"{name}: enter a number from {setting.minimum} to {setting.maximum}."
                     )
@@ -733,6 +740,13 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 f"{self.stage} configuration" + (f" — {self.target}" if self.target else "")
             )
             with VerticalScroll():
+                if self.stage == "Plan" and not self.declared:
+                    yield Static(
+                        "No valid settings declaration is available from this extension. "
+                        "Using built-in configuration; update the extension "
+                        "for its latest settings.",
+                        markup=False,
+                    )
                 if self.declared:
                     for setting in self.declared:
                         if not setting.advanced:
