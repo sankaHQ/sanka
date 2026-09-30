@@ -1,5 +1,20 @@
 # Sanka release procedure
 
+## CLI-default release 0.3.4
+
+Version 0.3.4 makes CLI output the default on terminals. `sanka tui` and explicit
+`--tui` opt into existing screens. CLI and TUI share installed declarations,
+saved configuration, reviewed endpoint scope and plan hashes. Repeatable
+`plan --endpoint ID` includes receipt/file-checked retained endpoints;
+`--all-endpoints` selects the supported inventory.
+
+The disposable sanka-examples checks exposed a Go subset replay defect. Publish
+and verify the coordinated Go a12 fix before pinning the final CLI catalog and
+publishing 0.3.4. Retain the native router and database gates. Verify public wheel
+and source hashes, clean installer, CLI-default/explicit-TUI dispatch and partial
+lifecycle before updating the public English and Japanese guides. Never replace
+0.3.3 or an existing extension release.
+
 ## Endpoint planning release 0.3.3
 
 Version 0.3.3 ships the endpoint picker and review-bound partial migration from
