@@ -86,6 +86,9 @@ def run_cloud_command(
     if "--help" in args or "-h" in args:
         click.echo(_CLOUD_HELP[command].rstrip())
         return
+    from sanka_cli.state import validate_tui
+
+    validate_tui(state, supported=False)
     options = _parse_options(command, args)
     if command == "status":
         _status(state, program_id=program_id, migration_id=migration_id)

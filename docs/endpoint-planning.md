@@ -1,10 +1,31 @@
-# Endpoint selection in the TUI
+# Endpoint selection
 
 Backend extensions can report `sanka.endpoint-scope/v1` during planning. Supported
 candidates are DRF to Flask, DRF to FastAPI, Python to Go (Fiber, chi, mux, Gin),
 and TypeScript to Rust. This is HTTP route selection, not data endpoint selection.
 
-Run Plan to capture the inventory, choose **Endpoints**, then review the new plan.
+Commands use CLI by default. First run Plan with the required configuration to
+see the captured endpoint IDs, counts and reviewed hash. For example:
+
+```bash
+sanka plan . --to fastapi --generation full --strategy native --package-manager uv --output fastapi-app
+sanka plan . --to fastapi --endpoint 'GET /api/gadgets/' --endpoint 'POST /api/gadgets/'
+sanka apply --root . --plan-hash sha256:<hash printed by the selected plan>
+sanka test .
+sanka verify .
+```
+
+Use exact IDs printed by your extension. Flask may report regex-shaped IDs;
+do not substitute a browser URL. `--all-endpoints` selects all supported IDs.
+It cannot be combined with `--endpoint` or explicit `selected_endpoints` JSON.
+Each fresh convenience selection replaces prior optional choices and includes
+receipt/file-checked Generated endpoints. Review the new hash before applying.
+CLI output lists selected, retained and omitted counts, endpoint states, and the
+exact next Apply command. Generated never implies Verified.
+
+## Optional TUI
+
+Use `sanka tui` or `sanka plan . --to fastapi --tui`. Run Plan to capture the inventory, choose **Endpoints**, then review the new plan.
 The picker supports individual checkboxes, method/path filtering, Select all and
 Deselect all. Bulk actions include hidden rows. Generated rows stay checked and
 locked; manual gaps are disabled. An empty selection cannot be applied.
@@ -35,9 +56,24 @@ Pass `selected_endpoints` in `--extension-config`, using IDs returned in the pla
 ```
 
 IDs are opaque extension values. Do not rewrite parameters or trailing slashes.
-Absence selects all; an explicit empty list, duplicate, unknown ID or removal of
+With no saved selection, absence selects all. A valid saved plan restores its
+configuration in either interface; explicit values win. An explicit empty list, duplicate, unknown ID or removal of
 a retained endpoint is rejected. Apply, test and verify cannot change the reviewed
 selection. Explicit scenario replay is also review-bound for scoped plans.
+
+Shared installed declarations provide defaults and required-input hints. Common
+DRF settings have flags; every declared field can be supplied in the existing
+`--extension-config` JSON object. For Go, for example:
+
+```bash
+sanka plan . --to fiber --extension-config '{"source_framework":"flask","source_file":"app.py","database_layer":"none"}' --endpoint 'GET /health'
+```
+
+The CLI asks for missing required inputs only on an interactive terminal. Pipes
+and JSON runs fail promptly with the missing keys. Apply, Test and Verify use the
+reviewed settings; they cannot silently change scope. Changing target or output
+requires a new plan. Forward only required environment names with repeated
+`--extension-env NAME` on each CLI stage or when starting an optional TUI session.
 
 Required authentication, serializers, models and database schema remain available
 even when fewer HTTP routes are generated. Shared capture/security failures remain

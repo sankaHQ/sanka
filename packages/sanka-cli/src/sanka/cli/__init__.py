@@ -147,11 +147,11 @@ def main(
         return 0
     if hasattr(args, "root_option"):
         args.root = args.root_option or args.root or "."
-    if _use_local_tui(args):
-        from sanka.cli.tui.launch import launch_local
-
-        return launch_local(args)
     try:
+        if _use_local_tui(args):
+            from sanka.cli.tui.launch import launch_local
+
+            return launch_local(args)
         return int(asyncio.run(args.handler(args)))
     except CliUsageError as error:
         return _print_cli_error(args, error, exit_code=2)
@@ -161,7 +161,8 @@ def main(
             error,
             exit_code=(
                 2
-                if args.command == "plan" and error.code == "SANKA_EXTENSION_TARGET_REQUIRED"
+                if error.code == "SANKA_USAGE"
+                or (args.command == "plan" and error.code == "SANKA_EXTENSION_TARGET_REQUIRED")
                 else 1
             ),
         )
@@ -276,6 +277,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         sub.add_argument("--state", default=DEFAULT_STATE_FILE, help="run-state SQLite file")
 
     def presentation(sub: argparse.ArgumentParser, *, json_option: bool = True) -> None:
+        sub.add_argument(
+            "--tui", action="store_true", help="open the optional TUI (requires a terminal)"
+        )
         if json_option:
             formats = sub.add_mutually_exclusive_group()
             formats.add_argument(
@@ -383,6 +387,17 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="omit FastAPI Swagger UI at /docs; keep OpenAPI and ReDoc",
     )
     extension_options(plan)
+    scope = plan.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--endpoint",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="select an exact captured endpoint ID (repeatable); retain Generated endpoints",
+    )
+    scope.add_argument(
+        "--all-endpoints", action="store_true", help="select all supported endpoints"
+    )
     presentation(plan)
     plan.set_defaults(handler=_cmd_plan)
 
@@ -600,6 +615,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
 
     status = commands.add_parser("status", help="show run status and ledger counts")
     common(status)
+    presentation(status, json_option=False)
     status.set_defaults(handler=_cmd_status)
 
     migrate = commands.add_parser("migrate", help="plan + apply + verify in one go")
@@ -930,13 +946,24 @@ _TUI_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify", "status", 
 
 
 def _use_local_tui(args: argparse.Namespace) -> bool:
-    if getattr(args, "product", "auto") == "app":
-        return False
-    if args.command not in _TUI_COMMANDS:
-        return False
-    if getattr(args, "json", False) or getattr(args, "compact_dsl", False):
-        return False
-    return _interactive_terminal()
+    import click
+
+    from sanka_cli.state import CLIState, validate_tui
+
+    context = click.get_current_context(silent=True)
+    state = context.obj if context and isinstance(context.obj, CLIState) else None
+    try:
+        return validate_tui(
+            state,
+            requested=bool(getattr(args, "tui", False)),
+            machine_output=bool(
+                getattr(args, "json", False) or getattr(args, "compact_dsl", False)
+            ),
+            supported=args.command in _TUI_COMMANDS and getattr(args, "product", "auto") != "app",
+            terminal=_interactive_terminal(),
+        )
+    except click.UsageError as error:
+        raise CliUsageError(error.format_message()) from error
 
 
 def _prompt_choice(
@@ -998,6 +1025,12 @@ def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
     for name in ("force", "gap_report_only", "no_http", "all_headers", "edge_probes"):
         if getattr(args, name, False):
             configuration[name] = True
+    if (
+        getattr(args, "endpoint", None) or getattr(args, "all_endpoints", False)
+    ) and "selected_endpoints" in configuration:
+        raise CliUsageError(
+            "Use --endpoint, --all-endpoints or selected_endpoints configuration, not a combination"
+        )
     return configuration
 
 
@@ -1061,6 +1094,24 @@ def _print_application_result(
         if command == "plan" and isinstance(result.data.get("plan_hash"), str):
             print(f"plan {result.data['plan_hash']}")
         if next_hint and not quiet:
+            if command == "plan":
+                next_hint = shlex.join(
+                    [
+                        "sanka",
+                        "apply",
+                        "--root",
+                        str(args.root),
+                        "--artifact-dir",
+                        str(args.artifact_dir),
+                        "--plan-hash",
+                        str(result.data["plan_hash"]),
+                        *[
+                            part
+                            for name in args.extension_env
+                            for part in ("--extension-env", name)
+                        ],
+                    ]
+                )
             print(f"next: {next_hint}")
     return 0
 
@@ -1069,10 +1120,14 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
     if _application_lifecycle_requested(args):
         if args.swagger_ui is not None and args.to not in (None, "fastapi"):
             raise CliUsageError("--swagger-ui/--no-swagger-ui requires --to fastapi")
+        selection: dict[str, Any] = {}
+        if args.endpoint or args.all_endpoints:
+            selection = {"endpoint_ids": tuple(args.endpoint), "all_endpoints": args.all_endpoints}
         result = _application_lifecycle(args).plan(
             target=args.to,
             configuration=_extension_configuration(args),
             explicit_env_names=tuple(args.extension_env),
+            **selection,
         )
         return _print_application_result(args, "plan", result, migration_state="planned")
     spec = _load_spec(args.file)

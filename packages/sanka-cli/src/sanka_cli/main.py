@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from functools import wraps
 
 import click
 
@@ -14,19 +15,26 @@ from sanka_cli.commands.code import code
 from sanka_cli.commands.doctor import doctor
 from sanka_cli.commands.fix import fix
 from sanka_cli.commands.functions import functions
-from sanka_cli.commands.migrate import register_migration_passthroughs
+from sanka_cli.commands.migrate import (
+    CLOUD_ONLY_COMMANDS,
+    MIGRATION_COMMANDS,
+    register_migration_passthroughs,
+)
 from sanka_cli.commands.profiles import profiles
 from sanka_cli.commands.resources import attach_resource_group
 from sanka_cli.commands.skill import skill
 from sanka_cli.commands.workflows import workflows
 from sanka_cli.output import print_error
-from sanka_cli.state import CLIState
+from sanka_cli.state import CLIState, validate_tui
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--h", "--help"]})
+@click.group(
+    invoke_without_command=True, context_settings={"help_option_names": ["-h", "--h", "--help"]}
+)
 @click.version_option(__version__, prog_name="sanka")
 @click.option("--profile", default=None, help="Profile name to use.")
 @click.option("--base-url", default=None, help="Override API base URL.")
+@click.option("--tui", is_flag=True, help="Open the interactive TUI; CLI is the default.")
 @click.option(
     "--output",
     type=click.Choice(["table", "json"]),
@@ -39,8 +47,14 @@ def cli(
     profile: str | None,
     base_url: str | None,
     output: str | None,
+    tui: bool,
 ) -> None:
-    ctx.obj = CLIState(profile=profile, base_url=base_url, output=output)
+    ctx.obj = CLIState(profile=profile, base_url=base_url, output=output, tui=tui)
+    if ctx.invoked_subcommand is None:
+        if tui:
+            ctx.invoke(tui_command)
+        else:
+            click.echo(ctx.get_help())
 
 
 @cli.command("help")
@@ -83,9 +97,7 @@ cli.add_command(doctor)
 @click.pass_obj
 def tui_command(state: CLIState, extension_env: tuple[str, ...]) -> None:
     """Open the status dashboard for the project in the current directory."""
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print_error("sanka tui needs a terminal. Run sanka --help.")
-        raise SystemExit(2)
+    validate_tui(state, requested=True, terminal=sys.stdin.isatty() and sys.stdout.isatty())
     from sanka.cli.tui.launch import launch_dashboard
 
     raise SystemExit(launch_dashboard(state=state, explicit_env_names=extension_env))
@@ -107,6 +119,35 @@ def mcp_command() -> None:
         "Configure your MCP client to use https://mcp.sanka.com/mcp instead. "
         "Connect your Sanka account when prompted."
     )
+
+
+def _cli_only(command: click.Command) -> None:
+    # Guard leaves after Click parses eager help, before their callbacks can write or request.
+    if isinstance(command, click.Group):
+        for child in command.commands.values():
+            _cli_only(child)
+    elif command.callback is not None:
+        callback = command.callback
+
+        @wraps(callback)
+        def guarded(*args: object, **kwargs: object) -> object:
+            validate_tui(click.get_current_context().obj, supported=False)
+            return callback(*args, **kwargs)
+
+        command.callback = guarded
+
+
+for _name, _command in cli.commands.items():
+    if _name not in {
+        *MIGRATION_COMMANDS,
+        *CLOUD_ONLY_COMMANDS,
+        "doctor",
+        "fix",
+        "tui",
+        "help",
+        "app",
+    }:
+        _cli_only(_command)
 
 
 def main() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import httpx
@@ -72,6 +73,38 @@ def test_requires_cloud_and_cap_before_api(api, remove):
 def test_automation_requires_key_before_api(api):
     assert CliRunner().invoke(cli, [*arguments(), "--yes"]).exit_code != 0
     api.assert_not_called()
+
+
+def test_fix_tui_conflict_is_rejected_before_paid_preflight(api):
+    result = CliRunner().invoke(
+        cli, [*arguments(), "--tui", "--yes", "--idempotency-key", "test-intent"]
+    )
+    assert result.exit_code == 2, result.output
+    api.assert_not_called()
+
+
+def test_fix_monitor_requires_explicit_ui(api, monkeypatch):
+    from sanka.cli.tui import launch
+
+    tty = SimpleNamespace(isatty=lambda: True)
+    streams = SimpleNamespace(stdin=tty, stdout=tty)
+    monkeypatch.setattr("sanka_cli.state.sys", streams)
+    monkeypatch.setattr(launch, "sys", streams)
+
+    def inspect(app):
+        assert app.session.command == "fix"
+        assert app.session.workspace == "10101010"
+        assert app.session.job.run_id == CHILD
+        return 6
+
+    monkeypatch.setattr(launch, "_run", inspect)
+    base = ["--output", "table", *arguments()[2:], "--yes", "--idempotency-key", "test-intent"]
+    plain = CliRunner().invoke(cli, base)
+    assert plain.exit_code == 0, plain.output
+    assert "queued" in plain.output
+    api.side_effect = [{"id": CHILD, "status": "queued"}]
+    result = CliRunner().invoke(cli, [*base, "--tui"])
+    assert result.exit_code == 6, result.output
 
 
 def test_consent_and_pinned_submission(api):

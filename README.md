@@ -77,7 +77,7 @@ uv tool install --python 3.12 sanka-cli
 sanka extension add sanka/drf-to-fastapi
 
 sanka scan .
-sanka plan . --to fastapi        # answers: minimal, .sanka/output/fastapi, uv, native
+sanka plan . --to fastapi --generation minimal --output .sanka/output/fastapi --package-manager uv --strategy native
 sanka apply --root . --plan-hash sha256:<hash printed by plan>
 sanka test .
 sanka verify .
@@ -87,6 +87,12 @@ sanka verify .
 against the DRF app and the generated FastAPI app and diffs the responses. The
 [DRF to FastAPI guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)
 walks through what each step checks and what stays manual.
+
+Commands use CLI output by default, even on a terminal. Open the optional
+dashboard with `sanka tui`, or add `--tui` to a supported command, such as
+`sanka plan . --to fastapi --tui`. Both interfaces share settings and reviewed
+plans. [Select endpoints](docs/endpoint-planning.md) with repeatable `--endpoint`
+IDs or `--all-endpoints`; [TUI controls](docs/tui.md) provide the same selection.
 
 ## Install
 

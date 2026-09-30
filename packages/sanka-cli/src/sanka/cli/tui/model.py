@@ -379,6 +379,8 @@ class Session:
     plan_hash: str | None = None
     configuration: dict[str, Any] = field(default_factory=dict)
     explicit_env_names: tuple[str, ...] = ()
+    endpoint_ids: tuple[str, ...] = ()
+    all_endpoints: bool = False
     endpoints: list[EndpointChoice] = field(default_factory=list)
     stage: StageRun = field(default_factory=lambda: StageRun("status"))
     job: JobRef | None = None
@@ -427,6 +429,11 @@ class Session:
                 parts += ["--artifact-dir", self.artifact_dir]
                 if self.target and command == "plan":
                     parts += ["--to", self.target]
+                if command == "plan":
+                    for endpoint in self.endpoint_ids:
+                        parts += ["--endpoint", endpoint]
+                    if self.all_endpoints:
+                        parts += ["--all-endpoints"]
                 if self.plan_hash and command == "apply":
                     parts += ["--plan-hash", self.plan_hash]
                 for name in self.explicit_env_names:

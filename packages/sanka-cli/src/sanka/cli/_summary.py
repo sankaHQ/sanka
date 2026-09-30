@@ -180,6 +180,26 @@ def _plan_lines(data: Mapping[str, Any], root: str | Path) -> list[str]:
                 f" ({native}/{eligible} non-alias routes)" if None not in (native, eligible) else ""
             )
             lines.append(f"  readiness {percent}%{detail}")
+    scope = data.get("endpoint_scope")
+    if isinstance(scope, Mapping) and scope.get("schema") == "sanka.endpoint-scope/v1":
+        selected = _count(scope.get("effective_ids")) or 0
+        retained = _count(scope.get("retained_ids")) or 0
+        omitted = _count(scope.get("omitted_ids")) or 0
+        lines.extend(
+            [
+                "",
+                f"Endpoints: {selected} selected, {retained} retained Generated, {omitted} omitted",
+            ]
+        )
+        for row in scope.get("endpoints", []):
+            if not isinstance(row, Mapping) or not isinstance(row.get("id"), str):
+                continue
+            state = "Manual" if row.get("blocked") else "Generated" if row.get("locked") else "New"
+            verification = (
+                "Verified" if row.get("verified") is True else "verification not reported"
+            )
+            choice = "selected" if row.get("selected") else "omitted"
+            lines.append(f"  {row['id']} — {state}; {verification}; {choice}")
     return lines
 
 

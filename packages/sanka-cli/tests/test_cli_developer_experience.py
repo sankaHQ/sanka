@@ -237,10 +237,12 @@ def _command_parser(parser: argparse.ArgumentParser, name: str) -> argparse.Argu
 
 def test_sdk_command_functional_options_are_explicit() -> None:
     parser = _build_parser()
-    presentation = {"help", "json", "compact_dsl", "no_color", "quiet", "verbose"}
+    presentation = {"help", "json", "compact_dsl", "no_color", "quiet", "verbose", "tui"}
     expected = {
         "scan": {"root", "settings", "artifact_dir", "extension_config", "extension_env"},
         "plan": {
+            "endpoint",
+            "all_endpoints",
             "root",
             "file",
             "state",

@@ -50,7 +50,7 @@ from sanka.cli.tui.model import (
 )
 from sanka.cli.tui.services import TuiServices, cloud_exit_code, preferred_extension
 from sanka.cli.tui.widgets import ActivityLog, CliLine, EmptyState, KeysBar, StageHeader
-from sanka.runtime.extensions.settings import Setting
+from sanka.runtime.extensions.settings import Setting, setting_defaults
 from sanka_cli import __version__
 
 _SETTLED = frozenset({"succeeded", "failed", "cancelled"})
@@ -642,7 +642,12 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
         declared: tuple[Setting, ...] = (),
     ) -> None:
         super().__init__()
-        self.target, self.values, self.drf, self.stage = target, values, drf, stage
+        self.target, self.values, self.drf, self.stage = (
+            target,
+            setting_defaults(declared, values),
+            drf,
+            stage,
+        )
         # Settings the installed extension declares in its wheel replace the built-in form.
         self.declared = declared
         self.locale = (locale.getlocale()[0] or "en").split("_")[0]
@@ -1502,6 +1507,8 @@ class StageScreen(SankaScreen):
             return
         session = self.sanka.session
         session.configuration["selected_endpoints"] = selected
+        session.endpoint_ids = ()
+        session.all_endpoints = False
         session.plan_hash = None
         session.stages.pop("apply", None)
         session.stages.pop("test", None)
@@ -1712,6 +1719,8 @@ class StageScreen(SankaScreen):
             on_activity=on_activity,
             endpoints=endpoints,
             explicit_env_names=self.sanka.session.explicit_env_names,
+            endpoint_ids=self.sanka.session.endpoint_ids if self.command == "plan" else (),
+            all_endpoints=self.sanka.session.all_endpoints if self.command == "plan" else False,
         )
         self.app.call_from_thread(self._finish, outcome)
 
@@ -1734,6 +1743,12 @@ class StageScreen(SankaScreen):
         discovered = parse_endpoints(outcome.run.result_data)
         if self.command == "plan" or discovered:
             session.endpoints = list(discovered)
+        if self.command == "plan" and outcome.run.phase == "succeeded":
+            saved = self.sanka.services.saved_configuration()
+            if saved:
+                session.configuration = saved
+            session.endpoint_ids = ()
+            session.all_endpoints = False
         self.query_one(StageHeader).show_stage(outcome.run, root=session.project_root)
         self._show_progress(outcome.run.progress)
         self.query_one("#rows").display = False

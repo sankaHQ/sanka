@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Open the Textual app from a TTY. ``--json`` and pipes stay on the CLI."""
+"""Open Textual only for an explicit TUI request."""
 
 from __future__ import annotations
 
@@ -17,11 +17,9 @@ _LIFECYCLE = frozenset({"scan", "plan", "apply", "test", "verify"})
 
 
 def use_human_tui(state: Any) -> bool:
-    from sanka_cli.output import resolve_output_format
+    from sanka_cli.state import validate_tui
 
-    return (
-        resolve_output_format(state.output) != "json" and sys.stdin.isatty() and sys.stdout.isatty()
-    )
+    return validate_tui(state, terminal=sys.stdin.isatty() and sys.stdout.isatty())
 
 
 def launch_dashboard(
@@ -83,16 +81,21 @@ def launch_local(args: Any) -> int:
     autostart = False
     if command in _LIFECYCLE:
         from sanka.cli import _extension_configuration
+        from sanka.runtime.extensions.lifecycle import resolve_plan_configuration
 
         session.target = getattr(args, "to", None)
         session.plan_hash = getattr(args, "plan_hash", None)
         saved = services.saved_configuration()
         if session.target is not None and session.target != saved.get("target"):
             saved = {}
-        session.configuration = {**saved, **_extension_configuration(args)}
+        session.configuration = resolve_plan_configuration(saved, _extension_configuration(args))
         if session.target is None:
             session.target = session.configuration.get("target")
         session.explicit_env_names = tuple(getattr(args, "extension_env", ()) or ())
+        session.endpoint_ids = tuple(getattr(args, "endpoint", ()) or ())
+        session.all_endpoints = bool(getattr(args, "all_endpoints", False))
+        if session.endpoint_ids or session.all_endpoints:
+            session.configuration.pop("selected_endpoints", None)
         session.stage = StageRun(command=command)
         session.endpoints = list(services.saved_endpoints())
         start = command

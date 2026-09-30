@@ -1,7 +1,40 @@
 # Interactive terminal workflow
 
-On a TTY, `sanka tui` opens the project dashboard. Lifecycle commands use the same
-screens; `--json`, `--compact-dsl`, help, pipes and CI retain the CLI printers.
+Commands use CLI output by default, including on a terminal. `sanka` prints help.
+Open the optional dashboard with `sanka tui` or `sanka --tui`. Add `--tui` to a
+supported command to open its screen with the same inputs:
+
+```bash
+sanka plan . --to fastapi --generation full --strategy native --package-manager uv
+sanka plan . --to fastapi --generation full --strategy native --package-manager uv --tui
+sanka status --tui
+sanka extension list --tui
+sanka extension marketplace list --tui
+sanka doctor --tui
+```
+
+Leading `sanka --tui plan . ...` is equivalent. Help always prints help. Explicit
+TUI needs stdin/stdout terminals and cannot be combined with JSON or compact
+output. Commands without a corresponding screen reject `--tui` before acting.
+Ordinary extension/marketplace operations, doctor, status and hosted monitors
+keep their CLI results; none opens a full-screen interface automatically.
+
+Use the CLI directly for unattended administration:
+
+```bash
+sanka extension list
+sanka extension add sanka/drf-to-fastapi
+sanka extension remove sanka/drf-to-fastapi
+sanka extension marketplace list
+sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name reviewed --revision FULL_COMMIT_SHA --trust
+sanka extension marketplace upgrade
+sanka extension marketplace remove reviewed
+sanka doctor --json
+sanka status
+```
+
+Use `--json` on supported commands for machine output. Installation preserves
+the existing trust and project-lock controls; `--tui` does not relax them.
 
 ## Local migration
 
@@ -52,7 +85,7 @@ it does not cancel it. Cancel requires its own confirmation when supported.
 
 ## Installation diagnostics
 
-On an interactive terminal, `sanka doctor` opens the Doctor screen. Open it from
+On an interactive terminal, `sanka doctor --tui` opens the Doctor screen. Open it from
 any idle TUI screen with `d` or the Doctor sidebar item. Refresh with `r`; Copy
 report copies the existing `sanka-doctor/v1` JSON diagnostics. The scrollable view
 shows CLI/Python versions, executable paths, duplicate installations and recovery
@@ -91,7 +124,7 @@ lifecycle screen. Export the values in the launching terminal first:
 ```bash
 sanka tui --extension-env SOURCE_PYTHON --extension-env TEST_DATABASE_URL
 # Or start directly at Scan:
-sanka scan . --extension-env SOURCE_PYTHON --extension-env TEST_DATABASE_URL
+sanka scan . --tui --extension-env SOURCE_PYTHON --extension-env TEST_DATABASE_URL
 ```
 
 Use the variable names required by your extension configuration. The selection

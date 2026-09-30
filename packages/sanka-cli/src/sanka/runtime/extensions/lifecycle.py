@@ -22,6 +22,7 @@ from sanka.runtime.extensions.runner import (
     ExtensionRunner,
     _canonical_environment_names,
 )
+from sanka.runtime.extensions.settings import setting_defaults
 from sanka.runtime.extensions.store import DEFAULT_EXTENSION_ID, ExtensionStore, LockEntry
 from sanka.runtime.hashing import content_hash
 from sanka.runtime.safe_local_io import (
@@ -58,6 +59,41 @@ type InputHints = Callable[[str, str | None], tuple[tuple[str, ...] | None, str 
 
 def _error(code: str, message: str, **details: Any) -> NoReturn:
     raise ExtensionError(code, message, details=details)
+
+
+def saved_plan(project_root: Path, artifact_dir: str = ".sanka") -> dict[str, Any]:
+    """Read shared plan state only while its reviewed content hash still matches."""
+    try:
+        payload = _read_json(project_root / artifact_dir / "plan.json", PLAN_SCHEMA)
+    except ExtensionError:
+        return {}
+    unsigned = {key: value for key, value in payload.items() if key != "plan_hash"}
+    return payload if content_hash(unsigned) == payload.get("plan_hash") else {}
+
+
+def saved_configuration(
+    project_root: Path, artifact_dir: str = ".sanka", target: str | None = None
+) -> dict[str, Any]:
+    values = saved_plan(project_root, artifact_dir).get("configuration")
+    if not isinstance(values, dict) or (target is not None and target != values.get("target")):
+        return {}
+    return dict(values)
+
+
+def resolve_plan_configuration(
+    saved: dict[str, Any],
+    explicit: dict[str, Any],
+    *,
+    replace_configuration: bool = False,
+    reset_scope: bool = False,
+) -> dict[str, Any]:
+    """CLI values override saved state; an edited form replaces it completely."""
+    normalized = dict(explicit) if replace_configuration else {**saved, **explicit}
+    if reset_scope or ("output" in explicit and explicit["output"] != saved.get("output")):
+        normalized.pop("selected_endpoints", None)
+        if "selected_endpoints" in explicit:
+            normalized["selected_endpoints"] = explicit["selected_endpoints"]
+    return normalized
 
 
 def _evidence(value: MatchedEvidence) -> dict[str, str]:
@@ -478,9 +514,25 @@ class ApplicationLifecycle:
         target: str | None,
         configuration: Mapping[str, Any] | None = None,
         explicit_env_names: tuple[str, ...] = (),
+        endpoint_ids: tuple[str, ...] = (),
+        all_endpoints: bool = False,
+        replace_configuration: bool = False,
     ) -> ExtensionResult:
         explicit_env_names = _canonical_environment_names(explicit_env_names)
-        normalized = _normalized_json_object(configuration)
+        explicit = _normalized_json_object(configuration)
+        convenience = bool(endpoint_ids) or all_endpoints
+        if (endpoint_ids and all_endpoints) or (convenience and "selected_endpoints" in explicit):
+            _error(
+                "SANKA_USAGE",
+                "Use --endpoint, --all-endpoints or selected_endpoints configuration; choose one",
+            )
+        if len(set(endpoint_ids)) != len(endpoint_ids):
+            _error("SANKA_USAGE", "--endpoint IDs must be unique")
+        saved = saved_configuration(self.project_root, str(self.artifact_root), target)
+        normalized = resolve_plan_configuration(
+            saved, explicit, replace_configuration=replace_configuration, reset_scope=convenience
+        )
+        target = target or normalized.get("target")
         fingerprint = fingerprint_repository(self.project_root)
         self._ensure_enabled(
             fingerprint,
@@ -490,18 +542,15 @@ class ApplicationLifecycle:
             recommendations = self._recommendations(fingerprint)
             if recommendations and not self._enabled(recommendations):
                 self._required(fingerprint, recommendations)
-            self._current_scan_locked(
-                fingerprint,
-                recommendations,
-                normalized,
-                explicit_env_names,
-            )
             return self._plan_locked(
                 fingerprint,
                 recommendations,
                 target,
                 normalized,
                 explicit_env_names,
+                endpoint_ids,
+                all_endpoints,
+                frozenset(explicit),
             )
 
     def _plan_locked(
@@ -511,6 +560,9 @@ class ApplicationLifecycle:
         target: str | None,
         normalized: dict[str, Any],
         explicit_env_names: tuple[str, ...],
+        endpoint_ids: tuple[str, ...] = (),
+        all_endpoints: bool = False,
+        explicit_keys: frozenset[str] = frozenset(),
     ) -> ExtensionResult:
         enabled = self._enabled(recommendations)
         targets = tuple(sorted({target for item in enabled for target in item.targets}))
@@ -544,14 +596,21 @@ class ApplicationLifecycle:
                 target=selected_target,
                 configured=configured_target,
             )
-        # An extension that advertises several targets learns the selection here. The
-        # reviewed core plan records it, so apply, test and verify receive the same value.
-        normalized = {**normalized, "target": selected_target}
         lock = self.store.resolve_locked(selected[0].id)
         self._verify_selection(lock, selected[0])
+        declaration = self.store.extension_settings(lock.id)
+        settings = declaration.for_stage("plan") if declaration else ()
+        normalized = setting_defaults(settings, normalized)
+        for setting in settings:
+            if setting.id not in explicit_keys and not setting.visible(normalized):
+                normalized.pop(setting.id, None)
+        self._current_scan_locked(fingerprint, recommendations, normalized, explicit_env_names)
+        # Later stages use the same reviewed target and configuration.
+        normalized = {**normalized, "target": selected_target}
         request = self._request(lock, "plan", fingerprint, normalized)
         extension_root = Path(request["artifact_root"])
         seen_inputs: set[str] = set()
+        scope_resolved = not (endpoint_ids or all_endpoints)
         while True:
             with self.store.execution_lease(lock) as executable_fd:
                 result = self.runner.run(
@@ -562,6 +621,40 @@ class ApplicationLifecycle:
                     executable_fd=executable_fd,
                 )
             if result.outcome == "success":
+                if not scope_resolved:
+                    scope = result.data.get("endpoint_scope")
+                    if (
+                        not isinstance(scope, dict)
+                        or scope.get("schema") != "sanka.endpoint-scope/v1"
+                        or not isinstance(scope.get("endpoints"), list)
+                    ):
+                        _error(
+                            "SANKA_EXTENSION_PROTOCOL",
+                            "Update this extension before selecting endpoints",
+                        )
+                    available = [
+                        row["id"]
+                        for row in scope["endpoints"]
+                        if isinstance(row, dict)
+                        and isinstance(row.get("id"), str)
+                        and not row.get("blocked")
+                    ]
+                    retained = scope.get("retained_ids", [])
+                    if not isinstance(retained, list) or any(
+                        not isinstance(key, str) for key in retained
+                    ):
+                        _error("SANKA_EXTENSION_PROTOCOL", "Invalid retained endpoint scope")
+                    requested_ids = available if all_endpoints else list(endpoint_ids)
+                    if not requested_ids or set(requested_ids) - set(available):
+                        _error(
+                            "SANKA_USAGE",
+                            "Select supported captured endpoint IDs",
+                            available_ids=available,
+                        )
+                    normalized["selected_endpoints"] = sorted(set(requested_ids) | set(retained))
+                    request["configuration"] = normalized
+                    scope_resolved = True
+                    continue
                 break
             details = (result.error or {}).get("details")
             inputs = details.get("inputs") if isinstance(details, dict) else None
@@ -577,16 +670,37 @@ class ApplicationLifecycle:
                 self._raise_failure(result)
             assert isinstance(inputs, list)
             if not self.interactive:
-                flags = ", ".join(f"--{name.replace('_', '-')}" for name in inputs)
+                flag_names = {
+                    "generation": "generation",
+                    "package_manager": "package-manager",
+                    "output": "output",
+                    "strategy": "strategy",
+                    "orm": "orm",
+                    "settings_module": "settings",
+                    "min_readiness": "min-readiness",
+                }
+                flags = ", ".join(f"--{flag_names[name]}" for name in inputs if name in flag_names)
+                flags_hint = f"{flags}, or " if flags else ""
                 _error(
                     "SANKA_EXTENSION_INPUT_REQUIRED",
-                    f"Missing plan inputs: {', '.join(inputs)}. Pass {flags}, "
-                    "or run plan in an interactive terminal to be asked for them",
+                    f"Missing plan inputs: {', '.join(inputs)}. Pass {flags_hint}"
+                    "--extension-config with those keys. Run plan in an interactive "
+                    "terminal to be asked for them",
                     inputs=list(inputs),
                 )
             for name in inputs:
                 choices, default = self._input_hint(name, selected_target)
                 label = f"Extension configuration: {name}"
+                declared = next(
+                    (item for item in settings if item.id == name and item.visible(normalized)),
+                    None,
+                )
+                if declared:
+                    label = declared.text(declared.label)
+                    if declared.choices:
+                        choices = tuple(item.value for item in declared.choices)
+                    if isinstance(declared.default, str):
+                        default = declared.default
                 if default is not None and not choices:
                     label = f"{label} [{default}]"
                 answer = self._prompt(label, choices)

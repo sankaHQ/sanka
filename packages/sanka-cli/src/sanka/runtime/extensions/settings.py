@@ -63,6 +63,20 @@ class ExtensionSettings:
         return tuple(item for item in self.settings if item.stage == stage)
 
 
+def setting_defaults(settings: tuple[Setting, ...], values: dict[str, Any]) -> dict[str, Any]:
+    """Use visible declaration defaults without replacing explicit or saved values."""
+    defaults = {item.id: item.default for item in settings if item.default is not None}
+    resolved = {**defaults, **values}
+    return {
+        **{
+            item.id: resolved[item.id]
+            for item in settings
+            if item.id in resolved and item.visible(resolved)
+        },
+        **values,
+    }
+
+
 def _label(value: Any, field: str) -> dict[str, str]:
     if not isinstance(value, dict) or not all(
         isinstance(value.get(key), str) and value[key] for key in ("en", "ja")

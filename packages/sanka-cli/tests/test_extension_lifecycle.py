@@ -57,6 +57,9 @@ def _recommendation(
 
 
 class FakeStore:
+    def extension_settings(self, _extension_id: str) -> None:
+        return None
+
     def __init__(self, *, installed: bool = False, default_available: bool = False) -> None:
         self.installed = installed
         self.disabled = False
@@ -511,7 +514,7 @@ def test_plan_refreshes_the_full_plan_only_recommendation_envelope(
     active = _recommendation(active_lock, marketplace="a", targets=("fastapi",))
     observed = _recommendation(observed_lock, marketplace="b", targets=("flask",))
 
-    class Store:
+    class Store(FakeStore):
         recommendations_value = (observed, active)
 
         def recommendations(self, _fingerprint: object) -> tuple[Recommendation, ...]:
@@ -915,14 +918,14 @@ def test_plan_rejects_a_conflicting_configured_target(tmp_path: Path) -> None:
     runner = FakeRunner()
     lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
     lifecycle.scan()
+    scan_before = (project / ".sanka" / "scan.json").read_bytes()
 
     with pytest.raises(ExtensionError) as raised:
         lifecycle.plan(target="fastapi", configuration={"target": "flask"})
 
     assert raised.value.code == "SANKA_EXTENSION_TARGET_MISMATCH"
-    # The changed configuration refreshes the read-only scan before target selection;
-    # no plan request is sent.
-    assert [request["command"] for _lock, request in runner.calls] == ["scan", "scan"]
+    assert (project / ".sanka" / "scan.json").read_bytes() == scan_before
+    assert not (project / ".sanka" / "plan.json").exists()
 
     planned = lifecycle.plan(target="fastapi", configuration={"target": "fastapi"})
 
@@ -989,10 +992,13 @@ def test_interactive_plan_without_hints_still_fails_on_an_empty_answer(tmp_path:
     assert raised.value.details == {"inputs": ["generation"]}
 
 
-def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(tmp_path: Path) -> None:
+@pytest.mark.parametrize("inputs", (["generation", "package_manager"], ["database_layer"]))
+def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(
+    tmp_path: Path, inputs: list[str]
+) -> None:
     project = _project(tmp_path)
     runner = FakeRunner()
-    runner.required_inputs = ["generation", "package_manager"]
+    runner.required_inputs = inputs
     lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
     lifecycle.scan()
 
@@ -1000,6 +1006,99 @@ def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(tmp_path: Path) -
         lifecycle.plan(target="fastapi")
 
     assert raised.value.code == "SANKA_EXTENSION_INPUT_REQUIRED"
-    assert raised.value.details == {"inputs": ["generation", "package_manager"]}
-    assert "Missing plan inputs: generation, package_manager" in str(raised.value)
-    assert "--generation, --package-manager" in str(raised.value)
+    assert raised.value.details == {"inputs": inputs}
+    assert f"Missing plan inputs: {', '.join(inputs)}" in str(raised.value)
+    assert "--extension-config" in str(raised.value)
+    if "generation" in inputs:
+        assert "--generation, --package-manager" in str(raised.value)
+    else:
+        assert "--database-layer" not in str(raised.value)
+
+
+def test_plan_form_can_clear_saved_optional_and_conditional_values(tmp_path: Path) -> None:
+    from sanka.cli.tui.services import _dispatch_lifecycle
+
+    project = _project(tmp_path)
+    runner = FakeRunner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    lifecycle.plan(
+        target="fastapi",
+        configuration={
+            "settings_module": "config.old",
+            "database_layer": "pgx",
+            "schema_mode": "sqlalchemy",
+            "models_file": "models.py",
+        },
+    )
+    _dispatch_lifecycle(
+        lifecycle,
+        "plan",
+        target="fastapi",
+        plan_hash=None,
+        configuration={"database_layer": "none"},
+    )
+    assert runner.calls[-1][1]["configuration"] == {
+        "database_layer": "none",
+        "target": "fastapi",
+    }
+
+
+def test_declared_plan_defaults_reach_the_prerequisite_scan(tmp_path: Path) -> None:
+    from sanka.runtime.extensions.settings import parse_settings
+
+    declaration = parse_settings(
+        {
+            "schema_version": "sanka-extension-settings/v1",
+            "display": {"name": {"en": "Go", "ja": "Go"}},
+            "settings": [
+                {
+                    "id": "source_framework",
+                    "stage": "plan",
+                    "type": "choice",
+                    "default": "drf",
+                    "label": {"en": "Source", "ja": "Source"},
+                    "choices": [{"value": "drf", "label": {"en": "DRF", "ja": "DRF"}}],
+                },
+                {
+                    "id": "database_layer",
+                    "stage": "plan",
+                    "type": "choice",
+                    "default": "none",
+                    "label": {"en": "Database", "ja": "Database"},
+                    "choices": [
+                        {"value": value, "label": {"en": value, "ja": value}}
+                        for value in ("none", "pgx")
+                    ],
+                },
+                {
+                    "id": "models_file",
+                    "stage": "plan",
+                    "type": "text",
+                    "default": None,
+                    "optional": True,
+                    "label": {"en": "Models", "ja": "Models"},
+                    "when": {"database_layer": "pgx"},
+                },
+            ],
+        }
+    )
+
+    class Store(FakeStore):
+        def extension_settings(self, _id: str) -> Any:
+            return declaration
+
+    class Runner(FakeRunner):
+        def run(self, lock: LockEntry, request: dict[str, Any], **kwargs: Any) -> ExtensionResult:
+            if request["command"] == "scan":
+                assert request["configuration"]["source_framework"] == "drf"
+            return super().run(lock, request, **kwargs)
+
+    runner = Runner()
+    lifecycle = _lifecycle(_project(tmp_path), Store(installed=True), runner)
+    lifecycle.plan(
+        target="fastapi", configuration={"database_layer": "pgx", "models_file": "models.py"}
+    )
+    lifecycle.plan(target="fastapi", configuration={"database_layer": "none"})
+    assert "models_file" not in runner.calls[-1][1]["configuration"]
+    lifecycle.plan(target="fastapi", configuration={"models_file": "explicit-invalid.py"})
+    assert runner.calls[-1][1]["configuration"]["models_file"] == "explicit-invalid.py"
