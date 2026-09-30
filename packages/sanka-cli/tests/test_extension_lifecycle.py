@@ -175,8 +175,6 @@ def _lifecycle(
     input_hints: Callable[[str, str | None], tuple[tuple[str, ...] | None, str | None]]
     | None = None,
 ) -> ApplicationLifecycle:
-    if not hasattr(store, "extension_settings"):
-        store.extension_settings = lambda _id: None  # type: ignore[attr-defined]
     if not hasattr(store, "execution_guard"):
         store.execution_guard = nullcontext  # type: ignore[attr-defined]
     if not hasattr(store, "execution_lease"):

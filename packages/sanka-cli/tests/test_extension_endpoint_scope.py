@@ -131,7 +131,8 @@ def test_changed_output_has_the_same_cli_and_tui_scope(tmp_path: Path, monkeypat
             return result
 
     project = _project(tmp_path)
-    lifecycle = _lifecycle(project, FakeStore(installed=True), Runner())
+    runner = Runner()
+    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
     lifecycle.plan(
         target="fastapi", configuration={"output": "old", "selected_endpoints": ["GET /one"]}
     )
@@ -146,7 +147,7 @@ def test_changed_output_has_the_same_cli_and_tui_scope(tmp_path: Path, monkeypat
             plan_hash=None,
             configuration=app.session.configuration,
         )
-        assert "selected_endpoints" not in lifecycle.runner.calls[-1][1]["configuration"]
+        assert "selected_endpoints" not in runner.calls[-1][1]["configuration"]
         return 0
 
     monkeypatch.setattr(launch, "_run", inspect)
