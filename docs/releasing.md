@@ -8,9 +8,10 @@ saved configuration, reviewed endpoint scope and plan hashes. Repeatable
 `plan --endpoint ID` includes receipt/file-checked retained endpoints;
 `--all-endpoints` selects the supported inventory.
 
-The disposable sanka-examples checks exposed a Go subset replay defect. Publish
-and verify the coordinated Go a12 fix before pinning the final CLI catalog and
-publishing 0.3.4. Retain the native router and database gates. Verify public wheel
+The default catalog pins verified Extensions commit
+`3d2569af990bd0369d2e17bfae48bd1b1e2433a6` and its public
+`api-converters-v0.1.0a12` release, including the Go subset replay fix found by
+the disposable sanka-examples checks. Retain the native router and database gates. Verify public wheel
 and source hashes, clean installer, CLI-default/explicit-TUI dispatch and partial
 lifecycle before updating the public English and Japanese guides. Never replace
 0.3.3 or an existing extension release.
