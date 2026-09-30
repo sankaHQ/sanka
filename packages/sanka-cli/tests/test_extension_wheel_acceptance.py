@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -318,7 +319,61 @@ def test_endpoint_selection_from_installed_wheel(
         "strategy": "native",
     }
     env_args = ("--extension-env", "PYTHONPATH", "--json")
-    for selected in (["GET /api/health/"], ["GET /api/health/", "POST /api/health/"]):
+    # A CLI partial plan is consumed in the real TUI; its cumulative plan returns to CLI.
+    from click.testing import CliRunner
+
+    import sanka.cli as local_cli
+    from sanka.cli.tui import launch
+    from sanka.cli.tui.app import ConfirmScreen, PlanConfiguration, SankaApp, trust_folder
+    from sanka_cli.main import cli
+
+    command_environment = _command_environment(environment)
+    monkeypatch.setenv("SANKA_HOME", command_environment["SANKA_HOME"])
+    monkeypatch.setenv("PYTHONPATH", command_environment["PYTHONPATH"])
+    monkeypatch.setattr(local_cli, "_interactive_terminal", lambda: True)
+    trust_folder(str(drf_extension_fixture))
+
+    def run_screen(app: SankaApp) -> int:
+        async def drive() -> int:
+            async with app.run_test(size=(100, 35)) as pilot:
+                await pilot.pause()
+                await pilot.click("#run-stage")
+                await pilot.pause()
+                if isinstance(app.screen, PlanConfiguration):
+                    await pilot.click("#save-configuration")
+                    await pilot.pause()
+                    await pilot.click("#run-stage")
+                    await pilot.pause()
+                if isinstance(app.screen, ConfirmScreen):
+                    await pilot.click("#yes")
+                await asyncio.wait_for(app.workers.wait_for_complete(), 60)
+                await pilot.pause()
+                assert app.session.stage.phase == "succeeded", app.session.stage.error_message
+                assert app.session.configuration["selected_endpoints"]
+                return app.session.exit_code
+
+        return asyncio.run(drive())
+
+    monkeypatch.setattr(launch, "_run", run_screen)
+    for selection in (["GET /api/health/"], ["POST /api/health/"]):
+        selected = sorted(set(selection) | ({"GET /api/health/"} if output.exists() else set()))
+        tui_hash = None
+        if output.exists():
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "plan",
+                    str(drf_extension_fixture),
+                    "--endpoint",
+                    selection[0],
+                    "--tui",
+                    *env_args[:-1],
+                ],
+            )
+            assert result.exit_code == 0, result.output
+            tui_hash = json.loads((drf_extension_fixture / ".sanka" / "plan.json").read_text())[
+                "plan_hash"
+            ]
         planned = run_json(
             environment,
             "plan",
@@ -326,23 +381,41 @@ def test_endpoint_selection_from_installed_wheel(
             "--to",
             "fastapi",
             "--extension-config",
-            json.dumps(config | {"selected_endpoints": selected}),
+            json.dumps(config),
+            *[part for endpoint in selection for part in ("--endpoint", endpoint)],
             *env_args,
         )
         data = cast(dict[str, Any], planned["data"])
+        if tui_hash:
+            assert data["plan_hash"] == tui_hash
         assert data["endpoint_scope"]["effective_ids"] == selected
         assert data["endpoint_scope"]["retained_ids"] == (
             [] if len(selected) == 1 else ["GET /api/health/"]
         )
-        run_json(
-            environment,
-            "apply",
-            "--root",
-            str(drf_extension_fixture),
-            "--plan-hash",
-            data["plan_hash"],
-            *env_args,
-        )
+        if len(selected) == 1:
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "apply",
+                    "--root",
+                    str(drf_extension_fixture),
+                    "--plan-hash",
+                    data["plan_hash"],
+                    "--tui",
+                    *env_args[:-1],
+                ],
+            )
+            assert result.exit_code == 0, result.output
+        else:
+            run_json(
+                environment,
+                "apply",
+                "--root",
+                str(drf_extension_fixture),
+                "--plan-hash",
+                data["plan_hash"],
+                *env_args,
+            )
         assert (
             run_json(environment, "test", str(drf_extension_fixture), *env_args)["outcome"]
             == "success"
@@ -359,7 +432,8 @@ def test_endpoint_selection_from_installed_wheel(
         "--to",
         "fastapi",
         "--extension-config",
-        json.dumps(config | {"selected_endpoints": selected}),
+        json.dumps(config),
+        "--all-endpoints",
         *env_args,
     )
     assert status != 0

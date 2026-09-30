@@ -241,6 +241,8 @@ def test_sdk_command_functional_options_are_explicit() -> None:
     expected = {
         "scan": {"root", "settings", "artifact_dir", "extension_config", "extension_env"},
         "plan": {
+            "endpoint",
+            "all_endpoints",
             "root",
             "file",
             "state",

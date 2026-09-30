@@ -18,6 +18,9 @@ from sanka.cli.tui.services import preferred_extension
 
 
 class FakeServices:
+    def saved_configuration(self) -> dict[str, Any]:
+        return {}
+
     def __init__(self) -> None:
         self.settings: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
@@ -178,6 +181,8 @@ class FakeServices:
         on_activity: Any,
         endpoints: tuple[str, ...] = (),
         explicit_env_names: tuple[str, ...] = (),
+        endpoint_ids: tuple[str, ...] = (),
+        all_endpoints: bool = False,
     ) -> StageOutcome:
         on_activity(f"Waiting on the {command} extension")
         self.calls.append(

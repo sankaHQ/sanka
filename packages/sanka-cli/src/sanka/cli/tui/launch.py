@@ -91,6 +91,10 @@ def launch_local(args: Any) -> int:
         if session.target is None:
             session.target = session.configuration.get("target")
         session.explicit_env_names = tuple(getattr(args, "extension_env", ()) or ())
+        session.endpoint_ids = tuple(getattr(args, "endpoint", ()) or ())
+        session.all_endpoints = bool(getattr(args, "all_endpoints", False))
+        if session.endpoint_ids or session.all_endpoints:
+            session.configuration.pop("selected_endpoints", None)
         session.stage = StageRun(command=command)
         session.endpoints = list(services.saved_endpoints())
         start = command

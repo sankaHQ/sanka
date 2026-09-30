@@ -161,7 +161,8 @@ def main(
             error,
             exit_code=(
                 2
-                if args.command == "plan" and error.code == "SANKA_EXTENSION_TARGET_REQUIRED"
+                if error.code == "SANKA_USAGE"
+                or (args.command == "plan" and error.code == "SANKA_EXTENSION_TARGET_REQUIRED")
                 else 1
             ),
         )
@@ -386,6 +387,17 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="omit FastAPI Swagger UI at /docs; keep OpenAPI and ReDoc",
     )
     extension_options(plan)
+    scope = plan.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--endpoint",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="select an exact captured endpoint ID (repeatable); retain Generated endpoints",
+    )
+    scope.add_argument(
+        "--all-endpoints", action="store_true", help="select all supported endpoints"
+    )
     presentation(plan)
     plan.set_defaults(handler=_cmd_plan)
 
@@ -1013,6 +1025,12 @@ def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
     for name in ("force", "gap_report_only", "no_http", "all_headers", "edge_probes"):
         if getattr(args, name, False):
             configuration[name] = True
+    if (
+        getattr(args, "endpoint", None) or getattr(args, "all_endpoints", False)
+    ) and "selected_endpoints" in configuration:
+        raise CliUsageError(
+            "Use --endpoint, --all-endpoints or selected_endpoints configuration, not a combination"
+        )
     return configuration
 
 
@@ -1076,6 +1094,24 @@ def _print_application_result(
         if command == "plan" and isinstance(result.data.get("plan_hash"), str):
             print(f"plan {result.data['plan_hash']}")
         if next_hint and not quiet:
+            if command == "plan":
+                next_hint = shlex.join(
+                    [
+                        "sanka",
+                        "apply",
+                        "--root",
+                        str(args.root),
+                        "--artifact-dir",
+                        str(args.artifact_dir),
+                        "--plan-hash",
+                        str(result.data["plan_hash"]),
+                        *[
+                            part
+                            for name in args.extension_env
+                            for part in ("--extension-env", name)
+                        ],
+                    ]
+                )
             print(f"next: {next_hint}")
     return 0
 
@@ -1084,10 +1120,14 @@ async def _cmd_plan(args: argparse.Namespace) -> int:
     if _application_lifecycle_requested(args):
         if args.swagger_ui is not None and args.to not in (None, "fastapi"):
             raise CliUsageError("--swagger-ui/--no-swagger-ui requires --to fastapi")
+        selection: dict[str, Any] = {}
+        if args.endpoint or args.all_endpoints:
+            selection = {"endpoint_ids": tuple(args.endpoint), "all_endpoints": args.all_endpoints}
         result = _application_lifecycle(args).plan(
             target=args.to,
             configuration=_extension_configuration(args),
             explicit_env_names=tuple(args.extension_env),
+            **selection,
         )
         return _print_application_result(args, "plan", result, migration_state="planned")
     spec = _load_spec(args.file)

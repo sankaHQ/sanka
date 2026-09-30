@@ -57,6 +57,9 @@ def _recommendation(
 
 
 class FakeStore:
+    def extension_settings(self, _extension_id: str) -> None:
+        return None
+
     def __init__(self, *, installed: bool = False, default_available: bool = False) -> None:
         self.installed = installed
         self.disabled = False
@@ -172,6 +175,8 @@ def _lifecycle(
     input_hints: Callable[[str, str | None], tuple[tuple[str, ...] | None, str | None]]
     | None = None,
 ) -> ApplicationLifecycle:
+    if not hasattr(store, "extension_settings"):
+        store.extension_settings = lambda _id: None  # type: ignore[attr-defined]
     if not hasattr(store, "execution_guard"):
         store.execution_guard = nullcontext  # type: ignore[attr-defined]
     if not hasattr(store, "execution_lease"):
@@ -989,10 +994,13 @@ def test_interactive_plan_without_hints_still_fails_on_an_empty_answer(tmp_path:
     assert raised.value.details == {"inputs": ["generation"]}
 
 
-def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(tmp_path: Path) -> None:
+@pytest.mark.parametrize("inputs", (["generation", "package_manager"], ["database_layer"]))
+def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(
+    tmp_path: Path, inputs: list[str]
+) -> None:
     project = _project(tmp_path)
     runner = FakeRunner()
-    runner.required_inputs = ["generation", "package_manager"]
+    runner.required_inputs = inputs
     lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
     lifecycle.scan()
 
@@ -1000,6 +1008,10 @@ def test_plan_names_the_missing_inputs_and_flags_outside_a_tty(tmp_path: Path) -
         lifecycle.plan(target="fastapi")
 
     assert raised.value.code == "SANKA_EXTENSION_INPUT_REQUIRED"
-    assert raised.value.details == {"inputs": ["generation", "package_manager"]}
-    assert "Missing plan inputs: generation, package_manager" in str(raised.value)
-    assert "--generation, --package-manager" in str(raised.value)
+    assert raised.value.details == {"inputs": inputs}
+    assert f"Missing plan inputs: {', '.join(inputs)}" in str(raised.value)
+    assert "--extension-config" in str(raised.value)
+    if "generation" in inputs:
+        assert "--generation, --package-manager" in str(raised.value)
+    else:
+        assert "--database-layer" not in str(raised.value)

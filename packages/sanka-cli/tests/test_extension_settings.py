@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from tui_helpers import DECLARATION
 
-from sanka.runtime.extensions.settings import read_wheel_settings
+from sanka.runtime.extensions.settings import read_wheel_settings, setting_defaults
 
 
 def wheel(
@@ -31,6 +31,12 @@ def test_declared_settings_are_read_from_the_verified_wheel(tmp_path: Path) -> N
     assert [item.id for item in plan] == ["orm", "generation", "min_readiness"]
     assert not plan[1].visible({"orm": "django"})
     assert plan[1].visible({"orm": "sqlalchemy"})
+    assert setting_defaults(plan, {"orm": "django"}) == {"orm": "django", "min_readiness": 0}
+    assert setting_defaults(plan, {"orm": "sqlalchemy", "min_readiness": 95}) == {
+        "orm": "sqlalchemy",
+        "generation": "minimal",
+        "min_readiness": 95,
+    }
 
 
 @pytest.mark.parametrize(

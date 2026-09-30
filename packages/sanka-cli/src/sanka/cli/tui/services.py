@@ -27,9 +27,9 @@ from sanka.cli.tui.model import (
     parse_tests,
     progress_fraction,
 )
+from sanka.runtime.extensions.lifecycle import saved_configuration, saved_plan
 from sanka.runtime.extensions.model import ExtensionError
 from sanka.runtime.extensions.settings import ExtensionSettings
-from sanka.runtime.hashing import content_hash
 
 Activity = Callable[[str], None]
 
@@ -60,6 +60,8 @@ class TuiServices(Protocol):
 
     def saved_endpoints(self) -> tuple[EndpointChoice, ...]: ...
 
+    def saved_configuration(self) -> dict[str, Any]: ...
+
     def install(self, extension_id: str, marketplace: str | None = None) -> str: ...
 
     def remove(self, extension_id: str) -> str: ...
@@ -89,6 +91,8 @@ class TuiServices(Protocol):
         on_activity: Activity,
         endpoints: tuple[str, ...] = (),
         explicit_env_names: tuple[str, ...] = (),
+        endpoint_ids: tuple[str, ...] = (),
+        all_endpoints: bool = False,
     ) -> StageOutcome: ...
 
     def history(self) -> tuple[HistoryEntry, ...]: ...
@@ -145,18 +149,8 @@ def preferred_extension(
 
 
 def read_plan_hash(root: Path, artifact_dir: str) -> str | None:
-    path = root / artifact_dir / "plan.json"
-    try:
-        payload = json_loads(path)
-    except (OSError, ValueError):
-        return None
-    reviewed = payload.get("plan_hash")
-    if not isinstance(reviewed, str):
-        return None
-    unsigned = {key: value for key, value in payload.items() if key != "plan_hash"}
-    if content_hash(unsigned) != reviewed:
-        return None
-    return reviewed
+    reviewed = saved_plan(root, artifact_dir).get("plan_hash")
+    return reviewed if isinstance(reviewed, str) else None
 
 
 def json_loads(path: Path) -> dict[str, Any]:
@@ -332,11 +326,7 @@ class HostServices:
         return (reviewed,) if reviewed else ()
 
     def saved_configuration(self) -> dict[str, Any]:
-        if read_plan_hash(self.root, self.artifact_dir) is None:
-            return {}
-        payload = json_loads(self.root / self.artifact_dir / "plan.json")
-        values = payload.get("configuration")
-        return dict(values) if isinstance(values, dict) else {}
+        return saved_configuration(self.root, self.artifact_dir)
 
     def saved_endpoints(self) -> tuple[EndpointChoice, ...]:
         path = self.root / self.artifact_dir / "scan.json"
@@ -419,6 +409,8 @@ class HostServices:
         on_activity: Activity,
         endpoints: tuple[str, ...] = (),
         explicit_env_names: tuple[str, ...] = (),
+        endpoint_ids: tuple[str, ...] = (),
+        all_endpoints: bool = False,
     ) -> StageOutcome:
         from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
         from sanka.runtime.extensions.runner import ExtensionRunner
@@ -452,6 +444,8 @@ class HostServices:
                 plan_hash=plan_hash,
                 configuration=cleaned,
                 explicit_env_names=explicit_env_names,
+                endpoint_ids=endpoint_ids,
+                all_endpoints=all_endpoints,
             )
         except ExtensionError as error:
             outcome = _outcome_from_error(command, error, started)
@@ -761,12 +755,22 @@ def _dispatch_lifecycle(
     plan_hash: str | None,
     configuration: Mapping[str, Any],
     explicit_env_names: tuple[str, ...] = (),
+    endpoint_ids: tuple[str, ...] = (),
+    all_endpoints: bool = False,
 ) -> Any:
     if command == "scan":
         return lifecycle.scan(configuration=configuration, explicit_env_names=explicit_env_names)
     if command == "plan":
+        selection = (
+            {"endpoint_ids": endpoint_ids, "all_endpoints": all_endpoints}
+            if endpoint_ids or all_endpoints
+            else {}
+        )
         return lifecycle.plan(
-            target=target, configuration=configuration, explicit_env_names=explicit_env_names
+            target=target,
+            configuration=configuration,
+            explicit_env_names=explicit_env_names,
+            **selection,
         )
     if command == "apply":
         if not plan_hash:
