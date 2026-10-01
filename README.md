@@ -126,12 +126,12 @@ for Homebrew upgrades, PATH conflicts, and project environments.
 The base installation contains no provider or framework implementation.
 Official extensions are immutable GitHub release wheels described by the
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions) marketplace.
-Configure its trusted snapshot, then install only the components required by a
-migration:
+The official marketplace is already configured and trusted. Install only the
+extensions required by a migration:
 
 ```bash
-sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name sanka
 sanka extension add sanka/drf-to-fastapi
+sanka extension add sanka/python-to-golang
 ```
 
 The revised official catalog offers code migration extensions. The CLI's default
@@ -149,6 +149,17 @@ and lock a compatible manifest before starting the next migration. To inspect a
 candidate or retain a particular catalog, add a separately named
 marketplace with `--revision FULL_COMMIT_SHA`; upgrades retain that exact revision.
 Explicit revisions may refer to unpublished artifacts, which still fail installation.
+
+Duplicate aliases of the same source appear once in CLI and TUI extension lists.
+Remove a redundant alias with `sanka extension marketplace remove <name>`;
+locked snapshots remain available through the remaining trusted alias. Removing
+the last trusted source for the current project's lock is blocked. Explicitly
+remove or update that project's extension first.
+
+For the supported Python-to-Go SQLite example, choose `database_layer: "sqlite"`
+in Plan configuration. No Docker or Podman database setup is needed. PostgreSQL
+still requires a disposable test database. CLI flags and the optional TUI use
+the same settings and endpoint selection.
 
 Project pins live in `.sanka/extensions.lock`; marketplace
 snapshots and verified artifacts live under `~/.sanka/extensions` or
