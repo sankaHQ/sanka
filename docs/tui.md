@@ -36,6 +36,18 @@ sanka status
 Use `--json` on supported commands for machine output. Installation preserves
 the existing trust and project-lock controls; `--tui` does not relax them.
 
+Aliases of one marketplace repository produce one extension choice in both CLI
+and TUI, preferring `official`. An explicit `--marketplace NAME` still selects
+that alias's pinned snapshot. Distinct repositories offering the same extension
+remain separate choices. Refresh an existing catalog with
+`sanka extension marketplace upgrade official`; ordinary installation needs only
+`sanka extension add sanka/python-to-golang`.
+
+A redundant alias such as `release` can be removed while another trusted alias
+for that repository remains. Project locks and historical snapshots stay pinned.
+Removing the last source referenced by the current project lock remains blocked;
+remove or rebind that project's extensions first.
+
 ## Local migration
 
 Choose Plan and a marketplace target. Configure opens an editable form before a

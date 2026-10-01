@@ -45,13 +45,16 @@ class Setting:
     maximum: int | None = None
     optional: bool = False
     advanced: bool = False
-    when: tuple[tuple[str, Value], ...] = ()
+    when: tuple[tuple[str, Value | tuple[Value, ...]], ...] = ()
 
     def text(self, field: dict[str, str] | None, locale: str = "en") -> str:
         return (field or {}).get(locale) or (field or {}).get("en", "")
 
     def visible(self, values: dict[str, Any]) -> bool:
-        return all(values.get(key) == value for key, value in self.when)
+        return all(
+            values.get(key) in value if isinstance(value, tuple) else values.get(key) == value
+            for key, value in self.when
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +137,10 @@ def parse_settings(document: Any) -> ExtensionSettings:
         when = item.get("when", {})
         if not isinstance(when, dict) or any(k not in ids or k == key for k in when):
             raise ValueError(f"{key}: when must refer to other settings")
+        for value in when.values():
+            values = value if isinstance(value, list) else [value]
+            if not values or any(v is not None and type(v) not in {str, bool, int} for v in values):
+                raise ValueError(f"{key}: when needs scalar values or a nonempty scalar list")
         settings.append(
             Setting(
                 id=key,
@@ -151,7 +158,9 @@ def parse_settings(document: Any) -> ExtensionSettings:
                 maximum=item.get("maximum"),
                 optional=optional,
                 advanced=item.get("advanced") is True,
-                when=tuple(sorted(when.items())),
+                when=tuple(
+                    (k, tuple(v) if isinstance(v, list) else v) for k, v in sorted(when.items())
+                ),
             )
         )
     return ExtensionSettings(name=name, settings=tuple(settings))
