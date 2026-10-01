@@ -1,5 +1,29 @@
 # Sanka release procedure
 
+## Migration fixes release 0.3.5
+
+Version 0.3.5 removes redundant marketplace aliases without deleting artifacts
+referenced by project locks. The last trusted matching source remains protected.
+The TUI lists identical extension snapshots once and lets users clear obsolete
+Plan configuration. Ordinary commands remain CLI-first; `sanka tui` and `--tui`
+open the same saved configuration and endpoint selection.
+
+The default catalog pins Extensions commit
+`273175bb3778f8355f2590ceedde0eb72863f113`, with immutable bundles
+`extensions-v0.1.0a36` and `api-converters-v0.1.0a13`. They contain DRF-to-Flask
+0.1.0a15, DRF-to-FastAPI 0.1.0a21, shared replay 0.1.0a5 and Python-to-Go
+0.1.0a13. The bounded Go persistence paths are SQLite to SQLite, SQLite to
+PostgreSQL and PostgreSQL to PostgreSQL; PostgreSQL to SQLite is rejected.
+
+Publish and verify both extension bundles before publishing this CLI. Require
+the private converter regression on that exact Extensions commit, public wheel
+hashes and fresh installed Scan/Plan/Apply/Test/Verify against the checked-in
+examples. Reuse the maintained package, flow and quickstart gates below. Verify
+fresh and upgraded installers preserve existing locks, CLI/explicit-TUI behavior,
+marketplace deduplication and reviewed partial endpoint scope. Publish the English
+and Japanese guides with actual 0.3.5 TUI captures and tested agent prompts only
+after public installation succeeds. Never replace an existing tag or artifact.
+
 ## CLI-default release 0.3.4
 
 Version 0.3.4 makes CLI output the default on terminals. `sanka tui` and explicit
