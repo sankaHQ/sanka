@@ -1709,10 +1709,14 @@ class ExtensionStore:
             if any(
                 entry.marketplace_identity == raw["identity"]
                 for entry in self._load_lock().values()
+            ) and not any(
+                item is not raw and item["identity"] == raw["identity"] and item.get("trusted")
+                for item in records
             ):
                 _error(
                     "SANKA_MARKETPLACE_IN_USE",
-                    "Marketplace is referenced by the current project lock",
+                    "This is the last marketplace used by the project lock; "
+                    "switch or remove its locked extensions first",
                     name=name,
                 )
             records.remove(raw)
@@ -2006,15 +2010,24 @@ class ExtensionStore:
             },
         )
 
-    def _catalog(self) -> list[tuple[MarketplaceRecord, Manifest]]:
+    def _catalog(self, marketplace: str | None = None) -> list[tuple[MarketplaceRecord, Manifest]]:
         values: list[tuple[MarketplaceRecord, Manifest]] = []
-        for record in self.marketplaces():
+        # Aliases identify the same source, not additional extension choices.
+        # Explicit aliases still select their own immutable revision.
+        sources: dict[str, MarketplaceRecord] = {}
+        for record in sorted(
+            self.marketplaces(), key=lambda item: (item.name != "official", item.name)
+        ):
+            if marketplace is not None and marketplace not in {record.name, record.identity}:
+                continue
             if not record.trusted:
                 _error(
                     "SANKA_MARKETPLACE_TRUST_REQUIRED",
                     "Configured marketplace is not trusted",
                     identity=record.identity,
                 )
+            sources.setdefault(record.identity, record)
+        for record in sources.values():
             with self._verified_snapshot(record.snapshot_root, record.tree_digest) as manifests:
                 values.extend((record, manifest) for manifest in manifests)
         return values
@@ -2227,16 +2240,7 @@ class ExtensionStore:
     def _select(
         self, extension_id: str, marketplace: str | None
     ) -> tuple[MarketplaceRecord, Manifest]:
-        selected = [
-            item
-            for item in self._catalog()
-            if item[1].id == extension_id
-            and (
-                marketplace is None
-                or item[0].name == marketplace
-                or item[0].identity == marketplace
-            )
-        ]
+        selected = [item for item in self._catalog(marketplace) if item[1].id == extension_id]
         if not selected:
             _error(
                 "SANKA_EXTENSION_NOT_FOUND",

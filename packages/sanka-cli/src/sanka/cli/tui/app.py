@@ -704,6 +704,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
         raw = self._raw_values()
         for setting in self.declared:
             if not setting.visible(raw):
+                values.pop(setting.id, None)
                 continue
             value, name = raw[setting.id], setting.text(setting.label, self.locale)
             if setting.type == "choice":
@@ -727,6 +728,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 value = str(value).strip()
                 if not value:
                     if setting.optional:
+                        values.pop(setting.id, None)
                         continue
                     raise ValueError(f"{name}: enter a value.")
                 if setting.type == "path":

@@ -39,6 +39,19 @@ def test_declared_settings_are_read_from_the_verified_wheel(tmp_path: Path) -> N
     }
 
 
+def test_shared_database_settings_accept_either_supported_driver(tmp_path: Path) -> None:
+    document = json.loads(json.dumps(DECLARATION))
+    document["settings"][1]["when"] = {"orm": ["django", "sqlalchemy"]}
+    path, digest = wheel(tmp_path, json.dumps(document).encode())
+    settings = read_wheel_settings(path, digest)
+    assert settings is not None
+    plan = settings.for_stage("plan")
+    assert plan[1].visible({"orm": "django"})
+    assert plan[1].visible({"orm": "sqlalchemy"})
+    assert not plan[1].visible({"orm": "none"})
+    assert setting_defaults(plan, {"orm": "django", "generation": "full"})["generation"] == "full"
+
+
 @pytest.mark.parametrize(
     ("content", "digest", "name"),
     [
