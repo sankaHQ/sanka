@@ -56,6 +56,17 @@ def _relative(path: Any, root: str | Path) -> str:
 def _scan_lines(data: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
     detected: list[tuple[str, str]] = []
+    config = data.get("configuration")
+    if isinstance(config, Mapping):
+        for key, name in (
+            ("source_framework", "Framework"),
+            ("source_file", "Entrypoint"),
+            ("models_file", "Models"),
+            ("source_database", "Source DB"),
+        ):
+            value = config.get(key)
+            if isinstance(value, str) and value:
+                detected.append((name, _label(value, _FRAMEWORK_LABELS)))
     for key, name in (
         ("python_version", "Python"),
         ("django_version", "Django"),
@@ -136,11 +147,21 @@ def _scan_targets(data: Mapping[str, Any]) -> list[str]:
 
 def _plan_lines(data: Mapping[str, Any], root: str | Path) -> list[str]:
     lines: list[str] = []
-    source = _label(data.get("source_framework"), _FRAMEWORK_LABELS)
-    target = _label(data.get("target_framework"), _FRAMEWORK_LABELS)
+    capture = data.get("capture")
+    config = capture.get("configuration") if isinstance(capture, Mapping) else None
+    config = config if isinstance(config, Mapping) else {}
+    source = _label(data.get("source_framework", config.get("source_framework")), _FRAMEWORK_LABELS)
+    target = _label(data.get("target_framework", config.get("target_framework")), _FRAMEWORK_LABELS)
     title = f"{source} → {target} plan" if source and target else "Migration plan"
     lines.append(title)
     strategy: list[str] = []
+    layer = config.get("database_layer")
+    destination = (
+        {"pgx": "postgresql", "sqlite": "sqlite"}.get(layer) if isinstance(layer, str) else None
+    )
+    if destination:
+        source_db = config.get("source_database", destination)
+        strategy.append(f"{source_db} → {destination}")
     if data.get("mode"):
         strategy.append(str(data["mode"]))
     if data.get("sql_engine"):

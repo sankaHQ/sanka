@@ -1,5 +1,18 @@
 # Sanka release procedure
 
+## Automatic Go source discovery release 0.3.6
+
+Version 0.3.6 displays detected Python-to-Go source facts in CLI and TUI summaries
+and the selected source-to-destination database path in Plan. Scan detects supported
+DRF, Flask and FastAPI entrypoints, models and source databases without source JSON
+configuration; Plan chooses the Go router, destination database and endpoints.
+Ambiguous or dynamic source inputs require an explicit override.
+
+Publish and verify the immutable `api-converters-v0.1.0a14` bundle before updating
+`OFFICIAL_REVISION` to its full Extensions merge SHA and publishing this CLI.
+Preserve existing project locks and public 0.3.5 artifacts. Verify a fresh public
+installation and the three example lifecycles before announcing availability.
+
 ## Migration fixes release 0.3.5
 
 Version 0.3.5 removes redundant marketplace aliases without deleting artifacts
