@@ -2265,6 +2265,40 @@ def test_marketplace_upgrade_does_not_lend_capabilities_to_the_locked_version(
     assert "update_available" in recommendation.status
 
 
+def test_recommendations_lock_only_the_selected_snapshot_when_catalogs_share_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_source, old_wheel = _marketplace(tmp_path / "old", version="0.1.0")
+    new_source, new_wheel = _marketplace(tmp_path / "new", version="0.2.0")
+    monkeypatch.setattr(
+        extension_store,
+        "_canonical_source",
+        lambda source: ("local", str(source), "fixtures.invalid/shared"),
+    )
+    store = ExtensionStore(tmp_path / "project", user_root=tmp_path / "home")
+    store.add_marketplace(old_source, name="old", trust=True)
+    store.add_marketplace(new_source, name="new", trust=True)
+    store.add_marketplace(new_source, name="new-alias", trust=True)
+    _responses(
+        monkeypatch,
+        {
+            "example_demo-0.1.0-py3-none-any.whl": old_wheel,
+            "example_demo-0.2.0-py3-none-any.whl": new_wheel,
+        },
+    )
+    _fast_environments(monkeypatch)
+    store.add_extension("example/demo", marketplace="old")
+    store.add_extension("example/demo", marketplace="new")
+    (store.project_root / "source.py").write_text("pass\n", encoding="utf-8")
+
+    recommendations = store.recommendations(fingerprint_repository(store.project_root))
+
+    assert [(item.version, "locked" in item.status) for item in recommendations] == [
+        ("0.1.0", False),
+        ("0.2.0", True),
+    ]
+
+
 def test_resolve_rejects_mutated_installed_executable_and_imported_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
