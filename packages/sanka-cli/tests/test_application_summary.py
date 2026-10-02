@@ -186,3 +186,25 @@ def test_scan_hint_derives_the_target_from_the_extension_id() -> None:
         },
     )
     assert ambiguous == "sanka plan . --to <target>"
+
+
+def test_go_replay_summaries_disclose_actual_tests_and_scope(tmp_path: Path) -> None:
+    report = {
+        "tests": 3,
+        "environment": str(tmp_path / "generated"),
+        "steps": [{"id": "create", "problems": []}, {"id": "list", "problems": []}],
+        "database": "isolated SQLite source and SQLite target",
+        "scope": "captured HTTP scenarios only",
+        "endpoints": [{"id": "PUT /items/:id/", "outcome": "not_exercised"}],
+        "original_tests": {"tests_run": 4, "ok": True},
+    }
+    tested, _ = application_summary("test", report, root=tmp_path)
+    assert "  Ran 3 tests" in tested and "  HTTP       2/2 scenarios passed" in tested
+    verified, _ = application_summary("verify", report)
+    assert "  HTTP     2/2 source-to-target scenarios matched" in verified
+    assert "  Source   4 original tests executed" in verified
+    assert "    PUT /items/:id/ — not exercised" in verified
+    report.pop("original_tests")
+    assert "Original source tests were not run" in "\n".join(
+        application_summary("verify", report)[0]
+    )

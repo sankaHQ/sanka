@@ -1,5 +1,21 @@
 # Sanka release procedure
 
+## Lifecycle feedback release 0.3.7
+
+Version 0.3.7 shows a saved Plan file path, prompts for missing visible declared
+Plan settings, and displays loading/stage messages during local Test and Verify.
+Python-to-Go a15 supplies actual test counts, per-scenario comparisons and endpoint
+coverage. Explicit and saved settings are reused. JSON, compact and quiet output
+remain separate from human progress. Ordinary commands remain CLI by default;
+TUI entrypoints stay opt-in. Existing reviewed hashes and file guards remain.
+
+The official catalog pins independently published and verified Extensions commit
+`10fb419e67b9f524406d999d4e3883494c3be8ce` and immutable tag
+`api-converters-v0.1.0a15`. Finish maintained checks and build, merge
+normally, then publish the absent immutable v0.3.7 tag with publish-v0.3.7.
+Verify exact-run PyPI artifact hashes, installer doctor and fresh default extension
+installation plus installed Scan/Plan/Apply/Test/Verify acceptance.
+
 ## Automatic Go source discovery release 0.3.6
 
 Version 0.3.6 displays detected Python-to-Go source facts in CLI and TUI summaries

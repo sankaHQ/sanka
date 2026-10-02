@@ -83,7 +83,33 @@ sanka test .
 sanka verify .
 ```
 
-`plan` prints a hash; `apply` accepts only that hash. `verify` replays requests
+`plan` prints its saved file path (normally `.sanka/plan.json`) and a hash;
+`apply` accepts only that hash. Interactive planning asks for missing declared
+settings; explicit flags and saved settings are reused. Test and Verify show
+activity while running, followed by test counts and report paths. Extensions
+can report each HTTP scenario's result; Python-to-Go reports source/Go status
+and response/database matches. `--quiet` hides progress and summaries;
+`--json` and `--compact-dsl` keep machine output clean.
+
+For the gadget-inventory Python-to-Go example, successful output includes:
+
+```text
+Plan file  .sanka/plan.json
+
+Generated app tests
+  Ran 2 tests
+  HTTP       13/13 scenarios passed
+
+Verified
+  HTTP     13/13 source-to-target scenarios matched
+```
+
+A terminal shows a spinner and stage messages while Test/Verify run. Scenario
+results arrive after the observations are collected. Plan hashes depend on the
+project, settings and endpoint scope; use your own printed hash for Apply.
+Unexercised endpoints are disclosed rather than marked verified.
+
+`verify` replays requests
 against the DRF app and the generated FastAPI app and diffs the responses. The
 [DRF to FastAPI guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)
 walks through what each step checks and what stays manual.

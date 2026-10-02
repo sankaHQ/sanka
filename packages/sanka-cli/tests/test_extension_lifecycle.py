@@ -1102,3 +1102,29 @@ def test_declared_plan_defaults_reach_the_prerequisite_scan(tmp_path: Path) -> N
     assert "models_file" not in runner.calls[-1][1]["configuration"]
     lifecycle.plan(target="fastapi", configuration={"models_file": "explicit-invalid.py"})
     assert runner.calls[-1][1]["configuration"]["models_file"] == "explicit-invalid.py"
+
+    prompts = []
+    (tmp_path / "interactive").mkdir()
+
+    def answer(label: str, choices: tuple[str, ...] | None) -> str | None:
+        prompts.append((label, choices))
+        return "pgx (pgx)" if "Database" in label else None
+
+    fresh = _lifecycle(
+        _project(tmp_path / "interactive"),
+        Store(installed=True),
+        Runner(),
+        interactive=True,
+        prompt=answer,
+    )
+    fresh.plan(target="fastapi")
+    saved = json.loads((fresh.artifact_root / "plan.json").read_text())
+    assert saved["configuration"]["database_layer"] == "pgx"
+    assert any("Database" in label for label, _ in prompts)
+    prompts.clear()
+    fresh.plan(target="fastapi")
+    assert not any("Database" in label for label, _ in prompts)
+    assert (
+        json.loads((fresh.artifact_root / "plan.json").read_text())["configuration"]
+        == saved["configuration"]
+    )

@@ -29,6 +29,8 @@ class TerminalOutput:
     verbose: bool = False
     stdout: TextIO = field(default_factory=lambda: sys.stdout)
     stderr: TextIO = field(default_factory=lambda: sys.stderr)
+    _activity: str = field(default="", init=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
     @property
     def color(self) -> bool:
@@ -89,8 +91,20 @@ class TerminalOutput:
         if self.verbose and not self.json_mode:
             print(self.style(value, "dim"), file=self.stderr)
 
+    def progress(self, value: str) -> None:
+        if self.json_mode or self.quiet:
+            return
+        with self._lock:
+            if self.animated:
+                self.stderr.write("\r\033[2K")
+            # Extension messages must not inject terminal controls.
+            value = "".join(c if c.isprintable() else " " for c in value)
+            self._activity = value
+            print(value, file=self.stderr, flush=True)
+
     @contextmanager
     def spinner(self, label: str) -> Iterator[None]:
+        self.progress(label)
         if not self.animated:
             yield
             return
@@ -101,8 +115,9 @@ class TerminalOutput:
             index = 0
             while not stopped.wait(0.08):
                 frame = frames[index % len(frames)]
-                self.stderr.write(f"\r{self.style(frame, 'cyan')} {label}")
-                self.stderr.flush()
+                with self._lock:
+                    self.stderr.write(f"\r{self.style(frame, 'cyan')} {self._activity}")
+                    self.stderr.flush()
                 index += 1
 
         worker = threading.Thread(target=animate, daemon=True)

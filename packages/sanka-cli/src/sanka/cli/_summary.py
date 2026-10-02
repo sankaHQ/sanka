@@ -162,6 +162,9 @@ def _plan_lines(data: Mapping[str, Any], root: str | Path) -> list[str]:
     if destination:
         source_db = config.get("source_database", destination)
         strategy.append(f"{source_db} → {destination}")
+        strategy.append("database/sql and Goose" if layer == "sqlite" else "pgx and Goose")
+        if config.get("schema_mode"):
+            strategy.append(f"{config['schema_mode']} destination schema")
     if data.get("mode"):
         strategy.append(str(data["mode"]))
     if data.get("sql_engine"):
@@ -175,6 +178,9 @@ def _plan_lines(data: Mapping[str, Any], root: str | Path) -> list[str]:
     output = data.get("default_output") or data.get("output")
     if output:
         lines.append(f"  {'Output':<10} {_relative(output, root)}")
+    files = _count(data.get("files"))
+    if files is not None:
+        lines.append(f"  {'Files':<10} {files} generated files to review")
     swagger_ui = data.get("swagger_ui")
     if target == "FastAPI" and isinstance(swagger_ui, bool):
         lines.append(f"  {'Swagger UI':<10} {'enabled (/docs)' if swagger_ui else 'disabled'}")
@@ -252,6 +258,10 @@ def _test_lines(data: Mapping[str, Any], root: str | Path) -> list[str]:
                 ran = int(match.group(1))
     if ran is not None:
         lines.append(f"  Ran {_plural(ran, 'test')}")
+    steps = data.get("steps")
+    if isinstance(steps, list):
+        passed = sum(isinstance(step, Mapping) and not step.get("problems") for step in steps)
+        lines.append(f"  HTTP       {passed}/{len(steps)} scenarios passed")
     environment = data.get("environment")
     if environment:
         lines.append(f"  {'Env':<10} {_relative(environment, root)}")
@@ -262,6 +272,26 @@ def _verify_lines(data: Mapping[str, Any]) -> list[str]:
     lines: list[str] = []
     mode = data.get("mode")
     lines.append(f"Verified ({mode})" if mode else "Verified")
+    steps = data.get("steps")
+    if isinstance(steps, list):
+        matched = sum(isinstance(step, Mapping) and not step.get("problems") for step in steps)
+        lines.append(f"  HTTP     {matched}/{len(steps)} source-to-target scenarios matched")
+    endpoints = data.get("endpoints")
+    if isinstance(endpoints, list):
+        lines.append("  Endpoints (captured scenarios)")
+        for endpoint in endpoints:
+            if isinstance(endpoint, Mapping):
+                outcome = str(endpoint.get("outcome", "unknown")).replace("_", " ")
+                lines.append(f"    {endpoint.get('id', '?')} — {outcome}")
+    if isinstance(data.get("database"), str):
+        lines.append(f"  Database {data['database']}")
+    if isinstance(data.get("scope"), str):
+        lines.append(f"  Scope    {data['scope']}")
+    original = data.get("original_tests")
+    if isinstance(original, Mapping) and isinstance(original.get("tests_run"), int):
+        lines.append(f"  Source   {original['tests_run']} original tests executed")
+    elif isinstance(steps, list):
+        lines.append("  Original source tests were not run; captured scenarios only.")
     routes = data.get("routes")
     if isinstance(routes, Mapping):
         parts: list[str] = []
