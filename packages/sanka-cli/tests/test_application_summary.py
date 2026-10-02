@@ -49,6 +49,26 @@ def test_scan_summary_without_a_single_target_keeps_a_placeholder() -> None:
     assert hint == "sanka plan . --to <target>"
 
 
+def test_go_summary_distinguishes_detected_source_from_planned_destination() -> None:
+    config = {
+        "source_framework": "drf",
+        "source_file": "crud_config/urls.py",
+        "models_file": "inventory/models.py",
+        "source_database": "sqlite",
+        "target_framework": "chi",
+        "database_layer": "pgx",
+    }
+    scan, _ = application_summary("scan", {"configuration": config, "routes": [{}]})
+    text = "\n".join(scan)
+    assert all(
+        value in text for value in ("DRF", "crud_config/urls.py", "inventory/models.py", "sqlite")
+    )
+    assert "pgx" not in text
+    plan, _ = application_summary("plan", {"capture": {"configuration": config}})
+    text = "\n".join(plan)
+    assert "DRF" in text and "chi" in text and "sqlite → postgresql" in text
+
+
 def test_plan_summary_shows_strategy_route_split_and_apply_hint(tmp_path: Path) -> None:
     plan_hash = "sha256:" + "c" * 64
     lines, hint = application_summary(
@@ -136,6 +156,9 @@ def test_apply_test_and_verify_summaries(tmp_path: Path) -> None:
 
 
 def test_summary_tolerates_unknown_shapes() -> None:
+    assert application_summary("plan", {"capture": {"configuration": {"database_layer": []}}})[
+        0
+    ] == ["Migration plan"]
     assert application_summary("verify", {}) == ([], None)
     assert application_summary("apply", {"unexpected": True}) == ([], "sanka test .")
     assert application_summary("status", {"anything": 1}) == ([], None)

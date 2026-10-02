@@ -156,8 +156,10 @@ locked snapshots remain available through the remaining trusted alias. Removing
 the last trusted source for the current project's lock is blocked. Explicitly
 remove or update that project's extension first.
 
-For the supported Python-to-Go SQLite example, choose `database_layer: "sqlite"`
-in Plan configuration. No Docker or Podman database setup is needed. PostgreSQL
+Python-to-Go Scan discovers the source framework, entrypoint, models and database.
+Plan chooses the Go router, destination database and endpoints. The destination
+defaults to the detected source database; choose `database_layer: "pgx"` in Plan
+to migrate SQLite to PostgreSQL. SQLite needs no Docker or Podman setup. PostgreSQL
 still requires a disposable test database. CLI flags and the optional TUI use
 the same settings and endpoint selection.
 
@@ -187,7 +189,7 @@ reviewed plan hash. `verify` reconciles the generated or transferred result;
 an exit code alone is not completion evidence.
 
 On an interactive terminal, start with `sanka tui` in your project directory,
-or run `sanka scan .` to open the Scan screen directly. Use the sidebar and
+or run `sanka scan . --tui` to open the Scan screen directly. Use the sidebar and
 footer shortcuts to move through Scan → Plan → Apply → Test → Verify. Plan shows
 the hash to review before Apply; cloud runs can be monitored from Cloud / Account.
 See the [TUI guide](docs/tui.md) for configuration and shortcuts. Add `--json`
