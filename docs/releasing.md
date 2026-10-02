@@ -8,8 +8,10 @@ DRF, Flask and FastAPI entrypoints, models and source databases without source J
 configuration; Plan chooses the Go router, destination database and endpoints.
 Ambiguous or dynamic source inputs require an explicit override.
 
-Publish and verify the immutable `api-converters-v0.1.0a14` bundle before updating
-`OFFICIAL_REVISION` to its full Extensions merge SHA and publishing this CLI.
+The default catalog pins verified Extensions commit
+`63fde8fad68532060fd0dcf097ca41c4cb6b9a89` and its immutable
+`api-converters-v0.1.0a14` release. Public assets match the reviewed manifest;
+installed DRF, FastAPI and Flask examples passed Scan/Plan/Apply/Test/Verify.
 Preserve existing project locks and public 0.3.5 artifacts. Verify a fresh public
 installation and the three example lifecycles before announcing availability.
 
