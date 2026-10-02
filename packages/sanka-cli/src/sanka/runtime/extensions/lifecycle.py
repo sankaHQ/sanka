@@ -600,7 +600,41 @@ class ApplicationLifecycle:
         self._verify_selection(lock, selected[0])
         declaration = self.store.extension_settings(lock.id)
         settings = declaration.for_stage("plan") if declaration else ()
+        provided = frozenset(normalized)
         normalized = setting_defaults(settings, normalized)
+        if self.interactive:
+            for setting in settings:
+                if setting.advanced or setting.id in provided or not setting.visible(normalized):
+                    continue
+                label = f"Extension configuration: {setting.text(setting.label)}"
+                choices = None
+                values: dict[str, Any] = {}
+                if setting.choices:
+                    ordered = sorted(setting.choices, key=lambda c: c.value != setting.default)
+                    values = {f"{setting.text(c.label)} ({c.value})": c.value for c in ordered}
+                    choices = tuple(values)
+                elif setting.type == "boolean":
+                    values = {"yes": True, "no": False}
+                    choices = ("yes", "no") if setting.default else ("no", "yes")
+                else:
+                    label += f" [{setting.default or ''}]"
+                answer = self._prompt(label, choices)
+                value = values.get(answer, answer) if answer is not None else setting.default
+                if setting.type == "integer":
+                    try:
+                        value = int(str(value))
+                    except (TypeError, ValueError):
+                        _error("SANKA_USAGE", f"{setting.id} requires an integer")
+                    if not (
+                        setting.minimum is not None
+                        and setting.maximum is not None
+                        and setting.minimum <= value <= setting.maximum
+                    ):
+                        _error("SANKA_USAGE", f"{setting.id} is outside its allowed range")
+                if choices and value not in values.values():
+                    _error("SANKA_USAGE", f"Invalid choice for {setting.id}")
+                if value is not None:
+                    normalized[setting.id] = value
         for setting in settings:
             if setting.id not in explicit_keys and not setting.visible(normalized):
                 normalized.pop(setting.id, None)

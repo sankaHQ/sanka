@@ -1044,11 +1044,31 @@ def _lifecycle_prompt(label: str, choices: tuple[str, ...] | None = None) -> str
     return input(f"{label}: ").strip() or None
 
 
-def _application_lifecycle(args: argparse.Namespace) -> ApplicationLifecycle:
+def _application_lifecycle(
+    args: argparse.Namespace, terminal: TerminalOutput | None = None
+) -> ApplicationLifecycle:
+    from codecs import getincrementaldecoder
+
+    from sanka.runtime.extensions.runner import ExtensionRunner
+
+    terminal = terminal or _terminal(args)
+    decoder = getincrementaldecoder("utf-8")("replace")
+    pending = ""
+
+    def on_stderr(chunk: bytes) -> None:
+        nonlocal pending
+        pending += decoder.decode(chunk)
+        while "\n" in pending:
+            line, pending = pending.split("\n", 1)
+            if line.startswith("[sanka] "):
+                terminal.progress(line.removeprefix("[sanka] "))
+
     return ApplicationLifecycle(
         Path(args.root),
         artifact_dir=args.artifact_dir,
-        interactive=_interactive_terminal() and not args.json,
+        runner=ExtensionRunner(on_stderr=on_stderr),
+        interactive=_interactive_terminal()
+        and not (args.json or getattr(args, "compact_dsl", False) or getattr(args, "quiet", False)),
         prompt=_lifecycle_prompt,
         input_hints=plan_input_hints(getattr(args, "to", None)),
     )
@@ -1093,6 +1113,12 @@ def _print_application_result(
         terminal.success(f"{command} complete")
         if command == "plan" and isinstance(result.data.get("plan_hash"), str):
             print(f"plan {result.data['plan_hash']}")
+        report = next((p for p in result.artifacts if Path(p).suffix == ".json"), None)
+        if not quiet and report and command in {"plan", "test", "verify"}:
+            path = Path(report)
+            if path.is_relative_to(Path(args.root).resolve()):
+                path = path.relative_to(Path(args.root).resolve())
+            print(f"{'Plan file' if command == 'plan' else 'Report':<10} {path}")
         if next_hint and not quiet:
             if command == "plan":
                 next_hint = shlex.join(
@@ -1237,10 +1263,12 @@ async def _cmd_apply(args: argparse.Namespace) -> int:
 
 
 async def _cmd_test(args: argparse.Namespace) -> int:
-    result = _application_lifecycle(args).test(
-        configuration=_extension_configuration(args),
-        explicit_env_names=tuple(args.extension_env),
-    )
+    terminal = _terminal(args)
+    with terminal.spinner("Testing generated application…"):
+        result = _application_lifecycle(args, terminal).test(
+            configuration=_extension_configuration(args),
+            explicit_env_names=tuple(args.extension_env),
+        )
     return _print_application_result(
         args,
         "test",
@@ -1251,10 +1279,12 @@ async def _cmd_test(args: argparse.Namespace) -> int:
 
 async def _cmd_verify(args: argparse.Namespace) -> int:
     if _application_lifecycle_requested(args):
-        result = _application_lifecycle(args).verify(
-            configuration=_extension_configuration(args),
-            explicit_env_names=tuple(args.extension_env),
-        )
+        terminal = _terminal(args)
+        with terminal.spinner("Verifying source and generated application…"):
+            result = _application_lifecycle(args, terminal).verify(
+                configuration=_extension_configuration(args),
+                explicit_env_names=tuple(args.extension_env),
+            )
         return _print_application_result(
             args,
             "verify",

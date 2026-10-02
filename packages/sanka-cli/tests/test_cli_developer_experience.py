@@ -13,7 +13,7 @@ import sanka.cli as cli
 from sanka.cli import _build_parser, main
 from sanka.cli._output import TerminalOutput
 from sanka.runtime.extensions import ExtensionError
-from sanka.runtime.extensions.runner import ExtensionResult
+from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
 
 
 def test_extension_help_exposes_only_the_management_command_tree(
@@ -534,3 +534,61 @@ def test_compact_keeps_diagnostics_nested_inside_descriptive_metadata() -> None:
     }
     text = render_compact(payload)
     assert json.loads(text.splitlines()[1].split("=", 1)[1]) == data["serializer_details"]
+
+
+@pytest.mark.parametrize(
+    ("command", "artifact_name"),
+    [
+        ("test", "test.json"),
+        ("test", "generated/.venv"),
+        ("verify", "verify.json"),
+        ("plan", "plan.json"),
+    ],
+)
+@pytest.mark.parametrize("mode", [[], ["--json"], ["--compact-dsl"], ["--quiet"]])
+def test_lifecycle_feedback_is_live_and_machine_output_stays_clean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    artifact_name: str,
+    mode: list[str],
+) -> None:
+    artifact = tmp_path / "reports" / artifact_name
+    visible = not mode
+
+    class Lifecycle:
+        def __init__(self, _root: Path, **kwargs: object) -> None:
+            self.runner = cast(ExtensionRunner | None, kwargs.get("runner"))
+
+        def run(self, **_kwargs: object) -> ExtensionResult:
+            if self.runner and self.runner.on_stderr:
+                self.runner.on_stderr(b"[sanka] Running Go ")
+                self.runner.on_stderr(b"tests\nprivate child output\n")
+            during = capsys.readouterr()
+            assert ("Running Go tests" in during.err) is visible
+            assert "private child output" not in during.err
+            return ExtensionResult(
+                "success",
+                {"plan_hash": "sha256:core", "tests": 3, "environment": ".sanka/go"},
+                (str(artifact),),
+                (),
+                (),
+                None,
+            )
+
+        test = verify = plan = run
+
+    monkeypatch.setattr(cli, "ApplicationLifecycle", Lifecycle)
+    assert main([command, str(tmp_path), "--artifact-dir", "reports", *mode]) == 0
+    result = capsys.readouterr()
+    if mode == ["--json"]:
+        assert json.loads(result.out)["artifacts"] == [str(artifact)]
+    elif mode == ["--compact-dsl"]:
+        assert result.out.startswith("sanka-compact/v1")
+    elif visible and command == "plan":
+        assert "Plan file  reports/plan.json" in result.out
+    elif visible and command == "test":
+        assert "Ran 3 tests" in result.out
+        assert ("Report " in result.out) == artifact_name.endswith(".json")
+    assert "\x1b" not in result.err
