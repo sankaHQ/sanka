@@ -1122,24 +1122,13 @@ def _print_application_result(
                 path = path.relative_to(Path(args.root).resolve())
             print(f"{'Plan file' if command == 'plan' else 'Report':<10} {path}")
         if next_hint and not quiet:
-            if command == "plan":
-                next_hint = shlex.join(
-                    [
-                        "sanka",
-                        "apply",
-                        "--root",
-                        str(args.root),
-                        "--artifact-dir",
-                        str(args.artifact_dir),
-                        "--plan-hash",
-                        str(result.data["plan_hash"]),
-                        *[
-                            part
-                            for name in args.extension_env
-                            for part in ("--extension-env", name)
-                        ],
-                    ]
-                )
+            options: list[str] = []
+            if args.artifact_dir != ".sanka":
+                options.extend(("--artifact-dir", str(args.artifact_dir)))
+            for name in args.extension_env:
+                options.extend(("--extension-env", name))
+            if options:
+                next_hint += " " + shlex.join(options)
             print(f"next: {next_hint}")
     return 0
 
