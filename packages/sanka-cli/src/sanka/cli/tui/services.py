@@ -28,7 +28,7 @@ from sanka.cli.tui.model import (
     progress_fraction,
 )
 from sanka.runtime.extensions.lifecycle import saved_configuration, saved_plan
-from sanka.runtime.extensions.model import ExtensionError
+from sanka.runtime.extensions.model import ExtensionError, canonical_target, canonical_targets
 from sanka.runtime.extensions.settings import ExtensionSettings
 
 Activity = Callable[[str], None]
@@ -127,7 +127,7 @@ def _choice_from_record(
         marketplace=record.marketplace,
         marketplace_identity=record.marketplace_identity,
         kind=record.kind,
-        targets=tuple(record.targets),
+        targets=canonical_targets(record.id, tuple(record.targets)),
         status=frozenset(record.status),
         commands=commands,
         runtime_specifier=runtime_specifier,
@@ -240,7 +240,7 @@ class HostServices:
                 continue
             if status and status not in choice.status and choice.status_label != status:
                 continue
-            if target and target not in choice.targets:
+            if target and canonical_target(choice.id, target) not in choice.targets:
                 continue
             haystack = " ".join(
                 (choice.id, choice.kind_label, *choice.targets, choice.label)
@@ -305,7 +305,11 @@ class HostServices:
             and "incompatible" not in item.status
         ]
         if target:
-            matched = [item for item in enabled if target in item.targets]
+            matched = [
+                item
+                for item in enabled
+                if canonical_target(item.id, target) in canonical_targets(item.id, item.targets)
+            ]
             if len(matched) == 1:
                 return str(matched[0].id)
         if len(enabled) == 1:

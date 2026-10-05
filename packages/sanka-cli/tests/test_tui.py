@@ -569,6 +569,31 @@ async def test_extension_marketplace_lists_installs_and_filters() -> None:
         assert menu.get_option_at_index(highlighted).id == "marketplace"
 
 
+@pytest.mark.asyncio
+async def test_qualified_target_preserves_a_legacy_review_and_configuration() -> None:
+    services = FakeServices()
+    services.catalog = (
+        _choice("sanka/drf-to-fastapi", "1.2.0", installed=True, targets=("python-fastapi",)),
+    )
+    services.target_names = ("python-fastapi",)
+    session = Session(
+        project_root="/work/demo",
+        target="fastapi",
+        plan_hash="sha256:reviewed",
+        configuration={"target": "fastapi", "selected_endpoints": ["GET /users"]},
+    )
+    app = SankaApp(services, session, start="plan")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert session.target == "python-fastapi"
+        assert session.plan_hash == "sha256:reviewed"
+        assert session.configuration["selected_endpoints"] == ["GET /users"]
+        await pilot.click("#configure-stage")
+        await pilot.pause()
+        assert app.screen.query("#plan-swagger-ui")
+        assert app.screen.query_one("#plan-output", Input).value == "fastapi-app"
+
+
 def test_extension_detail_prefers_newer_update_over_old_lock(tmp_path: Path) -> None:
     services = HostServices(tmp_path)
     locked = _choice("sanka/drf-to-fastapi", "0.1.0a17", installed=True, targets=("fastapi",))
@@ -1257,7 +1282,7 @@ def test_successful_stage_results_keep_cli_summary_and_next_command() -> None:
                 "extensions": [{"id": "sanka/drf-to-fastapi", "targets": ["fastapi"]}],
             },
             ("Detected", "Python     3.12.13", "14 routes", "scan hash: sha256:"),
-            "next: sanka plan . --to fastapi",
+            "next: sanka plan . --to python-fastapi",
         ),
         (
             "plan",
@@ -1348,7 +1373,7 @@ async def test_completed_scan_shows_its_cli_completion_at_120_by_28() -> None:
         await pilot.pause()
         visible = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
         assert "✓ OK  scan complete" in visible
-        assert "next: sanka plan . --to fastapi" in visible
+        assert "next: sanka plan . --to python-fastapi" in visible
 
 
 @pytest.mark.asyncio

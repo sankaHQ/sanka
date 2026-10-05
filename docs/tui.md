@@ -5,8 +5,8 @@ Open the optional dashboard with `sanka tui` or `sanka --tui`. Add `--tui` to a
 supported command to open its screen with the same inputs:
 
 ```bash
-sanka plan . --to fastapi --generation full --strategy native --package-manager uv
-sanka plan . --to fastapi --generation full --strategy native --package-manager uv --tui
+sanka plan . --to python-fastapi --generation full --strategy native --package-manager uv
+sanka plan . --to python-fastapi --generation full --strategy native --package-manager uv --tui
 sanka status --tui
 sanka extension list --tui
 sanka extension marketplace list --tui
@@ -128,7 +128,7 @@ worker's successful completion.
 For DRF → FastAPI, Plan configuration includes **Swagger UI at /docs**.
 It starts enabled; choosing Disabled removes `/docs` from the generated app
 while keeping `/openapi.json` and ReDoc. Review the plan summary before Apply.
-The equivalent CLI flag is `sanka plan . --to fastapi --no-swagger-ui`.
+The equivalent CLI flag is `sanka plan . --to python-fastapi --no-swagger-ui`.
 
 Pass repeatable `--extension-env NAME` options when opening the dashboard or a
 lifecycle screen. Export the values in the launching terminal first:

@@ -274,7 +274,7 @@ def test_default_extension_full_chain_from_wheels(
         "plan",
         str(drf_extension_fixture),
         "--to",
-        "fastapi",
+        "python-fastapi",
         "--extension-config",
         plan_config,
         *extension_env,

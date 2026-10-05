@@ -77,7 +77,7 @@ uv tool install --python 3.12 sanka-cli
 sanka extension add sanka/drf-to-fastapi
 
 sanka scan .
-sanka plan . --to fastapi --generation minimal --output .sanka/output/fastapi --package-manager uv --strategy native
+sanka plan . --to python-fastapi --generation minimal --output .sanka/output/fastapi --package-manager uv --strategy native
 sanka apply --root . --plan-hash sha256:<hash printed by plan>
 sanka test .
 sanka verify .
@@ -116,9 +116,13 @@ walks through what each step checks and what stays manual.
 
 Commands use CLI output by default, even on a terminal. Open the optional
 dashboard with `sanka tui`, or add `--tui` to a supported command, such as
-`sanka plan . --to fastapi --tui`. Both interfaces share settings and reviewed
+`sanka plan . --to python-fastapi --tui`. Both interfaces share settings and reviewed
 plans. [Select endpoints](docs/endpoint-planning.md) with repeatable `--endpoint`
 IDs or `--all-endpoints`; [TUI controls](docs/tui.md) provide the same selection.
+
+Plan targets use `<language>-<framework>`: `python-fastapi`, `python-flask`,
+`go-fiber`, `go-chi`, `go-mux` and `go-gin`. The earlier short names remain
+accepted aliases. Extension package IDs and existing reviewed Plans stay valid.
 
 ## Install
 

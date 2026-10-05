@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from sanka.runtime.extensions.model import canonical_target
+
 _FRAMEWORK_LABELS = {
     "django-rest-framework": "DRF",
     "drf": "DRF",
@@ -116,7 +118,7 @@ def _target_from_extension_id(extension_id: Any) -> str | None:
     if "-to-" not in name:
         return None
     target = name.rsplit("-to-", 1)[-1].strip()
-    return target or None
+    return canonical_target(extension_id, target) if target else None
 
 
 def _scan_targets(data: Mapping[str, Any]) -> list[str]:
@@ -133,14 +135,18 @@ def _scan_targets(data: Mapping[str, Any]) -> list[str]:
                 continue
             explicit = entry.get("targets")
             record = entry.get("extension")
+            identifier = entry.get("id")
+            if identifier is None and isinstance(record, Mapping):
+                identifier = record.get("id")
             if not explicit and isinstance(record, Mapping):
                 explicit = record.get("targets")
             for candidate in explicit or ():
-                add(candidate)
+                add(
+                    canonical_target(identifier, candidate)
+                    if isinstance(identifier, str) and isinstance(candidate, str)
+                    else candidate
+                )
             if not explicit:
-                identifier = entry.get("id")
-                if identifier is None and isinstance(record, Mapping):
-                    identifier = record.get("id")
                 add(_target_from_extension_id(identifier))
     return targets
 

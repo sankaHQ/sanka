@@ -49,10 +49,11 @@ def test_extension_parser_errors_keep_the_extension_outer_command(
     ("flag", "enabled"),
     [("--swagger-ui", True), ("--no-swagger-ui", False)],
 )
+@pytest.mark.parametrize("target", ["fastapi", "python-fastapi"])
 def test_fastapi_swagger_plan_flag_reaches_extension_configuration(
-    flag: str, enabled: bool
+    flag: str, enabled: bool, target: str
 ) -> None:
-    args = _build_parser().parse_args(["plan", ".", "--to", "fastapi", flag])
+    args = _build_parser().parse_args(["plan", ".", "--to", target, flag])
     assert cli._extension_configuration(args)["swagger_ui"] is enabled
 
 

@@ -8,8 +8,8 @@ Commands use CLI by default. First run Plan with the required configuration to
 see the captured endpoint IDs, counts and reviewed hash. For example:
 
 ```bash
-sanka plan . --to fastapi --generation full --strategy native --package-manager uv --output fastapi-app
-sanka plan . --to fastapi --endpoint 'GET /api/gadgets/' --endpoint 'POST /api/gadgets/'
+sanka plan . --to python-fastapi --generation full --strategy native --package-manager uv --output fastapi-app
+sanka plan . --to python-fastapi --endpoint 'GET /api/gadgets/' --endpoint 'POST /api/gadgets/'
 sanka apply --root . --plan-hash sha256:<hash printed by the selected plan>
 sanka test .
 sanka verify .
@@ -25,7 +25,7 @@ exact next Apply command. Generated never implies Verified.
 
 ## Optional TUI
 
-Use `sanka tui` or `sanka plan . --to fastapi --tui`. Run Plan to capture the inventory, choose **Endpoints**, then review the new plan.
+Use `sanka tui` or `sanka plan . --to python-fastapi --tui`. Run Plan to capture the inventory, choose **Endpoints**, then review the new plan.
 The picker supports individual checkboxes, method/path filtering, Select all and
 Deselect all. Bulk actions include hidden rows. Generated rows stay checked and
 locked; manual gaps are disabled. An empty selection cannot be applied.
@@ -66,7 +66,7 @@ DRF settings have flags; every declared field can be supplied in the existing
 `--extension-config` JSON object. For Go, for example:
 
 ```bash
-sanka plan . --to fiber --extension-config '{"source_framework":"flask","source_file":"app.py","database_layer":"none"}' --endpoint 'GET /health'
+sanka plan . --to go-fiber --extension-config '{"source_framework":"flask","source_file":"app.py","database_layer":"none"}' --endpoint 'GET /health'
 ```
 
 The CLI asks for missing required inputs only on an interactive terminal. Pipes

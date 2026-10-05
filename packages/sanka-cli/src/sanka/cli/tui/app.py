@@ -50,6 +50,7 @@ from sanka.cli.tui.model import (
 )
 from sanka.cli.tui.services import TuiServices, cloud_exit_code, preferred_extension
 from sanka.cli.tui.widgets import ActivityLog, CliLine, EmptyState, KeysBar, StageHeader
+from sanka.runtime.extensions.model import canonical_target
 from sanka.runtime.extensions.settings import Setting, setting_defaults
 from sanka_cli import __version__
 
@@ -376,7 +377,7 @@ class SearchModal(ModalScreen[str | None]):
             label = choice.status_label.lower()
             if status and status not in choice.status and label != status.lower():
                 continue
-            if target and target not in choice.targets:
+            if target and canonical_target(choice.id, target) not in choice.targets:
                 continue
             prompt = f"{choice.label}  {choice.kind_label}  {', '.join(choice.targets) or '-'}"
             if needle and needle not in f"{choice.id} {prompt}".casefold():
@@ -659,6 +660,8 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
             widget = f"plan-set-{setting.id}"
             if setting.type == "choice":
                 values = [choice.value for choice in setting.choices]
+                if setting.id == "source_framework" and f"python-{current}" in values:
+                    current = f"python-{current}"
                 yield Select(
                     [
                         (setting.text(choice.label, self.locale), choice.value)
@@ -761,9 +764,12 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                 elif self.drf:
                     yield Label("Output directory (inside this project)")
                     yield Input(
-                        str(self.values.get("output", f"{self.target}-app")), id="plan-output"
+                        str(
+                            self.values.get("output", f"{self.target.removeprefix('python-')}-app")
+                        ),
+                        id="plan-output",
                     )
-                    if self.target == "fastapi":
+                    if self.target in {"fastapi", "python-fastapi"}:
                         for name, label, options, default in (
                             (
                                 "generation",
@@ -820,7 +826,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                         yield Input(str(self.values.get("settings_module", "")), id="plan-settings")
                     yield Label("Additional extension configuration (JSON object)")
                     known = {"output", "settings_module"} | {item.id for item in self.declared}
-                    if self.target == "fastapi":
+                    if self.target in {"fastapi", "python-fastapi"}:
                         known.update({"generation", "strategy", "package_manager", "swagger_ui"})
                     extra = {
                         k: v
@@ -855,7 +861,7 @@ class PlanConfiguration(ModalScreen[dict[str, Any] | None]):
                     if not output or destination == root or not destination.is_relative_to(root):
                         raise ValueError("Choose an output directory inside the project.")
                     values["output"] = output
-                    if self.target == "fastapi":
+                    if self.target in {"fastapi", "python-fastapi"}:
                         for name in ("generation", "strategy", "package_manager"):
                             values[name] = self.query_one(f"#plan-{name}", Select).value
                         allowed = {
@@ -1417,6 +1423,15 @@ class StageScreen(SankaScreen):
             self.refresh_footer()
             return
         chosen = self.sanka.session.target
+        if chosen and chosen not in self._targets:
+            chosen = next(
+                (
+                    canonical_target(item.id, chosen)
+                    for item in self.sanka.services.extensions(target=chosen)
+                    if canonical_target(item.id, chosen) in self._targets
+                ),
+                chosen,
+            )
         listing.highlighted = matches.index(chosen) if chosen in matches else 0
         self._remember_target()
 
@@ -1446,7 +1461,14 @@ class StageScreen(SankaScreen):
             return
         option = listing.get_option_at_index(listing.highlighted)
         session = self.sanka.session
-        if session.target != str(option.id):
+        equivalent = session.target == str(option.id) or (
+            session.target is not None
+            and any(
+                canonical_target(item.id, session.target) == str(option.id)
+                for item in self.sanka.services.extensions(target=str(option.id))
+            )
+        )
+        if not equivalent:
             for key in ("selected_endpoints", "target", "target_framework"):
                 session.configuration.pop(key, None)
             session.endpoints = []
@@ -1536,9 +1558,11 @@ class StageScreen(SankaScreen):
             self.notify("Choose a target first.")
             return
         choices = self.sanka.services.extensions(target=target)
-        drf = any(item.id == f"sanka/drf-to-{target}" for item in choices)
+        drf = any(item.id == f"sanka/drf-to-{target.removeprefix('python-')}" for item in choices)
         extension = (
-            f"sanka/drf-to-{target}" if drf else self.sanka.services.used_extension_id(target)
+            f"sanka/drf-to-{target.removeprefix('python-')}"
+            if drf
+            else self.sanka.services.used_extension_id(target)
         )
         settings = self.sanka.services.extension_settings(extension) if extension else None
         self.app.push_screen(
@@ -1624,7 +1648,10 @@ class StageScreen(SankaScreen):
                 return
             choices = self.sanka.services.extensions(target=session.target)
             if (
-                any(item.id == f"sanka/drf-to-{session.target}" for item in choices)
+                any(
+                    item.id == f"sanka/drf-to-{session.target.removeprefix('python-')}"
+                    for item in choices
+                )
                 and self._configured_target != session.target
             ):
                 self._configure_plan()

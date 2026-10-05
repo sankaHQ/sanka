@@ -12,9 +12,10 @@ from typing import Any, cast
 import pytest
 
 from sanka.runtime.extensions import ExtensionError, Recommendation, fingerprint_repository
-from sanka.runtime.extensions.lifecycle import ApplicationLifecycle
+from sanka.runtime.extensions.lifecycle import ApplicationLifecycle, saved_configuration
 from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
 from sanka.runtime.extensions.store import ExtensionStore, LockEntry
+from sanka.runtime.hashing import content_hash
 
 
 def _lock(*, digest: str = "3" * 64) -> LockEntry:
@@ -690,7 +691,7 @@ def test_plan_requires_a_target_outside_a_tty(tmp_path: Path) -> None:
         lifecycle.plan(target=None)
 
     assert raised.value.code == "SANKA_EXTENSION_TARGET_REQUIRED"
-    assert raised.value.details == {"targets": ["fastapi"]}
+    assert raised.value.details == {"targets": ["python-fastapi"]}
 
 
 def test_interactive_plan_retries_only_requested_structured_inputs(tmp_path: Path) -> None:
@@ -881,16 +882,41 @@ def test_verify_without_scenarios_still_requires_the_reviewed_plan(tmp_path: Pat
     assert raised.value.code == "SANKA_EXTENSION_IDENTITY"
 
 
+@pytest.mark.parametrize(
+    "extension_id,target,wire_target",
+    [
+        ("sanka/drf-to-fastapi", "fastapi", "fastapi"),
+        ("sanka/drf-to-fastapi", "python-fastapi", "fastapi"),
+        ("sanka/drf-to-flask", "python-flask", "flask"),
+        *[
+            ("sanka/python-to-golang", f"go-{router}", router)
+            for router in ("fiber", "chi", "mux", "gin")
+        ],
+    ],
+)
 def test_plan_forwards_the_selected_target_to_the_plan_and_later_stages(
     tmp_path: Path,
+    extension_id: str,
+    target: str,
+    wire_target: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _project(tmp_path)
     runner = FakeRunner()
-    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
+    store = FakeStore(installed=True)
+    store.lock = replace(store.lock, id=extension_id)
+    monkeypatch.setattr(
+        store,
+        "recommendations",
+        lambda _: (
+            _recommendation(store.lock, marketplace="official", targets=(wire_target, target)),
+        ),
+    )
+    lifecycle = _lifecycle(project, store, runner)
     lifecycle.scan(configuration={"settings_module": "config.settings"})
 
     planned = lifecycle.plan(
-        target="fastapi",
+        target=target,
         configuration={"settings_module": "config.settings"},
     )
 
@@ -900,17 +926,36 @@ def test_plan_forwards_the_selected_target_to_the_plan_and_later_stages(
     assert plan_request["command"] == "plan"
     assert plan_request["configuration"] == {
         "settings_module": "config.settings",
-        "target": "fastapi",
+        "target": wire_target,
     }
     plan = json.loads((project / ".sanka" / "plan.json").read_text())
-    assert plan["configuration"]["target"] == "fastapi"
+    assert plan["configuration"]["target"] == target
+    reviewed = (project / ".sanka" / "plan.json").read_bytes()
+    assert saved_configuration(project, target=wire_target) == plan["configuration"]
+    assert (project / ".sanka" / "plan.json").read_bytes() == reviewed
 
     lifecycle.apply(reviewed_plan_hash=str(planned.data["plan_hash"]))
 
     apply_request = runner.calls[-1][1]
     assert apply_request["command"] == "apply"
-    assert apply_request["configuration"]["target"] == "fastapi"
+    assert apply_request["configuration"]["target"] == wire_target
     assert apply_request["configuration"]["extension_plan_hash"] == "sha256:extension-plan"
+
+
+@pytest.mark.parametrize("extension", [None, [], "invalid", {"id": []}])
+def test_saved_configuration_rejects_invalid_extension_identity(
+    tmp_path: Path, extension: object
+) -> None:
+    artifact = tmp_path / ".sanka"
+    artifact.mkdir()
+    plan = {
+        "schema_version": "sanka-application-plan/v1",
+        "extension": extension,
+        "configuration": {"target": "fastapi"},
+    }
+    plan["plan_hash"] = content_hash(plan)
+    (artifact / "plan.json").write_text(json.dumps(plan))
+    assert saved_configuration(tmp_path, target="python-fastapi") == {}
 
 
 def test_plan_rejects_a_conflicting_configured_target(tmp_path: Path) -> None:

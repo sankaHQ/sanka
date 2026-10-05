@@ -66,3 +66,17 @@ SDK release order: `sanka-connector-sdk` compatibility dependency, `sanka-extens
 | `SANKA_CONNECTOR_*` errors, host thread labels | Extension transport errors | Existing machine clients and diagnostics depend on codes; versioned transition required |
 
 The cloud runtime library upgrade is separate. Existing private cloud bridges continue to use their pinned SDK through the compatibility interface until their SDK-first dependency update is reviewed and released.
+
+## Language-qualified migration choices
+
+CLI and TUI present `python-fastapi`, `python-flask`, `go-fiber`, `go-chi`,
+`go-mux` and `go-gin` for the maintained Python migration extensions.
+Go source overrides accept `python-drf`, `python-fastapi` and `python-flask`.
+Short names remain aliases; unrelated extension targets are left unchanged.
+
+The mapping is scoped to each extension ID. Signed manifests, installed wheels,
+request wire names and historical extension captures retain their original names.
+New qualified CLI choices are saved in the core Plan configuration, then translated
+at the subprocess boundary for installed wheels. Old reviewed Plans are never
+rewritten or rehashed. Selecting an equivalent alias reuses saved configuration;
+a different target still requires a new Plan. Package IDs are unchanged.

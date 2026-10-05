@@ -9,6 +9,41 @@ from typing import Any, Literal
 LIFECYCLE_COMMANDS = frozenset({"apply", "plan", "scan", "test", "verify"})
 
 
+# Public choices are qualified; published extension requests keep their wire names.
+_FRAMEWORK_TARGETS = {
+    "sanka/drf-to-fastapi": {"fastapi": "python-fastapi"},
+    "sanka/drf-to-flask": {"flask": "python-flask"},
+    "sanka/python-to-golang": {name: f"go-{name}" for name in ("fiber", "chi", "mux", "gin")},
+}
+
+
+def canonical_target(extension_id: str, target: str) -> str:
+    return _FRAMEWORK_TARGETS.get(extension_id, {}).get(target, target)
+
+
+def canonical_targets(extension_id: str, targets: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(sorted({canonical_target(extension_id, target) for target in targets}))
+
+
+def wire_target(extension_id: str, target: str) -> str:
+    return next(
+        (old for old, new in _FRAMEWORK_TARGETS.get(extension_id, {}).items() if new == target),
+        target,
+    )
+
+
+def wire_configuration(extension_id: str, values: dict[str, Any]) -> dict[str, Any]:
+    result = dict(values)
+    for key in ("target", "target_framework"):
+        if isinstance(result.get(key), str):
+            result[key] = wire_target(extension_id, result[key])
+    if extension_id == "sanka/python-to-golang":
+        source = result.get("source_framework")
+        if source in ("python-drf", "python-fastapi", "python-flask"):
+            result["source_framework"] = source.removeprefix("python-")
+    return result
+
+
 class ExtensionError(RuntimeError):
     """An extension boundary failed with a stable machine-readable code."""
 
