@@ -45,6 +45,8 @@ class ExtensionResult:
     limitations: tuple[str, ...]
     next_actions: tuple[str, ...]
     error: dict[str, Any] | None
+    # Local transport metadata, outside the extension wire response and Plan hash.
+    forwarded_env_names: tuple[str, ...] = ()
 
 
 def _error(code: str, message: str, **details: Any) -> NoReturn:

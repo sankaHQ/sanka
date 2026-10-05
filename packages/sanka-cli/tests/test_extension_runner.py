@@ -101,11 +101,12 @@ response = {{
     "schema_version": "sanka-extension/v1",
     "request_id": "wrong" if mode == "wrong-request" else request["request_id"],
     "command": request["command"],
-    "extension": {{"id": "example/demo", "version": "1.0.0"}},
+    "extension": {{"id": request["extension"]["id"], "version": "1.0.0"}},
     "outcome": "success",
     "data": {{
         "ambient_secret": "SANKA_TEST_SECRET" in os.environ,
         "explicit_secret": os.environ.get("SANKA_EXPLICIT_SECRET"),
+        "source_python": os.environ.get("SANKA_GO_SOURCE_PYTHON"),
     }},
     "artifacts": [artifact] if mode in {{"valid", "outside-artifact"}} else [],
     "limitations": [],
@@ -178,24 +179,51 @@ def test_runner_enforces_the_combined_output_limit_while_the_process_is_running(
         os.kill(pid, 0)
 
 
-def test_runner_forwards_only_explicit_environment_names(
+@pytest.mark.parametrize(
+    ("extension_id", "exported", "explicit", "forwarded"),
+    [
+        ("example/demo", True, False, False),
+        ("sanka/python-to-golang", True, False, True),
+        ("sanka/python-to-golang", True, True, True),
+        ("sanka/python-to-golang", False, False, False),
+        ("example/demo", True, True, True),
+    ],
+)
+def test_runner_scopes_automatic_source_python_to_the_go_extension(
     tmp_path: Path,
     fake_extension: Path,
     monkeypatch: pytest.MonkeyPatch,
+    extension_id: str,
+    exported: bool,
+    explicit: bool,
+    forwarded: bool,
 ) -> None:
     monkeypatch.setenv("SANKA_TEST_SECRET", "ambient")
     monkeypatch.setenv("SANKA_EXPLICIT_SECRET", "forwarded")
+    monkeypatch.delenv("SANKA_GO_SOURCE_PYTHON", raising=False)
+    if exported:
+        monkeypatch.setenv("SANKA_GO_SOURCE_PYTHON", sys.executable)
     request = _request(tmp_path, "valid")
-
+    cast(dict[str, str], request["extension"])["id"] = extension_id
+    names = ("SANKA_EXPLICIT_SECRET",) + (("SANKA_GO_SOURCE_PYTHON",) if explicit else ())
     result = ExtensionRunner().run(
-        _lock(fake_extension),
+        replace(_lock(fake_extension), id=extension_id),
         request,
         allowed_roots=(_artifact_root(request),),
-        explicit_env_names=("SANKA_EXPLICIT_SECRET",),
+        explicit_env_names=names,
     )
 
     assert result.outcome == "success"
-    assert result.data == {"ambient_secret": False, "explicit_secret": "forwarded"}
+    assert result.data == {
+        "ambient_secret": False,
+        "explicit_secret": "forwarded",
+        "source_python": sys.executable if forwarded else None,
+    }
+    assert result.forwarded_env_names == (
+        ("SANKA_EXPLICIT_SECRET", "SANKA_GO_SOURCE_PYTHON")
+        if forwarded
+        else ("SANKA_EXPLICIT_SECRET",)
+    )
     assert os.environ["SANKA_TEST_SECRET"] == "ambient"
     assert "forwarded" not in json.dumps(request)
 

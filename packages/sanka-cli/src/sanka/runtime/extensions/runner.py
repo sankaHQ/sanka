@@ -12,6 +12,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
@@ -39,6 +40,13 @@ def _canonical_environment_names(names: tuple[str, ...]) -> tuple[str, ...]:
     ):
         _error("SANKA_EXTENSION_ENVIRONMENT", "Explicit environment names are invalid")
     return tuple(sorted(names))
+
+
+def extension_environment_names(lock: LockEntry, explicit: tuple[str, ...]) -> tuple[str, ...]:
+    names = _canonical_environment_names(explicit)
+    if lock.id == "sanka/python-to-golang" and "SANKA_GO_SOURCE_PYTHON" in os.environ:
+        return tuple(sorted({*names, "SANKA_GO_SOURCE_PYTHON"}))
+    return names
 
 
 class ExtensionRunner:
@@ -218,8 +226,9 @@ class ExtensionRunner:
             enabled=lock.enabled,
         )
 
+        names = extension_environment_names(lock, explicit_env_names)
+
         def execute(content: bytes) -> tuple[int, bytes, bytes]:
-            names = _canonical_environment_names(explicit_env_names)
             environment = {name: os.environ[name] for name in SAFE_ENV if name in os.environ}
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
             environment.update({name: os.environ[name] for name in names if name in os.environ})
@@ -256,9 +265,10 @@ class ExtensionRunner:
                 pass_fds=pass_fds,
             )
 
-        return ExtensionStageRunner().run(
+        result = ExtensionStageRunner().run(
             binding, request, allowed_roots=allowed_roots, execute=execute
         )
+        return replace(result, forwarded_env_names=names)
 
 
 __all__ = ["ExtensionResult", "ExtensionRunner"]

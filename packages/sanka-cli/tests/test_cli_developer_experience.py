@@ -17,6 +17,7 @@ from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
 
 
+@pytest.mark.parametrize("forwarded", [(), ("SANKA_GO_SOURCE_PYTHON",)])
 @pytest.mark.parametrize("command", ["scan", "plan", "apply", "test"])
 @pytest.mark.parametrize(
     "options",
@@ -24,10 +25,15 @@ from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
         [],
         ["--artifact-dir", "reports and plans"],
         ["--extension-env", "SOURCE_PYTHON", "--extension-env", "DATABASE_URL"],
+        ["--extension-env", "SANKA_GO_SOURCE_PYTHON"],
     ],
 )
 def test_next_hint_keeps_the_invocation_context(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str, options: list[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    options: list[str],
+    forwarded: tuple[str, ...],
 ) -> None:
     tmp_path = tmp_path / "source project"
     parser = _build_parser()
@@ -45,6 +51,7 @@ def test_next_hint_keeps_the_invocation_context(
         (),
         (),
         None,
+        forwarded_env_names=forwarded,
     )
     cli._print_application_result(args, command, result, migration_state="planned")
     output = capsys.readouterr().out
@@ -55,13 +62,14 @@ def test_next_hint_keeps_the_invocation_context(
     following = parser.parse_args(tokens[1:])
     assert Path(getattr(following, "root_option", None) or following.root) == tmp_path
     assert following.artifact_dir == args.artifact_dir
-    assert following.extension_env == args.extension_env
+    assert following.extension_env == list(dict.fromkeys([*args.extension_env, *forwarded]))
     if command == "scan":
         assert following.to == "<target>"
     if command == "plan":
         assert following.plan_hash == result.data["plan_hash"]
     if not options:
-        assert "--artifact-dir" not in tokens and "--extension-env" not in tokens
+        assert "--artifact-dir" not in tokens
+        assert ("--extension-env" in tokens) == bool(forwarded)
 
 
 def test_extension_help_exposes_only_the_management_command_tree(

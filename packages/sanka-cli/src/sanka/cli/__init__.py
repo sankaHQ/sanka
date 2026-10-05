@@ -1125,7 +1125,7 @@ def _print_application_result(
             options: list[str] = []
             if args.artifact_dir != ".sanka":
                 options.extend(("--artifact-dir", str(args.artifact_dir)))
-            for name in args.extension_env:
+            for name in dict.fromkeys([*args.extension_env, *result.forwarded_env_names]):
                 options.extend(("--extension-env", name))
             if options:
                 next_hint += " " + shlex.join(options)

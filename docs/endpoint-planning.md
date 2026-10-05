@@ -74,6 +74,10 @@ and JSON runs fail promptly with the missing keys. Apply, Test and Verify use th
 reviewed settings; they cannot silently change scope. Changing target or output
 requires a new plan. Forward only required environment names with repeated
 `--extension-env NAME` on each CLI stage or when starting an optional TUI session.
+For `sanka/python-to-golang`, an exported `SANKA_GO_SOURCE_PYTHON` is forwarded
+automatically; its `--extension-env` flag is optional. Human `next:` hints include
+the variable name when it was forwarded, never its value. Other variables still
+require explicit flags. The source interpreter path is validated by the extension.
 
 Required authentication, serializers, models and database schema remain available
 even when fewer HTTP routes are generated. Shared capture/security failures remain

@@ -13,7 +13,11 @@ CLI → ApplicationLifecycle → ExtensionRunner → ExtensionStageRunner
 
 `ExtensionRunner` retains verified executable leases, explicit environment
 selection, incremental output limits, deadlines and process cleanup. It supplies
-these controls to the shared stage runner as an adapter. The existing
+these controls to the shared stage runner as an adapter. For the verified
+`sanka/python-to-golang` extension, it also forwards an exported
+`SANKA_GO_SOURCE_PYTHON` automatically. Only forwarded names travel back as local
+result metadata for human next-command hints; values never enter the protocol or
+Plan hash. The existing
 `ExtensionResult` import from `sanka.runtime.extensions.runner` remains an alias
 of the same result class.
 

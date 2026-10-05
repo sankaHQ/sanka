@@ -25,6 +25,7 @@ from sanka.runtime.extensions.runner import (
     ExtensionResult,
     ExtensionRunner,
     _canonical_environment_names,
+    extension_environment_names,
 )
 from sanka.runtime.extensions.settings import setting_defaults
 from sanka.runtime.extensions.store import DEFAULT_EXTENSION_ID, ExtensionStore, LockEntry
@@ -464,6 +465,13 @@ class ApplicationLifecycle:
             "configuration": normalized,
             "explicit_env_names": list(explicit_env_names),
             **data,
+            "forwarded_env_names": sorted(
+                {
+                    name
+                    for lock in locks
+                    for name in extension_environment_names(lock, explicit_env_names)
+                }
+            ),
         }
         scan_path = _write_json(self.artifact_root / "scan.json", scan_payload)
         return ExtensionResult(
@@ -482,6 +490,11 @@ class ApplicationLifecycle:
                 action for _lock, result in extension_results for action in result.next_actions
             ),
             error=None,
+            forwarded_env_names=tuple(
+                sorted(
+                    {name for _, result in extension_results for name in result.forwarded_env_names}
+                )
+            ),
         )
 
     def _current_scan_locked(
@@ -494,6 +507,13 @@ class ApplicationLifecycle:
         locks = self._scan_locks(recommendations)
         expected_locks = [lock.to_dict() for lock in locks]
         expected_recommendations = _serialized_recommendations(recommendations)
+        environment_names = sorted(
+            {
+                name
+                for lock in locks
+                for name in extension_environment_names(lock, explicit_env_names)
+            }
+        )
         try:
             scan = _read_json(self.artifact_root / "scan.json", SCAN_SCHEMA)
         except ExtensionError:
@@ -512,9 +532,11 @@ class ApplicationLifecycle:
                 and saved.get("hash") == fingerprint.hash
                 and scan.get("configuration") == normalized
                 and scan.get("explicit_env_names") == list(explicit_env_names)
+                and scan.get("forwarded_env_names", scan.get("explicit_env_names"))
+                == environment_names
                 and saved_locks == expected_locks
                 and scan.get("recommendations") == expected_recommendations
-                and not explicit_env_names
+                and not environment_names
             ):
                 return
         self._scan_locked(
@@ -844,6 +866,7 @@ class ApplicationLifecycle:
             limitations=result.limitations,
             next_actions=result.next_actions,
             error=None,
+            forwarded_env_names=result.forwarded_env_names,
         )
 
     def _load_plan(self) -> dict[str, Any]:
@@ -970,6 +993,7 @@ class ApplicationLifecycle:
             limitations=result.limitations,
             next_actions=result.next_actions,
             error=None,
+            forwarded_env_names=result.forwarded_env_names,
         )
 
     def apply(
@@ -1054,6 +1078,7 @@ class ApplicationLifecycle:
             limitations=result.limitations,
             next_actions=result.next_actions,
             error=None,
+            forwarded_env_names=result.forwarded_env_names,
         )
 
     def _replay_lock(self, fingerprint: Fingerprint) -> LockEntry:

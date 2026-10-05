@@ -381,18 +381,28 @@ def test_plan_refreshes_scan_when_explicit_environment_names_change(
     assert scan["explicit_env_names"] == sorted(current_names)
 
 
-def test_plan_refreshes_scan_when_an_explicit_environment_value_may_have_changed(
+@pytest.mark.parametrize("automatic", [False, True, "removed"])
+def test_plan_refreshes_scan_when_a_forwarded_environment_value_may_have_changed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    automatic: bool | str,
 ) -> None:
     project = _project(tmp_path)
     runner = FakeRunner()
-    lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
-    monkeypatch.setenv("SANKA_CONTEXT", "first-value")
-    lifecycle.scan(explicit_env_names=("SANKA_CONTEXT",))
-    monkeypatch.setenv("SANKA_CONTEXT", "second-value")
+    store = FakeStore(installed=True)
+    if automatic:
+        store.lock = replace(store.lock, id="sanka/python-to-golang")
+    lifecycle = _lifecycle(project, store, runner)
+    name = "SANKA_GO_SOURCE_PYTHON" if automatic else "SANKA_CONTEXT"
+    explicit = () if automatic else (name,)
+    monkeypatch.setenv(name, "first-value")
+    lifecycle.scan(explicit_env_names=explicit)
+    if automatic == "removed":
+        monkeypatch.delenv(name)
+    else:
+        monkeypatch.setenv(name, "second-value")
 
-    lifecycle.plan(target="fastapi", explicit_env_names=("SANKA_CONTEXT",))
+    lifecycle.plan(target="fastapi", explicit_env_names=explicit)
 
     assert [request["command"] for _lock, request in runner.calls] == [
         "scan",
@@ -400,7 +410,7 @@ def test_plan_refreshes_scan_when_an_explicit_environment_value_may_have_changed
         "plan",
     ]
     serialized = (project / ".sanka" / "scan.json").read_text()
-    assert json.loads(serialized)["explicit_env_names"] == ["SANKA_CONTEXT"]
+    assert json.loads(serialized)["explicit_env_names"] == list(explicit)
     assert "first-value" not in serialized
     assert "second-value" not in serialized
 
