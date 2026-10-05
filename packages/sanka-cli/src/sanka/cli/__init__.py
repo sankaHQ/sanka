@@ -973,16 +973,14 @@ def _prompt_choice(
     choices: tuple[tuple[str, str], ...],
     *,
     default: str,
+    indent: str = "",
 ) -> str:
-    print(label)
+    print(f"{indent}{label}")
     for index, (value, description) in enumerate(choices, start=1):
         marker = " (recommended)" if value == default else ""
-        print(f"  {index}. {description}{marker}")
-    raw = (
-        input(f"Select [{next(i for i, item in enumerate(choices, 1) if item[0] == default)}]: ")
-        .strip()
-        .lower()
-    )
+        print(f"{indent}  {index}. {description}{marker}")
+    default_index = next(i for i, item in enumerate(choices, 1) if item[0] == default)
+    raw = input(f"{indent}Select [{default_index}]: ").strip().lower()
     if not raw:
         return default
     for index, (value, _description) in enumerate(choices, start=1):
@@ -1036,14 +1034,17 @@ def _extension_configuration(args: argparse.Namespace) -> dict[str, Any]:
     return configuration
 
 
-def _lifecycle_prompt(label: str, choices: tuple[str, ...] | None = None) -> str | None:
+def _lifecycle_prompt(
+    label: str, choices: tuple[str, ...] | None = None, *, indent: str = ""
+) -> str | None:
     if choices:
         return _prompt_choice(
             f"{label}:",
             tuple((choice, choice) for choice in choices),
             default=choices[0],
+            indent=indent,
         )
-    return input(f"{label}: ").strip() or None
+    return input(f"{indent}{label}: ").strip() or None
 
 
 def _application_lifecycle(
@@ -1056,6 +1057,19 @@ def _application_lifecycle(
     terminal = terminal or _terminal(args)
     decoder = getincrementaldecoder("utf-8")("replace")
     pending = ""
+    configuration_started = False
+
+    def prompt(label: str, choices: tuple[str, ...] | None = None) -> str | None:
+        nonlocal configuration_started
+        if args.command == "plan" and (
+            label == "Choose a migration target" or label.startswith("Extension configuration: ")
+        ):
+            print("" if configuration_started else "Configuration:")
+            configuration_started = True
+            return _lifecycle_prompt(
+                label.removeprefix("Extension configuration: "), choices, indent="  "
+            )
+        return _lifecycle_prompt(label, choices)
 
     def on_stderr(chunk: bytes) -> None:
         nonlocal pending
@@ -1071,7 +1085,7 @@ def _application_lifecycle(
         runner=ExtensionRunner(on_stderr=on_stderr),
         interactive=_interactive_terminal()
         and not (args.json or getattr(args, "compact_dsl", False) or getattr(args, "quiet", False)),
-        prompt=_lifecycle_prompt,
+        prompt=prompt,
         input_hints=plan_input_hints(getattr(args, "to", None)),
     )
 
