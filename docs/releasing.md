@@ -1,5 +1,23 @@
 # Sanka release procedure
 
+## Qualified framework names release 0.3.8
+
+Version 0.3.8 presents language-qualified Plan and TUI choices such as
+`python-fastapi`, `python-flask`, `go-fiber`, `go-chi`, `go-mux` and `go-gin`.
+Short aliases remain accepted. Extension request translation keeps existing
+published wheels usable, and equivalent names preserve saved configuration,
+endpoint selections and reviewed Plan hashes.
+
+The official catalog pins independently verified Extensions release merge
+`21ce3a6fb85f03692ff549fe13324725929e0615` and immutable
+`api-converters-v0.1.0a16`. Public assets match the merged manifests; installed
+acceptance passed native Go checks and HTTP comparison. Require maintained checks,
+installed fresh/upgrade acceptance,
+and successful exact-head CI. Merge the release preparation normally, then publish
+only the absent immutable v0.3.8 tag with publish-v0.3.8. Read back PyPI hashes and
+source provenance, verify the public installer and all five migration guide paths
+before publishing qualified-name documentation. Public 0.3.7 stays immutable.
+
 ## Lifecycle feedback release 0.3.7
 
 Version 0.3.7 shows a saved Plan file path, prompts for missing visible declared
