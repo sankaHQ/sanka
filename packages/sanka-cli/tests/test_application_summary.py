@@ -40,7 +40,7 @@ def test_scan_summary_lists_versions_counts_and_hash() -> None:
         "",
         "scan hash: sha256:" + "a" * 64,
     ]
-    assert hint == "sanka plan . --to fastapi"
+    assert hint == "sanka plan . --to python-fastapi"
 
 
 def test_scan_summary_without_a_single_target_keeps_a_placeholder() -> None:
@@ -173,7 +173,7 @@ def test_scan_hint_derives_the_target_from_the_extension_id() -> None:
             "extensions": [{"extension": {"id": "sanka/drf-to-fastapi", "version": "0.1.0a10"}}],
         },
     )
-    assert hint == "sanka plan . --to fastapi"
+    assert hint == "sanka plan . --to python-fastapi"
 
     _lines, ambiguous = application_summary(
         "scan",

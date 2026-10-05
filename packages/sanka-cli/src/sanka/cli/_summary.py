@@ -135,14 +135,18 @@ def _scan_targets(data: Mapping[str, Any]) -> list[str]:
                 continue
             explicit = entry.get("targets")
             record = entry.get("extension")
+            identifier = entry.get("id")
+            if identifier is None and isinstance(record, Mapping):
+                identifier = record.get("id")
             if not explicit and isinstance(record, Mapping):
                 explicit = record.get("targets")
             for candidate in explicit or ():
-                add(candidate)
+                add(
+                    canonical_target(identifier, candidate)
+                    if isinstance(identifier, str) and isinstance(candidate, str)
+                    else candidate
+                )
             if not explicit:
-                identifier = entry.get("id")
-                if identifier is None and isinstance(record, Mapping):
-                    identifier = record.get("id")
                 add(_target_from_extension_id(identifier))
     return targets
 
