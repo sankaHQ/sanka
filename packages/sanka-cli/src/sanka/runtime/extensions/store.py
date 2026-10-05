@@ -50,6 +50,7 @@ from sanka.runtime.extensions.model import (
     Manifest,
     Recommendation,
     Wheel,
+    canonical_targets,
 )
 from sanka.runtime.extensions.settings import ExtensionSettings, read_wheel_settings
 from sanka.runtime.hashing import content_hash
@@ -384,7 +385,7 @@ class ExtensionRecord:
             "providers": [
                 asdict(provider) | {"roles": list(provider.roles)} for provider in self.providers
             ],
-            "targets": list(self.targets),
+            "targets": list(canonical_targets(self.id, self.targets)),
             "status": list(self.status),
             "wheels": [asdict(wheel) for wheel in self.wheels],
         }

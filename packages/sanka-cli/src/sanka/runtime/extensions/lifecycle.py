@@ -16,6 +16,10 @@ from sanka.runtime.extensions.model import (
     Fingerprint,
     MatchedEvidence,
     Recommendation,
+    canonical_target,
+    canonical_targets,
+    wire_configuration,
+    wire_target,
 )
 from sanka.runtime.extensions.runner import (
     ExtensionResult,
@@ -74,8 +78,18 @@ def saved_plan(project_root: Path, artifact_dir: str = ".sanka") -> dict[str, An
 def saved_configuration(
     project_root: Path, artifact_dir: str = ".sanka", target: str | None = None
 ) -> dict[str, Any]:
-    values = saved_plan(project_root, artifact_dir).get("configuration")
-    if not isinstance(values, dict) or (target is not None and target != values.get("target")):
+    plan = saved_plan(project_root, artifact_dir)
+    values = plan.get("configuration")
+    extension_id = plan.get("extension", {}).get("id", "")
+    if (
+        not isinstance(values, dict)
+        or not isinstance(values.get("target"), str)
+        or (
+            target is not None
+            and canonical_target(extension_id, target)
+            != canonical_target(extension_id, values.get("target", ""))
+        )
+    ):
         return {}
     return dict(values)
 
@@ -121,7 +135,7 @@ def _recommendation(value: Recommendation) -> dict[str, Any]:
         "manifest_digest": value.manifest_digest,
         "commands": list(value.commands),
         "status": list(value.status),
-        "targets": list(value.targets),
+        "targets": list(canonical_targets(value.id, value.targets)),
         "version": value.version,
     }
 
@@ -330,7 +344,7 @@ class ApplicationLifecycle:
         return {
             "artifact_root": str(self._extension_root(lock)),
             "command": command,
-            "configuration": configuration,
+            "configuration": wire_configuration(lock.id, configuration),
             "extension": {
                 "id": lock.id,
                 "manifest_digest": lock.manifest_digest.removeprefix("sha256:"),
@@ -565,7 +579,11 @@ class ApplicationLifecycle:
         explicit_keys: frozenset[str] = frozenset(),
     ) -> ExtensionResult:
         enabled = self._enabled(recommendations)
-        targets = tuple(sorted({target for item in enabled for target in item.targets}))
+        targets = tuple(
+            sorted(
+                {target for item in enabled for target in canonical_targets(item.id, item.targets)}
+            )
+        )
         selected_target = target or self._prompt("Choose a migration target", targets)
         if selected_target is None:
             _error(
@@ -573,7 +591,12 @@ class ApplicationLifecycle:
                 "A migration target is required outside an interactive terminal",
                 targets=list(targets),
             )
-        selected = tuple(item for item in enabled if selected_target in item.targets)
+        selected = tuple(
+            item
+            for item in enabled
+            if canonical_target(item.id, selected_target)
+            in canonical_targets(item.id, item.targets)
+        )
         if not selected:
             _error(
                 "SANKA_EXTENSION_REQUIRED",
@@ -589,7 +612,11 @@ class ApplicationLifecycle:
                 extensions=[item.id for item in selected],
             )
         configured_target = normalized.get("target")
-        if configured_target is not None and configured_target != selected_target:
+        if configured_target is not None and (
+            not isinstance(configured_target, str)
+            or canonical_target(selected[0].id, configured_target)
+            != canonical_target(selected[0].id, selected_target)
+        ):
             _error(
                 "SANKA_EXTENSION_TARGET_MISMATCH",
                 "The selected target differs from configuration.target",
@@ -686,7 +713,7 @@ class ApplicationLifecycle:
                             available_ids=available,
                         )
                     normalized["selected_endpoints"] = sorted(set(requested_ids) | set(retained))
-                    request["configuration"] = normalized
+                    request["configuration"] = wire_configuration(lock.id, normalized)
                     scope_resolved = True
                     continue
                 break
@@ -723,7 +750,7 @@ class ApplicationLifecycle:
                     inputs=list(inputs),
                 )
             for name in inputs:
-                choices, default = self._input_hint(name, selected_target)
+                choices, default = self._input_hint(name, wire_target(lock.id, selected_target))
                 label = f"Extension configuration: {name}"
                 declared = next(
                     (item for item in settings if item.id == name and item.visible(normalized)),
@@ -744,7 +771,7 @@ class ApplicationLifecycle:
                     self._raise_failure(result)
                 normalized[name] = answer
                 seen_inputs.add(name)
-            request["configuration"] = normalized
+            request["configuration"] = wire_configuration(lock.id, normalized)
         requested = normalized.get("selected_endpoints")
         if requested is not None:
             scope = result.data.get("endpoint_scope")
@@ -769,7 +796,7 @@ class ApplicationLifecycle:
             )
         swagger_ui = normalized.get("swagger_ui")
         if (
-            selected_target == "fastapi"
+            wire_target(lock.id, selected_target) == "fastapi"
             and isinstance(swagger_ui, bool)
             and result.data.get("swagger_ui") is not swagger_ui
         ):

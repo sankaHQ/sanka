@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from sanka.runtime.extensions.model import canonical_targets
+
 LIFECYCLE_COMMANDS = frozenset({"scan", "plan", "apply", "test", "verify"})
 IMPLEMENTATIONS = frozenset({"not_migrated", "already_implemented", "skip", "unknown"})
 _DISPLAY_WORDS = {
@@ -455,7 +457,9 @@ def extension_from_recommendation(value: object) -> ExtensionChoice | None:
         marketplace=str(value.get("marketplace") or ""),
         marketplace_identity=str(value.get("marketplace_identity") or ""),
         kind="migration",
-        targets=tuple(item for item in targets if isinstance(item, str))
+        targets=canonical_targets(
+            value["id"], tuple(item for item in targets if isinstance(item, str))
+        )
         if isinstance(targets, list)
         else (),
         status=frozenset(item for item in status if isinstance(item, str))

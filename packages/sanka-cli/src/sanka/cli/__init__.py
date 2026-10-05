@@ -20,7 +20,7 @@ Shorthand and provider selection::
 Django REST Framework to FastAPI compatibility flow::
 
     sanka scan
-    sanka plan --to fastapi
+    sanka plan --to python-fastapi
     sanka apply --plan-hash sha256:...
     sanka test
     sanka verify
@@ -337,7 +337,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         ),
         epilog=(
             "Interactive: sanka plan .\n"
-            "Non-interactive: sanka plan . --to fastapi --generation full "
+            "Non-interactive: sanka plan . --to python-fastapi --generation full "
             "--output ./fastapi-app --strategy native --package-manager uv\n"
             "Next: sanka apply --plan-hash <printed-hash>"
         ),
@@ -345,7 +345,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     common(plan)
     plan.add_argument("root", nargs="?", default=".", help="application repository root")
-    plan.add_argument("--to", help="target application framework")
+    plan.add_argument(
+        "--to", help="target language-framework (for example python-fastapi or go-fiber)"
+    )
     plan.add_argument(
         "--strategy",
         choices=PLAN_STRATEGIES,
@@ -1144,8 +1146,8 @@ def _print_application_result(
 
 async def _cmd_plan(args: argparse.Namespace) -> int:
     if _application_lifecycle_requested(args):
-        if args.swagger_ui is not None and args.to not in (None, "fastapi"):
-            raise CliUsageError("--swagger-ui/--no-swagger-ui requires --to fastapi")
+        if args.swagger_ui is not None and args.to not in (None, "fastapi", "python-fastapi"):
+            raise CliUsageError("--swagger-ui/--no-swagger-ui requires --to python-fastapi")
         selection: dict[str, Any] = {}
         if args.endpoint or args.all_endpoints:
             selection = {"endpoint_ids": tuple(args.endpoint), "all_endpoints": args.all_endpoints}
