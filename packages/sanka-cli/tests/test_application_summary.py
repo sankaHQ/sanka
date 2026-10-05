@@ -102,7 +102,7 @@ def test_plan_summary_shows_strategy_route_split_and_apply_hint(tmp_path: Path) 
         "  0 need manual adaptation",
         "  readiness 100% (7/7 non-alias routes)",
     ]
-    assert hint == f"sanka apply --root . --plan-hash {plan_hash}"
+    assert hint == f"sanka apply --root {tmp_path} --plan-hash {plan_hash}"
 
 
 def test_apply_test_and_verify_summaries(tmp_path: Path) -> None:
@@ -118,7 +118,7 @@ def test_apply_test_and_verify_summaries(tmp_path: Path) -> None:
         "  Output     .sanka/output/fastapi",
         "  Engine     Tortoise ORM",
     ]
-    assert apply_hint == "sanka test ."
+    assert apply_hint == f"sanka test {tmp_path}"
 
     test_lines, test_hint = application_summary(
         "test",
@@ -130,7 +130,7 @@ def test_apply_test_and_verify_summaries(tmp_path: Path) -> None:
         "  Ran 7 tests",
         "  Env        .sanka/output/fastapi/.venv",
     ]
-    assert test_hint == "sanka verify ."
+    assert test_hint == f"sanka verify {tmp_path}"
 
     verify_lines, verify_hint = application_summary(
         "verify",
@@ -165,12 +165,13 @@ def test_summary_tolerates_unknown_shapes() -> None:
     assert application_summary("scan", "not a mapping") == ([], None)  # type: ignore[arg-type]
 
 
-def test_scan_hint_derives_the_target_from_the_extension_id() -> None:
+def test_scan_hint_uses_declared_recommendation_targets() -> None:
     _lines, hint = application_summary(
         "scan",
         {
             "routes": [],
             "extensions": [{"extension": {"id": "sanka/drf-to-fastapi", "version": "0.1.0a10"}}],
+            "recommendations": [{"id": "sanka/drf-to-fastapi", "targets": ["fastapi"]}],
         },
     )
     assert hint == "sanka plan . --to python-fastapi"

@@ -8,6 +8,7 @@ an older or newer extension response never breaks the text output.
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -110,17 +111,6 @@ def _scan_lines(data: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def _target_from_extension_id(extension_id: Any) -> str | None:
-    """``sanka/drf-to-fastapi`` names its target after ``-to-``; other ids give nothing."""
-    if not isinstance(extension_id, str):
-        return None
-    name = extension_id.rsplit("/", 1)[-1]
-    if "-to-" not in name:
-        return None
-    target = name.rsplit("-to-", 1)[-1].strip()
-    return canonical_target(extension_id, target) if target else None
-
-
 def _scan_targets(data: Mapping[str, Any]) -> list[str]:
     targets: list[str] = []
 
@@ -140,14 +130,21 @@ def _scan_targets(data: Mapping[str, Any]) -> list[str]:
                 identifier = record.get("id")
             if not explicit and isinstance(record, Mapping):
                 explicit = record.get("targets")
+            if not explicit:
+                explicit = next(
+                    (
+                        item.get("targets")
+                        for item in data.get("recommendations") or ()
+                        if isinstance(item, Mapping) and item.get("id") == identifier
+                    ),
+                    (),
+                )
             for candidate in explicit or ():
                 add(
                     canonical_target(identifier, candidate)
                     if isinstance(identifier, str) and isinstance(candidate, str)
                     else candidate
                 )
-            if not explicit:
-                add(_target_from_extension_id(identifier))
     return targets
 
 
@@ -330,22 +327,23 @@ def application_summary(
     """Return (summary lines, next-command hint) for a successful lifecycle step."""
     if not isinstance(data, Mapping):
         return [], None
+    quoted_root = shlex.quote(str(root))
     if command == "scan":
         targets = _scan_targets(data)
         target = targets[0] if len(targets) == 1 else "<target>"
-        return _scan_lines(data), f"sanka plan . --to {target}"
+        return _scan_lines(data), f"sanka plan {quoted_root} --to {target}"
     if command == "plan":
         plan_hash = data.get("plan_hash")
         hint = (
-            f"sanka apply --root . --plan-hash {plan_hash}"
+            f"sanka apply --root {quoted_root} --plan-hash {shlex.quote(plan_hash)}"
             if isinstance(plan_hash, str) and plan_hash
-            else "sanka apply --root . --plan-hash <hash printed above>"
+            else f"sanka apply --root {quoted_root} --plan-hash <hash printed above>"
         )
         return _plan_lines(data, root), hint
     if command == "apply":
-        return _apply_lines(data, root), "sanka test ."
+        return _apply_lines(data, root), f"sanka test {quoted_root}"
     if command == "test":
-        return _test_lines(data, root), "sanka verify ."
+        return _test_lines(data, root), f"sanka verify {quoted_root}"
     if command == "verify":
         return _verify_lines(data), None
     return [], None

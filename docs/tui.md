@@ -145,4 +145,5 @@ reruns. The Command view includes the names so the CLI equivalent is reproducibl
 Only names are kept in the TUI session; values are resolved by the existing
 extension runner and are not added to configuration or TUI history. This does
 not forward your whole shell environment or upload local variables to cloud runs.
-Re-supply the options when opening a new TUI session.
+Re-supply the options when opening a new TUI session. For Python → Go, the runner
+also uses an exported `SANKA_GO_SOURCE_PYTHON` automatically; that flag is optional.

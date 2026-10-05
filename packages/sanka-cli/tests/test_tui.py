@@ -1282,7 +1282,7 @@ def test_successful_stage_results_keep_cli_summary_and_next_command() -> None:
                 "extensions": [{"id": "sanka/drf-to-fastapi", "targets": ["fastapi"]}],
             },
             ("Detected", "Python     3.12.13", "14 routes", "scan hash: sha256:"),
-            "next: sanka plan . --to python-fastapi",
+            "next: sanka plan /work/demo --to python-fastapi",
         ),
         (
             "plan",
@@ -1300,19 +1300,19 @@ def test_successful_stage_results_keep_cli_summary_and_next_command() -> None:
                 "plan_hash": plan_hash,
             },
             ("DRF → FastAPI plan", "7 generated natively", "7 format-suffix aliases dropped"),
-            f"next: sanka apply --root . --plan-hash {plan_hash}",
+            f"next: sanka apply --root /work/demo --plan-hash {plan_hash}",
         ),
         (
             "apply",
             {"routes_generated": 7, "output": "/work/demo/.sanka/output/fastapi"},
             ("Generated", "7 native routes", ".sanka/output/fastapi"),
-            "next: sanka test .",
+            "next: sanka test /work/demo",
         ),
         (
             "test",
             {"log": "Ran 7 tests in 0.5s", "environment": "/work/demo/.sanka/output/fastapi/.venv"},
             ("Generated app tests", "Ran 7 tests", ".sanka/output/fastapi/.venv"),
-            "next: sanka verify .",
+            "next: sanka verify /work/demo",
         ),
         (
             "verify",
@@ -1342,7 +1342,7 @@ def test_successful_stage_results_keep_cli_summary_and_next_command() -> None:
     restored_plan = _summary_text(
         StageRun("plan", phase="succeeded", plan_hash=plan_hash), root=root
     )
-    assert f"next: sanka apply --root . --plan-hash {plan_hash}" in restored_plan
+    assert f"next: sanka apply --root /work/demo --plan-hash {plan_hash}" in restored_plan
     failed = _summary_text(StageRun("verify", phase="failed", error_message="Mismatch"), root=root)
     assert "✓ OK" not in failed
     assert "next:" not in failed
@@ -1373,7 +1373,7 @@ async def test_completed_scan_shows_its_cli_completion_at_120_by_28() -> None:
         await pilot.pause()
         visible = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
         assert "✓ OK  scan complete" in visible
-        assert "next: sanka plan . --to python-fastapi" in visible
+        assert "next: sanka plan /work/demo --to python-fastapi" in visible
 
 
 @pytest.mark.asyncio

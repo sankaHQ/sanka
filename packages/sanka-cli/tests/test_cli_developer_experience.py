@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import shlex
 from pathlib import Path
 from typing import cast
 
@@ -14,6 +15,61 @@ from sanka.cli import _build_parser, main
 from sanka.cli._output import TerminalOutput
 from sanka.runtime.extensions import ExtensionError
 from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
+
+
+@pytest.mark.parametrize("forwarded", [(), ("SANKA_GO_SOURCE_PYTHON",)])
+@pytest.mark.parametrize("command", ["scan", "plan", "apply", "test"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        [],
+        ["--artifact-dir", "reports and plans"],
+        ["--extension-env", "SOURCE_PYTHON", "--extension-env", "DATABASE_URL"],
+        ["--extension-env", "SANKA_GO_SOURCE_PYTHON"],
+    ],
+)
+def test_next_hint_keeps_the_invocation_context(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    options: list[str],
+    forwarded: tuple[str, ...],
+) -> None:
+    tmp_path = tmp_path / "source project"
+    parser = _build_parser()
+    invocation = (
+        [command, "--root", str(tmp_path), "--plan-hash", "sha256:previous"]
+        if command == "apply"
+        else [command, str(tmp_path)]
+    )
+    args = parser.parse_args([*invocation, *options])
+    args.root = getattr(args, "root_option", None) or args.root
+    result = ExtensionResult(
+        "success",
+        {"plan_hash": "sha256:reviewed", "extensions": [{"id": "sanka/python-to-golang"}]},
+        (),
+        (),
+        (),
+        None,
+        forwarded_env_names=forwarded,
+    )
+    cli._print_application_result(args, command, result, migration_state="planned")
+    output = capsys.readouterr().out
+    hint = next(
+        line.removeprefix("next: ") for line in output.splitlines() if line.startswith("next: ")
+    )
+    tokens = shlex.split(hint)
+    following = parser.parse_args(tokens[1:])
+    assert Path(getattr(following, "root_option", None) or following.root) == tmp_path
+    assert following.artifact_dir == args.artifact_dir
+    assert following.extension_env == list(dict.fromkeys([*args.extension_env, *forwarded]))
+    if command == "scan":
+        assert following.to == "<target>"
+    if command == "plan":
+        assert following.plan_hash == result.data["plan_hash"]
+    if not options:
+        assert "--artifact-dir" not in tokens
+        assert ("--extension-env" in tokens) == bool(forwarded)
 
 
 def test_extension_help_exposes_only_the_management_command_tree(
@@ -173,6 +229,42 @@ def test_real_install_prompt_declines_by_default_and_preserves_selected_choice(
 
     assert cli._lifecycle_prompt("Choose an extension to install", choices) == "decline"
     assert cli._lifecycle_prompt("Choose an extension to install", choices) == choices[2]
+
+
+@pytest.mark.parametrize("choose_target", [False, True])
+def test_plan_configuration_groups_keep_numbered_selections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    choose_target: bool,
+) -> None:
+    monkeypatch.setattr(cli, "_interactive_terminal", lambda: True)
+
+    def answer(label: str) -> str:
+        print(label)
+        return "2"
+
+    monkeypatch.setattr("builtins.input", answer)
+    args = _build_parser().parse_args(["plan", str(tmp_path)])
+    for _ in range(2):
+        lifecycle = cli._application_lifecycle(args)
+        assert lifecycle.prompt is not None
+        if choose_target:
+            assert (
+                lifecycle.prompt("Choose a migration target", ("go-chi", "go-fiber")) == "go-fiber"
+            )
+        assert (
+            lifecycle.prompt(
+                "Extension configuration: Destination database", ("auto", "pgx", "sqlite")
+            )
+            == "pgx"
+        )
+        assert lifecycle.prompt("Extension configuration: output [generated]", None) == "2"
+        lines = capsys.readouterr().out.splitlines()
+        assert sum(bool(line) and not line.startswith(" ") for line in lines) == 1
+        assert all(line.startswith("    ") for line in lines if line.lstrip()[:1].isdigit())
+        assert lines[-1].startswith("  ")
+        assert lines.count("") == (2 if choose_target else 1)
 
 
 def test_extension_config_requires_a_json_object(capsys: pytest.CaptureFixture[str]) -> None:
