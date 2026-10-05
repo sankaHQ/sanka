@@ -15,6 +15,7 @@ from sanka.runtime.extensions import ExtensionError, Recommendation, fingerprint
 from sanka.runtime.extensions.lifecycle import ApplicationLifecycle, saved_configuration
 from sanka.runtime.extensions.runner import ExtensionResult, ExtensionRunner
 from sanka.runtime.extensions.store import ExtensionStore, LockEntry
+from sanka.runtime.hashing import content_hash
 
 
 def _lock(*, digest: str = "3" * 64) -> LockEntry:
@@ -939,6 +940,22 @@ def test_plan_forwards_the_selected_target_to_the_plan_and_later_stages(
     assert apply_request["command"] == "apply"
     assert apply_request["configuration"]["target"] == wire_target
     assert apply_request["configuration"]["extension_plan_hash"] == "sha256:extension-plan"
+
+
+@pytest.mark.parametrize("extension", [None, [], "invalid", {"id": []}])
+def test_saved_configuration_rejects_invalid_extension_identity(
+    tmp_path: Path, extension: object
+) -> None:
+    artifact = tmp_path / ".sanka"
+    artifact.mkdir()
+    plan = {
+        "schema_version": "sanka-application-plan/v1",
+        "extension": extension,
+        "configuration": {"target": "fastapi"},
+    }
+    plan["plan_hash"] = content_hash(plan)
+    (artifact / "plan.json").write_text(json.dumps(plan))
+    assert saved_configuration(tmp_path, target="python-fastapi") == {}
 
 
 def test_plan_rejects_a_conflicting_configured_target(tmp_path: Path) -> None:

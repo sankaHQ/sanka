@@ -80,7 +80,10 @@ def saved_configuration(
 ) -> dict[str, Any]:
     plan = saved_plan(project_root, artifact_dir)
     values = plan.get("configuration")
-    extension_id = plan.get("extension", {}).get("id", "")
+    extension = plan.get("extension")
+    extension_id = extension.get("id") if isinstance(extension, dict) else None
+    if not isinstance(extension_id, str):
+        return {}
     if (
         not isinstance(values, dict)
         or not isinstance(values.get("target"), str)
