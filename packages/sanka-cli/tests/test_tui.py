@@ -1282,7 +1282,7 @@ def test_successful_stage_results_keep_cli_summary_and_next_command() -> None:
                 "extensions": [{"id": "sanka/drf-to-fastapi", "targets": ["fastapi"]}],
             },
             ("Detected", "Python     3.12.13", "14 routes", "scan hash: sha256:"),
-            "next: sanka plan . --to fastapi",
+            "next: sanka plan . --to python-fastapi",
         ),
         (
             "plan",
@@ -1373,7 +1373,7 @@ async def test_completed_scan_shows_its_cli_completion_at_120_by_28() -> None:
         await pilot.pause()
         visible = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
         assert "✓ OK  scan complete" in visible
-        assert "next: sanka plan . --to fastapi" in visible
+        assert "next: sanka plan . --to python-fastapi" in visible
 
 
 @pytest.mark.asyncio
