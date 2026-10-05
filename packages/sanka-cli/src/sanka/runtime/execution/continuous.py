@@ -195,8 +195,8 @@ def reopen_incomplete_routes(
 ) -> None:
     """Reopen routes from their last safe keyset checkpoint.
 
-    The checkpoint comes from the route's last batch page — its next cursor,
-    or the last source record id the page held. A route with neither has no
+    Prefer the saved terminal checkpoint: the page can contain later failed rows.
+    Otherwise use its next cursor or last source record id. A route with neither has no
     safe resume point: with ``require_checkpoint`` the reopen refuses
     (``SANKA_MIGRATE_SOURCE_CHECKPOINT_MISSING``) before mutating anything, because
     resuming from nowhere would re-read outside the frozen scope.
@@ -207,7 +207,9 @@ def reopen_incomplete_routes(
     reopened_checkpoints: dict[str, str] = {}
     for route_key in sorted(route_keys):
         page = snapshot.batch_pages.get(route_key)
-        cursor = str(page.next_cursor or "").strip() if page is not None else ""
+        cursor = str(snapshot.checkpoints.get(route_key) or "").strip()
+        if not cursor and page is not None:
+            cursor = str(page.next_cursor or "").strip()
         if not cursor and page is not None and page.source_record_ids:
             cursor = page.source_record_ids[-1]
         if not cursor and require_checkpoint:
