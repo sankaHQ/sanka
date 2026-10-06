@@ -1,5 +1,21 @@
 # Sanka release procedure
 
+## Guided Plan release 0.3.9
+
+Version 0.3.9 lets interactive `sanka plan .` choose an available target and groups
+its configuration prompts. Python-to-Go automatically forwards an exported
+`SANKA_GO_SOURCE_PYTHON`. Next commands preserve the project, artifact directory
+and forwarded variable names; explicit settings remain supported.
+
+The official catalog pins verified Extensions merge
+`191bdaf9a92f567e74ac0af0b253b99e99158a4c` and immutable
+`api-converters-v0.1.0a17`. The Go extension includes a reviewed generated README
+and auto/PostgreSQL/SQLite destination choices. Its public assets and 26-case
+packaged-CLI qualification passed. Require maintained CLI checks, installed wheel
+acceptance and exact-head CI, then publish only the absent `v0.3.9` tag with
+`publish-v0.3.9`. Verify public artifact provenance, installer and migration
+lifecycles. Existing releases remain immutable.
+
 ## Qualified framework names release 0.3.8
 
 Version 0.3.8 presents language-qualified Plan and TUI choices such as

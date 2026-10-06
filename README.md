@@ -124,6 +124,11 @@ Plan targets use `<language>-<framework>`: `python-fastapi`, `python-flask`,
 `go-fiber`, `go-chi`, `go-mux` and `go-gin`. The earlier short names remain
 accepted aliases. Extension package IDs and existing reviewed Plans stay valid.
 
+Run `sanka plan .` to choose an available target interactively. For Python-to-Go,
+an exported `SANKA_GO_SOURCE_PYTHON` is forwarded automatically; explicit
+`--extension-env` flags remain supported. Printed next commands include the
+forwarded variable names and preserve your project and artifact directories.
+
 ## Install
 
 On macOS/Linux, use the Sanka installer, which manages Python for you:
