@@ -55,7 +55,7 @@ Follow uv's printed shell setup instructions, then install Sanka with an explici
 Python version. uv downloads Python when needed and isolates the CLI environment:
 
 ```bash
-uv tool install --python 3.12 sanka-cli
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
 sanka --help
 sanka doctor
 ```
@@ -90,6 +90,7 @@ After upgrading the CLI, refresh its official catalog from the project directory
 For a project set up with `sanka extension add sanka/drf-to-fastapi`:
 
 ```bash
+sanka extension marketplace list
 sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
 sanka scan .

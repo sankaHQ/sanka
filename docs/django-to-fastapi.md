@@ -21,7 +21,9 @@ Run these commands from the Django repository root and from the project's
 existing Python 3.12+ environment:
 
 ```bash
-uv tool install --python 3.12 sanka-cli
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
+sanka extension marketplace list
+sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
 
 sanka scan
@@ -33,7 +35,7 @@ sanka verify
 
 Keep `--python 3.12`: when uv selects a newer interpreter, `sanka scan` reports
 that `.venv` must use a different Python. Reinstall with
-`uv tool install --python 3.12 --force sanka-cli`, then run
+`uv tool install --python 3.12 --force 'sanka-cli==0.3.9'`, then run
 `sanka extension remove sanka/drf-to-fastapi` and `sanka extension add
 sanka/drf-to-fastapi` so the extension environment is rebuilt.
 
@@ -104,7 +106,7 @@ selects full, update, or minimal generation, output path, strategy, a
 scan-relevant ORM, and `uv` or `pip`. Explicit flags skip their prompts:
 
 ```bash
-sanka plan . --to fastapi --generation full --output ./fastapi-app \
+sanka plan . --to python-fastapi --generation full --output ./fastapi-app \
   --strategy native --orm tortoise --package-manager uv
 ```
 
@@ -117,7 +119,9 @@ JSON and non-TTY runs never prompt. The plan classifies every discovered
 route, records the selected strategy (`native` or `compatibility`), records
 the async SQL engine only when generated routes need database access, lists
 retained components and manual adaptations, and binds the result to the
-exact scan hash. The canonical artifact is `.sanka/plan-fastapi.json`.
+exact scan hash. The CLI saves the reviewed plan at `.sanka/plan.json`
+by default; a custom
+`--artifact-dir` changes that location.
 
 In native mode every route receives one of four dispositions:
 

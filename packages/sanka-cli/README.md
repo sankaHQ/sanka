@@ -25,7 +25,7 @@ With [uv installed](https://docs.astral.sh/uv/getting-started/installation/),
 including on Windows, explicitly select the supported Python runtime:
 
 ```bash
-uv tool install --python 3.12 sanka-cli
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
 sanka --help
 ```
 
@@ -33,7 +33,8 @@ The macOS/Linux uv prerequisite is `curl -LsSf https://astral.sh/uv/install.sh |
 follow its printed shell setup instructions. Advanced pip users should use a
 Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
 Bare `pip` can select an older system interpreter and report “No matching distribution found.”
-Sanka CLI 0.3.0 includes the interactive TUI. The installer pins the CLI version
+Sanka CLI 0.3.9 uses ordinary CLI output by default. The TUI is opt-in.
+The installer pins the CLI version
 of its release (`sh install.sh --version X.Y.Z` selects another). See
 [installation and recovery](https://github.com/sankaHQ/sanka/blob/main/docs/install.md)
 for Homebrew upgrades, PATH conflicts, and project environments.
@@ -59,7 +60,8 @@ Components are immutable GitHub release wheels selected through the extension
 manager:
 
 ```bash
-sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name sanka
+sanka extension marketplace list
+sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
 ```
 
@@ -80,7 +82,7 @@ sanka verify .
 ```
 
 On an interactive terminal, run `sanka tui` from your project to open the
-dashboard, or `sanka scan .` to open Scan directly. Use the sidebar and footer
+dashboard, or `sanka scan . --tui` to open Scan directly. Use the sidebar and footer
 shortcuts for Plan → Apply → Test → Verify; review Plan's hash before Apply.
 Cloud / Account monitors hosted runs. See the [TUI guide](https://github.com/sankaHQ/sanka/blob/main/docs/tui.md)
 for configuration and shortcuts. Agents can use `--json` or `--compact-dsl`;
@@ -149,7 +151,7 @@ main CLI process. Hosted SaaS implementations remain private to the cloud runtim
 from sanka import Sanka
 ```
 
-`Sanka.configure_system(...)` creates a write-free endpoint descriptor.
+`Sanka.configure_endpoint(...)` creates a write-free endpoint descriptor.
 `Sanka.migrate(...)` creates or resumes a local lifecycle handle. Planning is
 destination-write-free, and apply requires the exact plan hash returned by
 plan.
