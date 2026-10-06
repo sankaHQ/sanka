@@ -73,7 +73,9 @@ step below from a clean checkout:
 git clone https://github.com/sankaHQ/sanka-examples
 cd sanka-examples/django/order-tracker
 uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install -r requirements.txt
-uv tool install --python 3.12 sanka-cli
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
+sanka extension marketplace list
+sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
 
 sanka scan .
@@ -144,7 +146,7 @@ With [uv installed](https://docs.astral.sh/uv/getting-started/installation/),
 including on Windows, explicitly select the supported Python runtime:
 
 ```bash
-uv tool install --python 3.12 sanka-cli
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
 sanka --help
 ```
 
@@ -165,6 +167,8 @@ The official marketplace is already configured and trusted. Install only the
 extensions required by a migration:
 
 ```bash
+sanka extension marketplace list
+sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
 sanka extension add sanka/python-to-golang
 ```
