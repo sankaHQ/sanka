@@ -85,6 +85,10 @@ sanka test .
 sanka verify .
 ```
 
+When an extension reports `capture.generation_ready=false`, the human plan summary
+shows its capture gaps and omits the apply recommendation. Resolve those support
+gaps before applying; a saved plan alone does not mean generation is supported.
+
 `plan` prints its saved file path (normally `.sanka/plan.json`) and a hash;
 `apply` accepts only that hash. Interactive planning asks for missing declared
 settings; explicit flags and saved settings are reused. Test and Verify show
