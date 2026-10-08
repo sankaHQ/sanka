@@ -55,7 +55,7 @@ Follow uv's printed shell setup instructions, then install Sanka with an explici
 Python version. uv downloads Python when needed and isolates the CLI environment:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.10'
 sanka --help
 sanka doctor
 ```
@@ -110,7 +110,7 @@ other discovered binaries or claim an installed extension is authenticated.
 
 ```bash
 sanka doctor --json
-sanka doctor --expected-version 0.3.9
+sanka doctor --expected-version 0.3.10
 ```
 
 JSON uses `sanka-doctor/v1`. Errors (unsupported runtime or unexpected version)
