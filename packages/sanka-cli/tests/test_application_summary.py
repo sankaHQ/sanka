@@ -209,3 +209,14 @@ def test_go_replay_summaries_disclose_actual_tests_and_scope(tmp_path: Path) -> 
     assert "Original source tests were not run" in "\n".join(
         application_summary("verify", report)[0]
     )
+
+
+def test_blocked_capture_plan_has_no_apply_recommendation() -> None:
+    gap = "service/views.py: custom request processing requires capture"
+    data = {"capture": {"generation_ready": False, "gaps": [gap]}}
+    lines, hint = application_summary("plan", data)
+    assert hint is None
+    assert any(gap in line for line in lines)
+    for capture in ({"generation_ready": True, "gaps": []}, {}):
+        _, hint = application_summary("plan", {"capture": capture})
+        assert hint is not None
