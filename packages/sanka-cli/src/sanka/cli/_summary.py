@@ -333,6 +333,14 @@ def application_summary(
         target = targets[0] if len(targets) == 1 else "<target>"
         return _scan_lines(data), f"sanka plan {quoted_root} --to {target}"
     if command == "plan":
+        capture = data.get("capture")
+        if isinstance(capture, Mapping) and capture.get("generation_ready") is False:
+            lines = _plan_lines(data, root)
+            lines.extend(["", "Generation blocked; resolve the capture gaps before applying."])
+            gaps = capture.get("gaps")
+            if isinstance(gaps, list):
+                lines.extend(f"  {gap}" for gap in gaps if isinstance(gap, str))
+            return lines, None
         plan_hash = data.get("plan_hash")
         hint = (
             f"sanka apply --root {quoted_root} --plan-hash {shlex.quote(plan_hash)}"
