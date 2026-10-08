@@ -2,12 +2,14 @@
 
 ## Current release
 
-CLI `0.3.9` uses the official catalog at Extensions commit
-`191bdaf9a92f567e74ac0af0b253b99e99158a4c`. It includes Python-to-Go
-`0.1.0a17`, TypeScript-to-Rust `0.1.0a3`, DRF-to-FastAPI `0.1.0a21`,
+CLI `0.3.10` uses the official catalog at Extensions commit
+`302475d1feed583012dcab0b293a0e972792c954`. It includes Python-to-Go
+`0.1.0a18`, TypeScript-to-Rust `0.1.0a3`, DRF-to-FastAPI `0.1.0a21`,
 DRF-to-Flask `0.1.0a15` and React-Native-to-Native `0.1.0a1`.
-Public installed acceptance covered all four Go routers on the DRF example,
-the FastAPI and Flask Go examples, and both DRF-to-Python guides.
+The previous CLI 0.3.9 release qualified all four Go routers on the DRF
+example, the FastAPI and Flask Go examples, and both DRF-to-Python guides.
+Version 0.3.10 changes readiness guidance and adopts the a18 diagnostics;
+its publication requires the package acceptance gates in the release procedure.
 Fixture acceptance does not establish parity for arbitrary applications.
 
 Refresh `official` after upgrading the CLI, then explicitly reinstall the desired
@@ -53,7 +55,7 @@ locks unchanged during ordinary CLI upgrades, and explicitly adopt an extension
 update only after reviewing its release and a new plan:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.10'
 sanka extension marketplace list
 sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi

@@ -21,7 +21,7 @@ Run these commands from the Django repository root and from the project's
 existing Python 3.12+ environment:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.10'
 sanka extension marketplace list
 sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
@@ -35,7 +35,7 @@ sanka verify
 
 Keep `--python 3.12`: when uv selects a newer interpreter, `sanka scan` reports
 that `.venv` must use a different Python. Reinstall with
-`uv tool install --python 3.12 --force 'sanka-cli==0.3.9'`, then run
+`uv tool install --python 3.12 --force 'sanka-cli==0.3.10'`, then run
 `sanka extension remove sanka/drf-to-fastapi` and `sanka extension add
 sanka/drf-to-fastapi` so the extension environment is rebuilt.
 
