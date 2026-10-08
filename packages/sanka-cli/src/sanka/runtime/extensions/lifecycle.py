@@ -1032,10 +1032,22 @@ class ApplicationLifecycle:
         if normalized.get("scenarios") is not None:
             # A scoped migration must keep replay bound to the reviewed selection.
             plan_path = self.artifact_root / "plan.json"
-            scoped = plan_path.exists() and bool(
+            scope = (
                 self._load_plan().get("extension_plan", {}).get("endpoint_scope")
+                if plan_path.exists()
+                else None
             )
-            if not scoped:
+            # A full selection has no omitted endpoints to protect. Apply still
+            # requires its original fingerprint; candidate replay never applies.
+            unrestricted = (
+                isinstance(scope, dict)
+                and scope.get("omitted_ids") == []
+                and (
+                    normalized.get("selected_endpoints", scope.get("effective_ids"))
+                    == scope.get("effective_ids")
+                )
+            )
+            if not scope or unrestricted:
                 return self._replay(normalized, explicit_env_names)
         return self._dispatch(
             "verify",

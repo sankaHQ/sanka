@@ -507,7 +507,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         description=(
             "Check hashes, generated files, route coverage, and configured read-only HTTP "
             "comparisons. With --scenarios, replay a scenario file against the source "
-            "application and a candidate FastAPI or Flask app and diff status, body, declared "
+            "application and a candidate app (FastAPI, Flask or Go) and diff status, body, "
             "headers, and database state; that mode needs no plan or generated manifest."
         ),
         epilog=(
@@ -554,7 +554,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     verify.add_argument(
         "--entrypoint",
         default=None,
-        help="candidate module exposing `app` (default: target_app.py)",
+        help="candidate Python module exposing `app`, or Go main file (Go: cmd/api/main.go)",
     )
     verify.add_argument(
         "--db-env",
