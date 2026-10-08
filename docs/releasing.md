@@ -1,5 +1,24 @@
 # Sanka release procedure
 
+## Capture readiness release 0.3.10
+
+Version 0.3.10 suppresses the human apply recommendation for a plan whose
+extension explicitly reports generation_ready=false and displays its capture
+gaps. Ready and legacy plan guidance is unchanged.
+
+The official catalog pins Extensions merge
+`302475d1feed583012dcab0b293a0e972792c954` and
+`api-converters-v0.1.0a18`. The Go extension distinguishes unsupported capture
+from missing replay prerequisites; no new source-language support is claimed.
+Publish and verify a18 assets before publishing this CLI. Existing project locks
+remain unchanged; explicit extension installation adopts the new wheel.
+
+Require maintained checks, installed-wheel acceptance and final-head CI, then
+publish only the absent immutable `v0.3.10` tag with `publish-v0.3.10`. Verify
+PyPI hashes, installer and Homebrew channels separately. No benchmark-score
+improvement or application-wide parity is claimed by this release.
+
+
 ## Guided Plan release 0.3.9
 
 Version 0.3.9 lets interactive `sanka plan .` choose an available target and groups

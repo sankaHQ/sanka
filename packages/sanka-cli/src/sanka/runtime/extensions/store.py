@@ -61,7 +61,7 @@ OFFICIAL_IDENTITY = "github.com/sankaHQ/extensions"
 OFFICIAL_SOURCE = "https://github.com/sankaHQ/extensions.git"
 # Advance only after verifying the catalog's published release wheels.
 # Development entries may still refer to releases awaiting publication.
-OFFICIAL_REVISION = "191bdaf9a92f567e74ac0af0b253b99e99158a4c"
+OFFICIAL_REVISION = "302475d1feed583012dcab0b293a0e972792c954"
 DEFAULT_EXTENSION_ID = "sanka/drf-to-fastapi"
 MAX_WHEEL_BYTES = 128 * 1024 * 1024
 MAX_WHEEL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
