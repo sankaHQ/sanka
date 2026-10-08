@@ -25,7 +25,7 @@ With [uv installed](https://docs.astral.sh/uv/getting-started/installation/),
 including on Windows, explicitly select the supported Python runtime:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.10'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.11'
 sanka --help
 ```
 
@@ -33,7 +33,7 @@ The macOS/Linux uv prerequisite is `curl -LsSf https://astral.sh/uv/install.sh |
 follow its printed shell setup instructions. Advanced pip users should use a
 Python 3.12+ virtual environment and `python -m pip install sanka-cli`.
 Bare `pip` can select an older system interpreter and report “No matching distribution found.”
-Sanka CLI 0.3.10 uses ordinary CLI output by default. The TUI is opt-in.
+Sanka CLI 0.3.11 uses ordinary CLI output by default. The TUI is opt-in.
 The installer pins the CLI version
 of its release (`sh install.sh --version X.Y.Z` selects another). See
 [installation and recovery](https://github.com/sankaHQ/sanka/blob/main/docs/install.md)
