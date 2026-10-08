@@ -1,5 +1,19 @@
 # Sanka release procedure
 
+## Edited Go candidate verification release 0.3.11
+
+Version 0.3.11 verifies the complete selected endpoint scope, including retained
+endpoints, and preserves explicit candidate verification settings. The official
+catalog pins Extensions merge `e3d7d199760f8c5232e78f24b9a91b091a4749a7`,
+Python-to-Go `0.1.0a19` and shared DRF replay `0.1.0a6`. Public replay compares
+responses, headers, database state and media for isolated public scenarios.
+It does not establish application-wide parity or improved benchmark scores.
+
+Publish and verify `api-converters-v0.1.0a19` before publishing this CLI.
+Require maintained checks, installed-wheel acceptance and final-head CI, then
+publish only the absent immutable `v0.3.11` tag with `publish-v0.3.11`. Verify
+PyPI hashes, installer and Homebrew separately. Existing locks remain unchanged.
+
 ## Capture readiness release 0.3.10
 
 Version 0.3.10 suppresses the human apply recommendation for a plan whose
