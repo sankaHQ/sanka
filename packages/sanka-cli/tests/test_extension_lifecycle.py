@@ -843,11 +843,25 @@ def test_store_recommendations_keep_verified_marketplace_identity(tmp_path: Path
     assert recommendations[0].marketplace_identity.startswith("local:")
 
 
+@pytest.mark.parametrize("full_scope", [False, True])
 def test_verify_replay_runs_without_a_reviewed_plan_and_after_source_changes(
     tmp_path: Path,
+    full_scope: bool,
 ) -> None:
     project = _project(tmp_path)
-    runner = FakeRunner()
+
+    class ReplayRunner(FakeRunner):
+        def run(self, lock: LockEntry, request: dict[str, Any], **kwargs: Any) -> ExtensionResult:
+            result = super().run(lock, request, **kwargs)
+            if full_scope and request["command"] == "plan":
+                return replace(
+                    result,
+                    data=result.data
+                    | {"endpoint_scope": {"effective_ids": ["GET /"], "omitted_ids": []}},
+                )
+            return result
+
+    runner = ReplayRunner()
     lifecycle = _lifecycle(project, FakeStore(installed=True), runner)
 
     # No scan and no plan yet: replay only needs the enabled extension.
