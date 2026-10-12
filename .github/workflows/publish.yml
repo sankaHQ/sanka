@@ -45,13 +45,13 @@ jobs:
         run: make business-flow-acceptance
       - name: Verify the built wheel against the public quickstart
         run: make quickstart-acceptance
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: candidate-quickstart
           path: sanka/quickstart-acceptance.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sanka-cli-${{ github.ref_name }}
           path: sanka/release/
@@ -85,7 +85,7 @@ jobs:
           (cd release && shasum -a 256 --check SHA256SUMS)
       - name: Test candidate with existing independent extension lock
         run: make extension-acceptance CLI_WHEEL='release/sanka_cli-*-py3-none-any.whl'
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: extension-acceptance-${{ matrix.os }}
@@ -135,7 +135,7 @@ jobs:
           python3 scripts/wait_for_pypi.py --version "${GITHUB_REF_NAME#v}" \
             --source-commit "$GITHUB_SHA" --release-dir release \
             --timeout 300 --report pypi-readiness.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: pypi-readiness
           path: pypi-readiness.json
@@ -164,7 +164,7 @@ jobs:
         run: python3 scripts/smoke_installer.py --version "${GITHUB_REF_NAME#v}" --upgrade-from 0.2.9 --report installer-smoke.json
       - name: Verify the public PyPI quickstart
         run: python3 scripts/smoke_quickstart.py --cli "sanka-cli==${GITHUB_REF_NAME#v}" --upgrade-from 0.2.16 --report quickstart-acceptance.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: published-quickstart
@@ -182,12 +182,12 @@ jobs:
           (cd release && sha256sum install.sh install.md >> SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
             --title "Sanka CLI $GITHUB_REF_NAME" --notes-file docs/install.md
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: sanka-cli-installer-${{ github.ref_name }}
           path: release/
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: published-installer-acceptance
           path: installer-smoke.json
@@ -243,7 +243,7 @@ jobs:
           Path("handoff/release-status.json").write_text(json.dumps(report, indent=2) + "\n")
           PY
           cat handoff/release-status.json >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: homebrew-${{ github.ref_name }}-review
           path: handoff/
