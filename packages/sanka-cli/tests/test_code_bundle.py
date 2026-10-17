@@ -104,6 +104,10 @@ class TestIgnoreRules:
             "node_modules/pkg/index.js",
             "__pycache__/x.pyc",
             ".env",
+            "pkg/.env",
+            "pkg/nested/.env.production",
+            "pkg/.git/config",
+            "pkg/node_modules/dependency/index.js",
             ".DS_Store",
         ],
     )
@@ -111,9 +115,15 @@ class TestIgnoreRules:
         directory = _function_dir(tmp_path / "fn")
         target = directory / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("x", encoding="utf-8")
+        target.write_text("SYNTHETIC_SECRET_MARKER", encoding="utf-8")
+        (directory / "lib").mkdir(exist_ok=True)
+        (directory / "lib/main.js").write_text("// retained source", encoding="utf-8")
 
-        assert relative not in build_bundle(directory).paths
+        bundle = build_bundle(directory)
+        assert relative not in bundle.paths
+        assert relative not in _members(bundle.raw)
+        assert b"SYNTHETIC_SECRET_MARKER" not in gzip.decompress(bundle.raw)
+        assert "lib/main.js" in _members(bundle.raw)
 
     def test_sankaignore_entries_are_honoured(self, tmp_path: Path) -> None:
         directory = _function_dir(tmp_path / "fn")
@@ -121,11 +131,14 @@ class TestIgnoreRules:
         (directory / "fixtures").mkdir()
         (directory / "fixtures" / "big.json").write_text("{}", encoding="utf-8")
         (directory / "scratch.js").write_text("//", encoding="utf-8")
+        (directory / "lib/fixtures").mkdir(parents=True)
+        (directory / "lib/fixtures/keep.json").write_text("{}", encoding="utf-8")
 
         paths = build_bundle(directory).paths
 
         assert "fixtures/big.json" not in paths
         assert "scratch.js" not in paths
+        assert "lib/fixtures/keep.json" in paths
         assert "index.js" in paths
 
     def test_the_ignore_file_itself_is_never_uploaded(self, tmp_path: Path) -> None:

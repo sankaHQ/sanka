@@ -89,6 +89,10 @@ class BuiltBundle:
 
 def read_ignore_patterns(root: Path) -> tuple[str, ...]:
     patterns = list(DEFAULT_IGNORE_PATTERNS)
+    # Built-in exclusions apply at every depth; user patterns stay root-relative.
+    patterns.extend(
+        f"**/{pattern}" for pattern in DEFAULT_IGNORE_PATTERNS if not pattern.startswith("**/")
+    )
     ignore_file = root / IGNORE_FILENAME
     if ignore_file.is_file():
         for line in ignore_file.read_text(encoding="utf-8").splitlines():
