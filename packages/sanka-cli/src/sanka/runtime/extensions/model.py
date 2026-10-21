@@ -12,6 +12,8 @@ LIFECYCLE_COMMANDS = frozenset({"apply", "plan", "scan", "test", "verify"})
 # Public choices are qualified; published extension requests keep their wire names.
 _FRAMEWORK_TARGETS = {
     "sanka/drf-to-fastapi": {"fastapi": "python-fastapi"},
+    "sanka/php-to-fastapi": {"fastapi": "python-fastapi"},
+    "sanka/php-to-golang": {"chi": "go-chi"},
     "sanka/drf-to-flask": {"flask": "python-flask"},
     "sanka/python-to-golang": {name: f"go-{name}" for name in ("fiber", "chi", "mux", "gin")},
 }
