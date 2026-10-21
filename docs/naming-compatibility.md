@@ -80,3 +80,8 @@ New qualified CLI choices are saved in the core Plan configuration, then transla
 at the subprocess boundary for installed wheels. Old reviewed Plans are never
 rewritten or rehashed. Selecting an equivalent alias reuses saved configuration;
 a different target still requires a new Plan. Package IDs are unchanged.
+
+PHP migration candidates use the same qualified target choices: `python-fastapi`
+for `sanka/php-to-fastapi` and `go-chi` for `sanka/php-to-golang`. Their published
+wire names remain `fastapi` and `chi`; this mapping does not enable or publish
+an extension.

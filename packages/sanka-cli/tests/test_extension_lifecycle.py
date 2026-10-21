@@ -912,6 +912,8 @@ def test_verify_without_scenarios_still_requires_the_reviewed_plan(tmp_path: Pat
         ("sanka/drf-to-fastapi", "fastapi", "fastapi"),
         ("sanka/drf-to-fastapi", "python-fastapi", "fastapi"),
         ("sanka/drf-to-flask", "python-flask", "flask"),
+        ("sanka/php-to-fastapi", "python-fastapi", "fastapi"),
+        ("sanka/php-to-golang", "go-chi", "chi"),
         *[
             ("sanka/python-to-golang", f"go-{router}", router)
             for router in ("fiber", "chi", "mux", "gin")
