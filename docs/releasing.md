@@ -1,5 +1,20 @@
 # Sanka release procedure
 
+## Trust audit catalog release 0.3.12
+
+Version 0.3.12 advances the official catalog pin to Extensions merge
+`b870fefb9cd5375a3e9644aa993772c169c53252`, adding `sanka/trust-audit` 0.1.0a1
+(`trust-audit-v0.1.0a1`, published and verified: asset hashes match the landed
+manifest; official-catalog install, scan, plan and apply passed with CLI 0.3.11).
+The same pin adopts the already published Python-to-Go `0.1.0a32`
+(`api-converters-v0.1.0a32`) in place of a19. It also carries the merged CLI
+changes since 0.3.11: recursive default function bundle exclusions, qualified PHP
+conversion targets and certifi 2026.10.19.
+
+Require maintained checks, installed-wheel acceptance and final-head CI, then
+publish only the absent immutable `v0.3.12` tag with `publish-v0.3.12`. Verify
+PyPI hashes, installer and Homebrew separately. Existing locks remain unchanged.
+
 ## Edited Go candidate verification release 0.3.11
 
 Version 0.3.11 verifies the complete selected endpoint scope, including retained

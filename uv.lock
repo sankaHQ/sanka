@@ -1142,7 +1142,7 @@ wheels = [
 
 [[package]]
 name = "sanka-cli"
-version = "0.3.11"
+version = "0.3.12"
 source = { editable = "packages/sanka-cli" }
 dependencies = [
     { name = "click" },

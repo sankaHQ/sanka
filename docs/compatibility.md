@@ -2,16 +2,19 @@
 
 ## Current release
 
-CLI `0.3.11` uses the official catalog at Extensions commit
-`e3d7d199760f8c5232e78f24b9a91b091a4749a7`. It includes Python-to-Go
-`0.1.0a19`, TypeScript-to-Rust `0.1.0a3`, DRF-to-FastAPI `0.1.0a21`,
-DRF-to-Flask `0.1.0a15` and React-Native-to-Native `0.1.0a1`.
-The previous CLI 0.3.9 release qualified all four Go routers on the DRF
-example, the FastAPI and Flask Go examples, and both DRF-to-Python guides.
-Version 0.3.11 verifies the full selected scope with Python-to-Go a19 and shared
-DRF replay a6, including edited candidates;
-its publication requires the package acceptance gates in the release procedure.
-Fixture acceptance does not establish parity for arbitrary applications.
+CLI `0.3.12` uses the official catalog at Extensions commit
+`b870fefb9cd5375a3e9644aa993772c169c53252`. It includes Python-to-Go
+`0.1.0a32`, TypeScript-to-Rust `0.1.0a3`, DRF-to-FastAPI `0.1.0a21`,
+DRF-to-Flask `0.1.0a15`, React-Native-to-Native `0.1.0a1`, LLM-to-Jev
+`0.1.0a1` and Trust audit `0.1.0a1`. Trust audit (`sanka/trust-audit`, target
+`trust-patches`) reports where a repository trusts the compromised eMudhra CAs and
+writes fixes into a new patch directory; it never edits project files.
+Its published assets and an official-catalog install with CLI 0.3.11 were
+verified before this pin. Fixture acceptance does not establish parity for
+arbitrary applications.
+
+CLI `0.3.11` used Extensions commit `e3d7d199760f8c5232e78f24b9a91b091a4749a7`
+with Python-to-Go `0.1.0a19`.
 
 Refresh `official` after upgrading the CLI, then explicitly reinstall the desired
 extension in each project. Refreshing the catalog leaves existing locks unchanged.
@@ -56,7 +59,7 @@ locks unchanged during ordinary CLI upgrades, and explicitly adopt an extension
 update only after reviewing its release and a new plan:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.11'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.12'
 sanka extension marketplace list
 sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
