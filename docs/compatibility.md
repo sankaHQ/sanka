@@ -59,7 +59,7 @@ locks unchanged during ordinary CLI upgrades, and explicitly adopt an extension
 update only after reviewing its release and a new plan:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.11'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.12'
 sanka extension marketplace list
 sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
