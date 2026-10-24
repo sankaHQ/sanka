@@ -219,8 +219,7 @@ def fix(
                 f"Sanka Fix: {eligibility.get('workspace_name')} ({workspace}), run {parent_id}\n"
                 f"Source: {eligibility.get('source_sha256')}; candidate: {candidate}\n"
                 f"Recipe: {eligibility.get('recipe')} ({eligibility.get('recipe_sha256')})\n"
-                f"Scope: {eligibility.get('verification_scope')}; provider/model: "
-                f"{eligibility.get('provider')}/{eligibility.get('model')}\n"
+                f"Scope: {eligibility.get('verification_scope')}\n"
                 f"Worker limits: {json.dumps(eligibility.get('limits'), sort_keys=True)}",
                 err=True,
             )

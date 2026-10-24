@@ -42,8 +42,6 @@ def eligibility():
         "min_credits": 100,
         "max_credits": 6000,
         "verification_scope": "code-ai-http-sqlite-v1",
-        "provider": "test-provider",
-        "model": "test-model",
         "limits": {"timeout_seconds": 600},
     }
 
