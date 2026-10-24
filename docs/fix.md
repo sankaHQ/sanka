@@ -15,8 +15,8 @@ sanka fix --cloud --workspace 78165495 --run <migration-run-id> --max-credits 15
 
 `login` prompts for the Developer API token without echoing it. Existing
 `--access-token` and profile options remain supported. Fix displays the pinned
-workspace, source and candidate digests, recipe, verification scope, provider/model
-and worker limits. Confirmation authorizes cloud processing of repository excerpts
+workspace, source and candidate digests, recipe, verification scope and worker
+limits. Confirmation authorizes cloud processing of repository excerpts
 and a hold of at most the specified total credits. The cap is not a fixed price or
 a guarantee that repairs or all application behavior will be verified.
 
