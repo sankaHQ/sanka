@@ -2,19 +2,22 @@
 
 ## Current release
 
-CLI `0.3.12` uses the official catalog at Extensions commit
-`b870fefb9cd5375a3e9644aa993772c169c53252`. It includes Python-to-Go
+CLI `0.3.13` uses the official catalog at Extensions commit
+`bd0b9ddaf7b351baa092a389bac2b6a593daef3c`. It includes Python-to-Go
 `0.1.0a32`, TypeScript-to-Rust `0.1.0a3`, DRF-to-FastAPI `0.1.0a21`,
 DRF-to-Flask `0.1.0a15`, React-Native-to-Native `0.1.0a1`, LLM-to-Jev
-`0.1.0a1` and Trust audit `0.1.0a1`. Trust audit (`sanka/trust-audit`, target
-`trust-patches`) reports where a repository trusts the compromised eMudhra CAs and
-writes fixes into a new patch directory; it never edits project files.
-Its published assets and an official-catalog install with CLI 0.3.11 were
+`0.1.0a1` and Trust audit `0.1.0a2`. Trust audit (`sanka/trust-audit`, target
+`trust-patches`) reports where a repository trusts a compromised or withdrawn CA and
+writes fixes into a new patch directory; it never edits project files. Version
+0.1.0a2 reads each incident from a validated advisory file and checks every
+advisory at once; its findings for the eMudhra advisory match 0.1.0a1.
+Its published assets and an official-catalog install with CLI 0.3.12 were
 verified before this pin. Fixture acceptance does not establish parity for
 arbitrary applications.
 
-CLI `0.3.11` used Extensions commit `e3d7d199760f8c5232e78f24b9a91b091a4749a7`
-with Python-to-Go `0.1.0a19`.
+CLI `0.3.12` used Extensions commit `b870fefb9cd5375a3e9644aa993772c169c53252`
+with Trust audit `0.1.0a1`. CLI `0.3.11` used Extensions commit
+`e3d7d199760f8c5232e78f24b9a91b091a4749a7` with Python-to-Go `0.1.0a19`.
 
 Refresh `official` after upgrading the CLI, then explicitly reinstall the desired
 extension in each project. Refreshing the catalog leaves existing locks unchanged.
@@ -59,7 +62,7 @@ locks unchanged during ordinary CLI upgrades, and explicitly adopt an extension
 update only after reviewing its release and a new plan:
 
 ```bash
-uv tool install --upgrade --python 3.12 'sanka-cli==0.3.12'
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.13'
 sanka extension marketplace list
 sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi
