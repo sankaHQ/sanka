@@ -1,5 +1,19 @@
 # Sanka release procedure
 
+## Trust audit advisory release 0.3.13
+
+Version 0.3.13 advances the official catalog pin to Extensions merge
+`bd0b9ddaf7b351baa092a389bac2b6a593daef3c`, adopting `sanka/trust-audit` 0.1.0a2
+(`trust-audit-v0.1.0a2`, published and verified: asset hashes match the landed
+manifest; official-catalog install, scan, plan and apply passed with CLI 0.3.12).
+Trust audit now reads incidents from validated advisory files, so later advisories
+ship as extension releases. The pin changes no other extension. The CLI also stops
+printing the provider and model in the Fix consent summary.
+
+Require maintained checks, installed-wheel acceptance and final-head CI, then
+publish only the absent immutable `v0.3.13` tag with `publish-v0.3.13`. Verify
+PyPI hashes, installer and Homebrew separately. Existing locks remain unchanged.
+
 ## Trust audit catalog release 0.3.12
 
 Version 0.3.12 advances the official catalog pin to Extensions merge
