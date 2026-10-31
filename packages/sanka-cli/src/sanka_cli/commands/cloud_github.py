@@ -17,7 +17,7 @@ SOURCE_ROOT = "/v2/migrate/code-sources"
 
 
 def connection_url(workspace: str) -> str:
-    return f"https://code.sanka.com/{workspace}?edit=source"
+    return f"https://cloud.sanka.com/{workspace}?edit=source"
 
 
 def pages(state: CLIState, workspace: str, kind: str, **params: Any) -> list[dict[str, Any]]:
@@ -66,15 +66,15 @@ def select_repository(
 
 @click.group()
 def github() -> None:
-    """Configure or inspect the GitHub connection used by Sanka Code."""
+    """Configure or inspect the GitHub connection used by Sanka Cloud."""
 
 
 @github.command("connect")
 @WORKSPACE
-@click.option("--open", "open_browser", is_flag=True, help="Open Sanka Code to connect GitHub.")
+@click.option("--open", "open_browser", is_flag=True, help="Open Sanka Cloud to connect GitHub.")
 @click.pass_obj
 def connect(state: CLIState, workspace: str, open_browser: bool) -> None:
-    """Connect in Sanka Code with the same user as your CLI token, then return here."""
+    """Connect in Sanka Cloud with the same user as your CLI token, then return here."""
     status = _data(_read(state, workspace, f"{SOURCE_ROOT}/status"))
     url = connection_url(workspace)
     if open_browser:

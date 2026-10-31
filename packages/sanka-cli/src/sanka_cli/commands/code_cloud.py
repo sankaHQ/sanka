@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CLI adapter for the same two cloud operations used by Sanka Code."""
+"""CLI adapter for the same two cloud operations used by Sanka Cloud."""
 
 from __future__ import annotations
 
