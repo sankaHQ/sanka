@@ -314,4 +314,4 @@ repository's license boundaries.
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md) code of
 conduct.
 
-See [Sanka Fix](docs/fix.md) for optional cloud verification and repair of existing Sanka Code runs.
+See [Sanka Fix](docs/fix.md) for optional cloud verification and repair of existing Sanka Cloud code migration runs.

@@ -518,7 +518,7 @@ def cancel(state: CLIState, workspace: str, run_id: Any) -> None:
 @RUN
 @click.option(
     "--artifact",
-    help="Exact name from the run artifact manifest (including Sanka Code/Fix artifacts).",
+    help="Exact name from the run artifact manifest (including Sanka Cloud/Fix artifacts).",
     default="output.zip",
 )
 @click.option("--to", "destination", required=True, type=click.Path(dir_okay=False, path_type=Path))

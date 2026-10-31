@@ -50,7 +50,7 @@ Review mappings, readiness, limitations, output, and exact hash before apply. Ho
 ## Products, extensions, and systems
 
 The shared CLI serves Sanka App data migrations, Sanka Flow workflow operations,
-and Sanka Code application migrations. Extensions add Data or Code capabilities;
+and Sanka Cloud application migrations. Extensions add Data or Code capabilities;
 systems identify configured database/account endpoints. Installation does not
 authenticate a system. PostgreSQL record transfer is data migration; application
 SQL/ORM conversion is code migration. Use `sanka functions` for custom functions;

@@ -1,6 +1,6 @@
 # Sanka architecture
 
-The OSS CLI/runtime is shared by Sanka, Sanka Flow and Sanka Code. Extensions own
+The OSS CLI/runtime is shared by Sanka, Sanka Flow and Sanka Cloud. Extensions own
 the SDK and reusable data, workflow and code capabilities. Private cloud
 authentication, workspace services and hosted SaaS implementations remain in
 `sanka-api`; screens remain in `sanka-react`. The embedded Flow definition contract

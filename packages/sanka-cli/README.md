@@ -71,7 +71,7 @@ snapshot advances only after that catalog is reviewed and published; existing
 data project locks continue to use their pinned marketplace snapshots.
 The embedded SDK exposes `sanka_extensions.app` for application data access.
 
-## Sanka Code commands
+## Sanka Cloud code migrations
 
 ```bash
 sanka scan .
@@ -110,13 +110,13 @@ Hosted application migrations use the same `app` group with an explicit Program
 or migration ID, for example `sanka app plan --program ID` and
 `sanka app apply --migration ID --yes`. Hosted App commands require a Sanka API
 token. The existing root data commands remain hidden compatibility aliases and
-print a deprecation notice. Root `plan`, `apply`, and `verify` select Sanka Code;
+print a deprecation notice. Root `plan`, `apply`, and `verify` select Sanka Cloud code migrations;
 use `sanka app` when a `sanka.yaml` data spec is present.
 
 Sanka Flow operations remain under `sanka workflows list|get|create|run`.
 
 Custom functions use `sanka functions`; the old `sanka code` group keeps its original
-function operations as a compatibility alias. Sanka Code migration commands remain
+function operations as a compatibility alias. Sanka Cloud code migration commands remain
 `scan`, `plan`, `apply`, `test`, and `verify`.
 
 `--base-url` also selects the API origin for the anonymous assessment. A full

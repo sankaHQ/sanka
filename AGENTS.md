@@ -2,7 +2,7 @@
 
 Read `docs/public-naming.md`, `docs/naming-compatibility.md`, and `CONTRIBUTING.md` before changes.
 
-- Products are Sanka (data migrations), Sanka Flow (workflow migrations), and Sanka Code (code migrations). This repository and executable are shared interfaces.
+- Products are Sanka (data migrations), Sanka Flow (workflow migrations), and Sanka Cloud (cloud migration and operations, including code modernization). This repository and executable are shared interfaces.
 - Extensions are capability packages. Data endpoints are configured sources/destinations. Use the same vocabulary in developer docs and code; installation never implies authentication.
 - New data-access code uses `sanka_extensions.app`, `ExtensionRegistry`, `ExtensionRegistration`, `DataReader`, `DataWriter`, and `DataEndpoint` as appropriate.
 - Keep the published compatibility inventory explicit. Do not mechanically rename protocol fields, URLs, error codes, stored specs, or third-party terminology.

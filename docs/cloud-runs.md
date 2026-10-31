@@ -1,6 +1,6 @@
 # Hosted repository runs
 
-`sanka cloud` is a client for the optional Sanka Developer cloud service. It uses
+`sanka cloud` is a client for the optional Sanka Cloud service. It uses
 your existing `sanka login` profile and requires an exact workspace code on every
 command. The service must be enabled by the workspace operator. Local `scan`,
 `plan`, `apply`, `test`, and `verify` behavior is unchanged.
@@ -224,7 +224,7 @@ review, aggregate limits, partial receipts, cancellation and selective retry flo
 
 ## Code migrations: Scan → Plan → Apply → Test → Verify
 
-Code stages use the same workspace-scoped operations as Sanka Code. Authenticate
+Code stages use the same workspace-scoped operations as Sanka Cloud. Authenticate
 with `sanka auth login` using a token for the intended workspace. Named-scope tokens
 need `migrate:cloud:read` and `migrate:cloud:write`; existing cloud access and workspace
 permissions still apply. Always pass the eight-digit workspace code explicitly.
@@ -267,11 +267,11 @@ sanka scan --cloud --github hira29/sanka-code-drf-test --ref main \
   --idempotency-key github-scan-001 --yes --wait
 ```
 
-Connect GitHub in Sanka Code as the **same user who owns the CLI token**. Grant the
-Sanka Code GitHub App access to the repository. No GitHub client secret or personal
+Connect GitHub in Sanka Cloud as the **same user who owns the CLI token**. Grant the
+Sanka GitHub App access to the repository. No GitHub client secret or personal
 access token belongs in CLI configuration. Imports resolve the selected branch
 and pin its commit; subsequent branch changes cannot silently change a retry.
-The connection command opens the production Sanka Code site.
+The connection command opens the production Sanka Cloud console (`cloud.sanka.com`).
 
 An existing hosted source can instead use `--source-id SOURCE_ID --sha256 SHA256`.
 For Django projects, pass `--settings-module project.settings` when needed.
@@ -281,7 +281,7 @@ Directory packaging excludes `.env`, `.env.*`, `.git`, `.ssh`, `.aws`, `.venv`,
 project files or apply `.gitignore`; inspect other files before consenting to an
 upload. ZIPs containing excluded files, unsafe paths, links, or special files are
 rejected. Limits are 8 MiB compressed, 64 MiB expanded, and 20,000 entries. Uploaded
-sources follow Sanka Code's seven-day retention. `--yes` consents to upload and the
+sources follow Sanka Cloud's seven-day retention. `--yes` consents to upload and the
 explicit credit cap; it is required for noninteractive submissions.
 
 ### Retry and results

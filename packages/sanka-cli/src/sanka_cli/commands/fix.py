@@ -160,7 +160,7 @@ def fix(
     wait: bool,
     wait_timeout: int,
 ) -> None:
-    """Run optional paid Sanka Fix on an eligible retained Sanka Code migration."""
+    """Run optional paid Sanka Fix on an eligible retained Sanka Cloud code migration."""
     validate_tui(state)
     if not use_cloud:
         raise click.UsageError(

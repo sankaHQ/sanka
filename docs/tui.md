@@ -72,7 +72,7 @@ reopens its recorded result. Returning to a stage preserves its own result.
 
 ## Cloud and account
 
-Choose Cloud / Account (c). Sign in opens Sanka Code; create an API token under
+Choose Cloud / Account (c). Sign in opens Sanka Cloud; create an API token under
 Developers → API and paste it into the masked input, or use a saved CLI login.
 Connect verifies the token and access to the entered workspace. Paid actions use
 that pinned workspace; editing the workspace field alone does not switch it.
