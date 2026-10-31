@@ -6,7 +6,7 @@ Use the same nouns in the product, CLI, developer documentation, and code.
 | --- | --- |
 | Sanka | Data migrations: records, schemas, relationships and attachments |
 | Sanka Flow | Workflow migrations: automations, triggers, actions and conditions |
-| Sanka Code | Code migrations: application code, SQL dialects, ORM and dbt transformations |
+| Sanka Cloud | Cloud migration and operations, including code modernization: application code, SQL dialects, ORM and dbt transformations |
 
 The `sanka` repository owns the shared OSS CLI/runtime. The executable is an interface to product capabilities, not an additional product. Migration-domain names may include “Migrate” when they describe operations rather than retired packages.
 
@@ -18,7 +18,7 @@ The `sanka` repository owns the shared OSS CLI/runtime. The executable is an int
 
 Installation and endpoint authentication are different facts. An installed extension supports endpoint types; “Connected” is appropriate only after actual authentication/reachability verification. Do not introduce Connections or Integrations as competing resource categories. Ordinary network/database connections and credential providers retain their technical meanings.
 
-Moving PostgreSQL records is a Sanka data migration. Adapting the application's SQL/ORM is Sanka Code work. One project can need both. Technology names alone do not determine product ownership or imply a supported service-to-service migration route.
+Moving PostgreSQL records is a Sanka data migration. Adapting the application's SQL/ORM is Sanka Cloud work. One project can need both. Technology names alone do not determine product ownership or imply a supported service-to-service migration route.
 
 ## Canonical names
 

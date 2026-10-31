@@ -227,7 +227,7 @@ class CloudSetupScreen(SankaScreen):
         if event.button.id and event.button.id.startswith("recent-cloud-"):
             self._monitor(list(self._jobs.values())[int(event.button.id.rsplit("-", 1)[1])])
         elif event.button.id == "sign-in":
-            self.app.open_url("https://code.sanka.com")
+            self.app.open_url("https://cloud.sanka.com")
         elif event.button.id == "connect-cloud":
             workspace = self.query_one("#cloud-workspace", Input).value.strip()
             if not workspace.isdigit():

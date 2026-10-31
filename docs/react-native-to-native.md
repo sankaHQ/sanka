@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # React Native to native migration (experimental)
 
-`sanka/react-native-to-native` is a Sanka Code extension that captures a React
+`sanka/react-native-to-native` is a Sanka Cloud code extension that captures a React
 Native application's screens, navigation, styles, local state, data loading and
 forms, and generates native code from that capture. It is developed in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions/tree/main/packages/sanka-extension-react-native-to-native)

@@ -2,8 +2,8 @@
 
 The `fix --cloud` command is available in Sanka CLI 0.2.14 and later.
 
-Sanka Fix is optional paid cloud verification and repair of a retained Sanka Code
-migration candidate. It requires an eligible Code migration run ID, including one
+Sanka Fix is optional paid cloud verification and repair of a retained Sanka Cloud
+code migration candidate. It requires an eligible Code migration run ID, including one
 created in the UI. It does not import arbitrary local folders or execute agents locally.
 Availability depends on the deployed API and worker configuration.
 
@@ -61,7 +61,7 @@ sanka cloud cancel --workspace 78165495 <fix-run-id>
 ```
 
 Downloads validate the declared size and SHA-256 and refuse to overwrite files.
-Use the returned Sanka Code URL to review changes and create a PR for the selected
+Use the returned Sanka Cloud URL to review changes and create a PR for the selected
 artifact. Fix does not merge or deploy a change. The original migration remains
 accessible through its parent run. Existing `sanka cloud repair` and custom-function
 `sanka code` semantics remain unchanged. The root `sanka repair` data command is a

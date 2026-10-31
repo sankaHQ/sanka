@@ -2,7 +2,7 @@
 
 The same words apply to UI, developer documentation, and implementation. Extensions are capability packages; data endpoints are their configured sources and destinations. When a distinction is needed, describe data access or code conversion. “Connected” is a verified endpoint status, never an installation status. Do not introduce Connections or Integrations as competing resource categories.
 
-The shared `sanka` executable supports Sanka (data migrations), Sanka Flow (workflow migrations), and Sanka Code (code migrations). Technology names do not determine product ownership: moving PostgreSQL records is data migration; adapting application SQL/ORM is code migration.
+The shared `sanka` executable supports Sanka (data migrations), Sanka Flow (workflow migrations), and Sanka Cloud (cloud migration and operations, including code modernization). Technology names do not determine product ownership: moving PostgreSQL records is data migration; adapting application SQL/ORM is code migration.
 
 ## Canonical developer interface
 

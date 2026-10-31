@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # TypeScript to Rust migration (experimental)
 
-`sanka/typescript-to-rust` is a Sanka Code extension that turns a bounded Express
+`sanka/typescript-to-rust` is a Sanka Cloud code extension that turns a bounded Express
 application into a native axum service and proves the result by replaying the
 source and the candidate against the same scenarios. It is developed in
 [`sankaHQ/extensions`](https://github.com/sankaHQ/extensions/tree/main/packages/sanka-extension-typescript-to-rust)
@@ -40,7 +40,7 @@ Fastify and Hono sources.
 
 ## The five commands
 
-The extension speaks the same five-command contract as every Sanka Code
+The extension speaks the same five-command contract as every Sanka Cloud code
 extension. Configuration keys: `source_framework` (`express`), `target_framework`
 or `target` (`axum`), `source_file`, `database_layer` (`none` or `sqlx`),
 `schema_file`, `models_file`, and `extension_plan_hash` for `apply`.
