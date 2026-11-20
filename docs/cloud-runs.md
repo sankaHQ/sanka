@@ -32,7 +32,7 @@ sanka cloud run --workspace WORKSPACE_CODE \
 ```
 
 The workspace wallet reserves the full limit before queueing. Active compute
-costs 100 credits per worker-minute on one standard 2 CPU / 4 GiB worker; fractional
+costs 25 credits per worker-minute (1 credit = ¥1 or 1 cent) on one standard 2 CPU / 4 GiB worker; fractional
 usage rounds up once to a whole credit. Queueing is free. Unused credits are
 released, customer-code failure bills elapsed compute, and infrastructure failure
 is free for the affected attempt. The worker stops at the earlier credit or time
@@ -74,13 +74,13 @@ configuration, add dependencies, or reach external networks.
 ```sh
 sanka cloud repair FAILED_RUN_UUID --workspace WORKSPACE_CODE \
   --candidate-sha256 OUTPUT_SHA256 --target-gate test \
-  --path app/main.py --max-credits 2000 --timeout-seconds 600 \
+  --path app/main.py --max-credits 500 --timeout-seconds 600 \
   --idempotency-key my-reviewed-repair
 ```
 
 Repeat `--path` to allow up to 20 existing Python files under `app/` (32 KiB per
 file). The command reads the failed run and its candidate before asking you to
-confirm the hold. The cap is 1,001–7,000 credits and includes a 1,000-credit
+confirm the hold. The cap is 251–1,750 credits and includes a 250-credit
 success premium; only the remaining cap funds compute. Failed or cancelled repairs
 have no premium. Reuse the same options and key after an uncertain response.
 
@@ -114,13 +114,13 @@ and untested declared routes; it does not establish behavior outside those cases
 ```sh
 sanka cloud certify RUN_UUID --workspace WORKSPACE_CODE \
   --candidate-sha256 OUTPUT_SHA256 --cases cases.json \
-  --max-credits 3000 --timeout-seconds 600 \
+  --max-credits 750 --timeout-seconds 600 \
   --idempotency-key my-reviewed-certification
 sanka cloud certificate CERTIFICATION_RUN_UUID --workspace WORKSPACE_CODE --to certificate.json
 sanka cloud certificate-verify certificate.json --workspace WORKSPACE_CODE
 ```
 
-The cap is 2,001–8,000 credits, including a 2,000-credit fee only when the signed
+The cap is 501–2,000 credits, including a 500-credit fee only when the signed
 certificate is issued. The remaining cap funds compute at the standard rate.
 Failed or cancelled verification has no certificate fee. Use the same reviewed
 inputs and idempotency key after an uncertain create response. Normal run status,

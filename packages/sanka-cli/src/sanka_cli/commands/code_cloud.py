@@ -175,7 +175,7 @@ def make_command(stage: str) -> click.Command:
     @click.option("--to", "recipe", type=click.Choice(["fastapi", "flask"]), default="fastapi")
     @click.option("--settings-module")
     @click.option("--plan-hash", help="Exact reviewed hosted plan SHA-256, required for apply.")
-    @click.option("--max-credits", type=click.IntRange(1, 6000))
+    @click.option("--max-credits", type=click.IntRange(1, 1500))
     @click.option("--timeout-seconds", type=click.IntRange(1, 3600), default=600)
     @click.option(
         "--idempotency-key", help="Required for scan/apply; reuse identical inputs after a timeout."

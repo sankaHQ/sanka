@@ -45,9 +45,16 @@ def arguments() -> list[str]:
 def test_declined_credit_hold_does_not_call_api(api):
     result = CliRunner().invoke(cli, arguments(), input="n\n")
     assert result.exit_code != 0
-    assert "1000 credits" in result.output
-    assert "100 credits per active worker-minute" in result.output
     api.assert_not_called()
+
+
+def test_compute_cap_reaches_the_api_up_to_its_new_limit(api):
+    # 1,500 compute credits is the most a run takes since the credit unit change (2026-11-20).
+    args = arguments()
+    args[args.index("--max-credits") + 1] = "1500"
+    result = CliRunner().invoke(cli, [*args, "--yes"])
+    assert result.exit_code == 0, result.output
+    assert api.call_args.kwargs["json_body"]["max_credits"] == 1500
 
 
 def repair_arguments():
@@ -141,7 +148,7 @@ def test_repeated_intent_preserves_workspace_source_budget_and_key(api):
     "option,value",
     [
         ("--max-credits", "0"),
-        ("--max-credits", "6001"),
+        ("--max-credits", "1501"),
         ("--sha256", "invalid"),
         ("--workspace", "other"),
         ("--idempotency-key", "too\nunsafe"),
