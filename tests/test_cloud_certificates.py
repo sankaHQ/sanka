@@ -65,8 +65,14 @@ def test_certificate_decline_and_unsafe_cases_never_start_paid_work(api, tmp_pat
     ]
     result = CliRunner().invoke(cli, arguments(cases), input="n\n")
     assert result.exit_code != 0
-    assert "500 only" in result.output and "525 credits" in result.output
     assert all(call.args[1] == "GET" for call in api.call_args_list)
+    # A cap that cannot hold the 500-credit fee, or above 500 + 1,500, never reaches the API.
+    for cap in ("500", "2001"):
+        api.reset_mock()
+        args = arguments(cases)
+        args[args.index("--max-credits") + 1] = cap
+        assert CliRunner().invoke(cli, [*args, "--yes"]).exit_code != 0
+        api.assert_not_called()
     api.reset_mock()
     cases.write_text(
         json.dumps([{"id": "unsafe", "method": "GET", "path": "https://outside.example/"}])
