@@ -36,7 +36,7 @@ def arguments(cases):
         "--cases",
         str(cases),
         "--max-credits",
-        "2100",
+        "525",
         "--idempotency-key",
         "reviewed-certificate",
     ]
@@ -65,7 +65,7 @@ def test_certificate_decline_and_unsafe_cases_never_start_paid_work(api, tmp_pat
     ]
     result = CliRunner().invoke(cli, arguments(cases), input="n\n")
     assert result.exit_code != 0
-    assert "2,000" in result.output and "2100 credits" in result.output
+    assert "500 only" in result.output and "525 credits" in result.output
     assert all(call.args[1] == "GET" for call in api.call_args_list)
     api.reset_mock()
     cases.write_text(

@@ -46,7 +46,7 @@ def test_declined_credit_hold_does_not_call_api(api):
     result = CliRunner().invoke(cli, arguments(), input="n\n")
     assert result.exit_code != 0
     assert "1000 credits" in result.output
-    assert "100 credits per active worker-minute" in result.output
+    assert "25 credits per active worker-minute" in result.output
     api.assert_not_called()
 
 
@@ -141,7 +141,7 @@ def test_repeated_intent_preserves_workspace_source_budget_and_key(api):
     "option,value",
     [
         ("--max-credits", "0"),
-        ("--max-credits", "6001"),
+        ("--max-credits", "1501"),
         ("--sha256", "invalid"),
         ("--workspace", "other"),
         ("--idempotency-key", "too\nunsafe"),

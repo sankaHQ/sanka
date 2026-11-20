@@ -123,7 +123,7 @@ def upload(state: CLIState, workspace: str, archive: Path, yes: bool, revision: 
 @WORKSPACE
 @click.option("--source-id", required=True, type=click.UUID)
 @click.option("--sha256", required=True)
-@click.option("--max-credits", required=True, type=click.IntRange(1, 6000))
+@click.option("--max-credits", required=True, type=click.IntRange(1, 1500))
 @click.option("--timeout-seconds", default=600, show_default=True, type=click.IntRange(1, 3600))
 @click.option(
     "--settings-module", default=None, help="Django settings module, e.g. config.settings."
@@ -159,7 +159,7 @@ def run(
         click.confirm(
             f"Run source {source_id} in workspace {workspace}? "
             f"Reserve up to {max_credits} credits; "
-            "100 credits per active worker-minute, unused credits released",
+            "25 credits per active worker-minute, unused credits released",
             abort=True,
         )
     headers["Idempotency-Key"] = idempotency_key
@@ -191,7 +191,7 @@ def run(
     help="Existing application Python file to allow; repeat for multiple paths.",
 )
 @click.option("--target-gate", required=True, type=click.Choice(["test", "verify"]))
-@click.option("--max-credits", required=True, type=click.IntRange(1001, 7000))
+@click.option("--max-credits", required=True, type=click.IntRange(251, 1750))
 @click.option("--timeout-seconds", default=600, show_default=True, type=click.IntRange(1, 3600))
 @click.option(
     "--idempotency-key",
@@ -249,7 +249,7 @@ def repair(
         click.confirm(
             f"Repair run {run_id} in workspace {workspace}, check {target_gate}, "
             f"paths {', '.join(sorted(paths))}? Reserve up to {max_credits} credits, including "
-            "1,000 only on success plus 100 per active worker-minute; one model attempt",
+            "250 only on success plus 25 per active worker-minute; one model attempt",
             abort=True,
         )
     headers["Idempotency-Key"] = idempotency_key
@@ -286,7 +286,7 @@ def repair(
 @click.option(
     "--cases", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
-@click.option("--max-credits", required=True, type=click.IntRange(2001, 8000))
+@click.option("--max-credits", required=True, type=click.IntRange(501, 2000))
 @click.option("--timeout-seconds", default=600, show_default=True, type=click.IntRange(1, 3600))
 @click.option("--idempotency-key", required=True, help="Reuse only with the same reviewed inputs.")
 @click.option("--yes", is_flag=True, help="Confirm the full credit hold and selected HTTP scope.")
@@ -331,8 +331,8 @@ def certify(
     if not yes:
         click.confirm(
             f"Certify candidate {candidate_sha256} in workspace {workspace} using {len(scenarios)} "
-            f"reviewed HTTP cases? Reserve up to {max_credits} credits, including 2,000 only on "
-            "successful certificate issuance plus 100 per active worker-minute. "
+            f"reviewed HTTP cases? Reserve up to {max_credits} credits, including 500 only on "
+            "successful certificate issuance plus 25 per active worker-minute. "
             "Untested behavior is outside this certificate",
             abort=True,
         )

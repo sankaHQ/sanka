@@ -17,7 +17,7 @@ from sanka_cli.state import CLIState
 ROOT = "/v2/migrate/cloud-fleets"
 WORKSPACE = click.option("--workspace", required=True, help="Exact workspace code (8 digits).")
 FLEET = click.argument("fleet_id", type=click.UUID)
-CAP = click.option("--max-credits", required=True, type=click.IntRange(1, 160000))
+CAP = click.option("--max-credits", required=True, type=click.IntRange(1, 40000))
 CONCURRENCY = click.option("--concurrency", required=True, type=click.IntRange(1, 5))
 KEY = click.option(
     "--idempotency-key",
@@ -82,11 +82,11 @@ def manifest_items(path: Path, cap: int) -> list[dict[str, Any]]:
             r"[a-f0-9]{64}", run["source_sha256"]
         ):
             raise ValueError("Each child must pin the uploaded source digest")
-        premium = 2000 if run.get("certification") else 1000 if run.get("repair") else 0
+        premium = 500 if run.get("certification") else 250 if run.get("repair") else 0
         credits = run.get("max_credits")
-        if type(credits) is not int or not premium < credits <= premium + 6000:
+        if type(credits) is not int or not premium < credits <= premium + 1500:
             raise ValueError(
-                "Each child cap must contain its success fee and 1-6,000 compute credits"
+                "Each child cap must contain its success fee and 1-1,500 compute credits"
             )
         total += credits
         seen.add(key)

@@ -93,7 +93,7 @@ class CloudAction(ModalScreen[JobRef | None]):
             return list(self.approved_args)
         cap = int(self.query_one("#credit-cap", Input).value)
         minimum = int(self.eligibility.get("min_credits", 1))
-        maximum = int(self.eligibility.get("max_credits", 6000))
+        maximum = int(self.eligibility.get("max_credits", 1500))
         if not minimum <= cap <= maximum:
             raise ValueError(f"Credit cap must be {minimum}-{maximum}.")
         key = self.query_one("#intent-key", Input).value.strip()
