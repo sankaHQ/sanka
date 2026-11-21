@@ -1,5 +1,21 @@
 # Sanka release procedure
 
+## Cloud credit unit release 0.3.14
+
+Version 0.3.14 bounds Cloud credit caps in today's Sanka Credits (since 2026-11-20,
+1 credit = ¥1 = 1 cent, a quarter of the old count): `sanka cloud run` and the
+`--cloud` Code stages accept 1 to 1,500 credits, `sanka cloud repair` 251 to 1,750,
+`sanka cloud certify` 501 to 2,000 and a Fleet up to 40,000. The API applies the
+same unit; 0.3.13 still allows caps four times what the API now accepts. The release also
+names the hosted service Sanka Cloud in help, the TUI and docs; the TUI sign-in and
+GitHub connection open `https://cloud.sanka.com`. The official catalog pin is
+unchanged from 0.3.13. Development-only lockfile updates (Django 6.1.3,
+djangorestframework 3.18.3, urllib3 2.8.0) do not change the published wheel.
+
+Require maintained checks, installed-wheel acceptance and final-head CI, then
+publish only the absent immutable `v0.3.14` tag with `publish-v0.3.14`. Verify
+PyPI hashes, installer and Homebrew separately. Existing locks remain unchanged.
+
 ## Trust audit advisory release 0.3.13
 
 Version 0.3.13 advances the official catalog pin to Extensions merge
